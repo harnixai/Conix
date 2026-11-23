@@ -61,7 +61,11 @@ panel:
   job_on_hint: "enabled · Space to disable"
   job_off_hint: "disabled · Space to enable"
   job_auto_off_hint: "disabled after {n} failures in a row · space to enable"
-  job_guard: "timeout {timeout} · per run {tokens} · {overlap} · {disable}"
+  job_guard: "timeout {timeout} · per run {tokens} · {overlap} · {disable} · {network}"
+  network:
+    deny_all: "no network"
+    allowlist: "allowlisted network"
+    inherit: "network as settings say"
   overlap:
     skip: "skip when still running"
     queue: "queue when still running"

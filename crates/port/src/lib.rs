@@ -35,7 +35,7 @@ pub use ids::{
 pub use instance::{Attach, ClientInfo, InstanceInfo, InstanceState, NewInstance};
 pub use job::{
     AutoDisabled, FiringAudit, Job, JobCheck, JobEntry, JobGuard, JobKind, JobOutcome, JobTarget,
-    OutcomeKind, Overlap, SkipCause, StopCause,
+    Network, OutcomeKind, Overlap, SkipCause, StopCause,
 };
 pub use session::{
     Answer, FileChange, FileChangeKind, Goal, GoalPhase, HistoryItem, Origin, Prompt, PromptKind,

@@ -93,9 +93,10 @@ pub fn declarations() -> Value {
         "enabled": {"type": "boolean"},
         "catch_up": {"type": "boolean", "description": "Run once at startup if a firing was missed while the instance was down."},
         "timeout": {"type": ["string", "null"], "description": "Guardrail: stop a firing running longer than this, e.g. \"30m\", \"2h\". null = the machine's default. Capped by the machine's limit."},
-        "max_tokens": {"type": ["string", "integer", "null"], "description": "Guardrail: stop a firing using more tokens than this (input + output, sub-agents included), e.g. \"2M\", \"500k\". null = the machine's default. Capped by the machine's limit."},
+        "max_tokens": {"type": ["string", "integer", "null"], "description": "Guardrail: stop a firing using more tokens than this (uncached input + cache writes + output, sub-agents and side calls included), e.g. \"2M\", \"500k\". null = the machine's default. Capped by the machine's limit."},
         "overlap": {"type": ["string", "null"], "enum": ["skip", "queue", "replace", null], "description": "Guardrail: when a firing is due while the previous one still runs: skip it, queue one, or replace (stop the previous). null = the machine's default."},
-        "disable_after": {"type": ["integer", "null"], "description": "Guardrail: disable the job on this machine after this many failures in a row; 0 = never. null = the machine's default."}
+        "disable_after": {"type": ["integer", "null"], "description": "Guardrail: disable the job on this machine after this many failures in a row; 0 = never. null = the machine's default."},
+        "network": {"type": ["string", "null"], "enum": ["deny_all", "allowlist", "inherit", null], "description": "Guardrail: network for the job's shell commands. deny_all (the usual default): none; allowlist: only the hosts in the settings' web.allowed_domains; inherit: as the settings say — unattended, a command with no allow rule in the settings is then refused unless the network is restricted. null = the machine's default."}
     });
     let mut save_props = job_fields.as_object().cloned().unwrap_or_default();
     save_props.insert(
@@ -365,6 +366,16 @@ fn guard_from_input(input: &Value, mut g: JobGuard) -> Result<JobGuard, String> 
             _ => return Err("overlap must be skip, queue or replace".into()),
         };
     }
+    if let Some(v) = input.get("network") {
+        g.network = match v {
+            Value::Null => None,
+            v => Some(
+                v.as_str()
+                    .and_then(port::Network::parse)
+                    .ok_or("network must be deny_all, allowlist or inherit")?,
+            ),
+        };
+    }
     if let Some(v) = input.get("disable_after") {
         g.disable_after = match v {
             Value::Null => None,
@@ -430,7 +441,8 @@ mod tests {
         );
         let f = job_from_input(
             &json!({"name":"weekly","cron":"0 9 * * 1","flow":"#1","subject":"release","inputs":{"v":1},
-                    "timeout":"45m","max_tokens":"1.5M","overlap":"queue","disable_after":5}),
+                    "timeout":"45m","max_tokens":"1.5M","overlap":"queue","disable_after":5,
+                    "network":"allowlist"}),
             None,
         )
         .unwrap();
@@ -450,6 +462,7 @@ mod tests {
         assert_eq!(f.guard.max_tokens, Some(1_500_000));
         assert_eq!(f.guard.overlap, Some(Overlap::Queue));
         assert_eq!(f.guard.disable_after, Some(5));
+        assert_eq!(f.guard.network, Some(port::Network::Allowlist));
         // 只改主题：种类与别的都留着；null 让一项回到全局缺省。
         let f2 =
             job_from_input(&json!({"subject":"hotfix","timeout":null}), Some(f.clone())).unwrap();

@@ -609,6 +609,7 @@ impl ScriptedBackend {
                 guard: job.guard.clone(),
                 capped: vec![],
                 problems: vec![],
+                notes: vec![],
             })),
             StopFiring { job, fired_ms } => {
                 let mut state = st();

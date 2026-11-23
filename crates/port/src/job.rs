@@ -48,6 +48,43 @@ pub struct JobGuard {
     /// 连续失败几次自动停用；0 是不停。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub disable_after: Option<u32>,
+    /// 无人值守的会话里命令能不能出网（Agix 的 `sandbox.network.mode`）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub network: Option<Network>,
+}
+
+/// 作业会话里命令的出网。Agix 0.4 起无人值守的会话里，没有 allow 规则的命令要沙箱兜得住、且网络受限才执行
+/// （`sandbox.unattended_needs_network_policy`），所以缺省是 `deny_all`：命令能跑、但出不了网。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Network {
+    /// 不出网。
+    #[default]
+    DenyAll,
+    /// 只到设置里 `web.allowed_domains` 列的主机。
+    Allowlist,
+    /// 照项目与全局设置（缺省是不受限，此时没有 allow 规则的命令会被 Agix 拒）。
+    Inherit,
+}
+
+impl Network {
+    /// 会话设置里 `sandbox.network.mode` 的值；`Inherit` 不写。
+    pub fn sandbox_mode(self) -> Option<&'static str> {
+        match self {
+            Network::DenyAll => Some("deny_all"),
+            Network::Allowlist => Some("allowlist"),
+            Network::Inherit => None,
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Network> {
+        match s {
+            "deny_all" => Some(Network::DenyAll),
+            "allowlist" => Some(Network::Allowlist),
+            "inherit" => Some(Network::Inherit),
+            _ => None,
+        }
+    }
 }
 
 impl JobGuard {
@@ -88,6 +125,9 @@ pub struct JobCheck {
     /// 存不进去的原因；空就是可以存。
     #[serde(default)]
     pub problems: Vec<String>,
+    /// 能存、但跑起来可能不如预期的地方（如网络照设置时命令会被 Agix 拒）。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub notes: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

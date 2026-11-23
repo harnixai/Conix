@@ -23,7 +23,18 @@ impl Hub {
                 ..
             } => {
                 let extra = json!({"attended": false, "auto_name": false});
+                let guard = self.guard_config().effective(&job.guard).0;
                 let settings = SessionSettings {
+                    // 引擎在每次调用前按剩余预算拦（含子 Agent、旁路调用），不会像事后数帧那样冲过头；
+                    // Codix 的计数仍在，管每日额度与界面（`meter_frame`）。一次触发就是一个新会话，
+                    // 所以会话预算就是这次触发的预算。
+                    token_budget: guard.max_tokens,
+                    network: guard
+                        .network
+                        .and_then(port::Network::sandbox_mode)
+                        .map(Into::into),
+                    // 无人值守的会话里模型再自建定时任务，就在 Codix 的作业与护栏之外了。
+                    deny: vec!["CronCreate".into()],
                     prompt_append: (!skills.is_empty()).then(|| {
                         format!(
                             "This is the scheduled job \"{}\". Use these skills: {}.",
@@ -146,6 +157,13 @@ impl Hub {
         Ok(job)
     }
 
+    /// 作业此刻生效的网络（流程作业起的运行在第一次开站会话时取一次，见 `flows::policy`）。
+    pub(crate) fn job_network(&self, job: &str) -> Option<port::Network> {
+        let sched = self.scheduler().ok()?;
+        let j = sched.get(job)?;
+        self.guard_config().effective(&j.guard).0.network
+    }
+
     /// 校验一份作业定义，不落盘（`ValidateJob`、`job_validate`）。
     pub(super) async fn check_job(&self, job: &Job) -> port::JobCheck {
         let mut problems = vec![];
@@ -190,11 +208,19 @@ impl Hub {
             }
         }
         let (guard, capped) = self.guard_config().effective(&job.guard);
+        let mut notes = vec![];
+        if guard.network == Some(port::Network::Inherit) {
+            notes.push(
+                "network: inherit — unattended, Agix refuses a shell command that has no allow rule in the settings unless the network is restricted (sandbox.unattended_needs_network_policy); give the commands this job needs permissions.allow rules in the project's settings, or use deny_all / allowlist"
+                    .into(),
+            );
+        }
         port::JobCheck {
             next_fire_ms: next,
             guard,
             capped,
             problems,
+            notes,
         }
     }
 

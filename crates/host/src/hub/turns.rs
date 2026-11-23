@@ -33,7 +33,8 @@ impl Hub {
                 ok,
                 text,
                 usage,
-            } => self.turn_done(&session, ok, text, usage),
+                budget,
+            } => self.turn_done(&session, ok, text, usage, budget),
             Todo2::Resubscribe { session } => {
                 let _ = self.subscribe(&session, false).await;
             }
@@ -205,7 +206,14 @@ impl Hub {
         q.remove(i).map(|(_, text)| text)
     }
 
-    pub(super) fn turn_done(&self, session: &str, ok: bool, text: String, usage: Usage) {
+    pub(super) fn turn_done(
+        &self,
+        session: &str,
+        ok: bool,
+        text: String,
+        usage: Usage,
+        budget: bool,
+    ) {
         if self.0.side.locked().remove(session) {
             let first: String = text.chars().take(400).collect();
             self.emit_events(vec![Event::Notice {
@@ -220,7 +228,13 @@ impl Hub {
         let run = self.0.job_runs.locked().remove(session);
         let audit = self.meter_take(session);
         if let (Some((job, fired, started)), Ok(sched)) = (run, self.scheduler()) {
-            let stopped = self.0.stop_causes.locked().remove(session);
+            // 引擎按会话预算（作业的 max_tokens）停下的，和 Codix 自己数到超额停下的是一回事。
+            let stopped = self
+                .0
+                .stop_causes
+                .locked()
+                .remove(session)
+                .or(budget.then_some(port::StopCause::Budget));
             let outcome = match (stopped, ok) {
                 (Some(reason), _) => JobOutcome::Stopped { reason },
                 (None, true) => JobOutcome::Done,

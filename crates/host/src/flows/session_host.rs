@@ -15,6 +15,7 @@ use port::{Origin, RunId, StationId};
 use serde_json::{Value, json};
 
 use super::frames::Translator;
+use super::policy::{RunPolicies, RunPolicy};
 use crate::engine::RpcError;
 use crate::hub::{SessionSettings, WeakHub, rule_strings};
 
@@ -33,15 +34,37 @@ pub(crate) struct CodixSessionHost {
     pub(crate) engine: OnceLock<Arc<Engine>>,
     /// 这个进程里每个键开时的 spec：同一个键换了 spec 再开要拒；跨重启由引擎比 `options`。
     opened: Mutex<HashMap<String, OpenSpec>>,
+    /// 作业起的运行的会话限制（网络、禁 `CronCreate`）。
+    policies: Arc<RunPolicies>,
 }
 
 impl CodixSessionHost {
-    pub(crate) fn new(hub: WeakHub) -> Arc<Self> {
+    pub(crate) fn new(hub: WeakHub, policies: Arc<RunPolicies>) -> Arc<Self> {
         Arc::new(Self {
             hub,
             engine: OnceLock::new(),
             opened: Mutex::default(),
+            policies,
         })
+    }
+
+    /// 这次运行的会话限制：记过就用记下的；没记过而运行是作业起的，就按作业此刻的护栏定下并记住
+    /// （第一次开站会话时取，免得与运行启动抢先后）。
+    async fn policy(&self, run: &str) -> Option<RunPolicy> {
+        if let Some(p) = self.policies.get(run) {
+            return Some(p);
+        }
+        let rec = self.engine.get()?.record(run).await.ok()?;
+        let harnix_flow::Trigger::Schedule { schedule, .. } = &rec.trigger else {
+            return None;
+        };
+        let hub = self.hub().ok()?;
+        let p = RunPolicy {
+            job: schedule.clone(),
+            network: hub.job_network(schedule).unwrap_or_default(),
+        };
+        self.policies.put(run, p.clone());
+        self.policies.get(run)
     }
 
     fn hub(&self) -> Result<crate::hub::Hub, HostError> {
@@ -137,8 +160,9 @@ fn base58(bytes: &[u8]) -> String {
     out
 }
 
-/// 建会话的 `options`：只由 spec 定，同一个 spec 再建总是同一份（引擎按它判断"是同一个会话"）。
-pub(crate) fn options_of(spec: &OpenSpec) -> Value {
+/// 建会话的 `options`：只由 spec 与这次运行的限制定，同一个 spec 再建总是同一份（引擎按它判断
+/// "是同一个会话"；运行的限制按运行记下、不再变，见 [`super::policy`]）。
+pub(crate) fn options_of(spec: &OpenSpec, policy: Option<&RunPolicy>) -> Value {
     // 只读工具与流程自己的工具（flow_state / flow_submit / flow_propose）不问，写在 cli 层
     // （`hub::cli_settings`）；`acceptEdits` 比项目缺省宽，靠 cli 层开的 `client_may_loosen` 才生效。
     // 流程库的 `ask_rules` 还是 0.3 的规则形状，这里换成规则串。
@@ -146,6 +170,11 @@ pub(crate) fn options_of(spec: &OpenSpec) -> Value {
         mode: Some(TASK_PERMISSION_MODE.into()),
         ask: rule_strings(&ask_rules(&spec.asks), "ask"),
         effort: spec.placement.effort.clone(),
+        // 作业起的运行同简单作业：命令的出网按作业的护栏，模型不能再自建定时任务。
+        network: policy
+            .and_then(|p| p.network.sandbox_mode())
+            .map(Into::into),
+        deny: policy.map_or_else(Vec::new, |_| vec!["CronCreate".into()]),
         ..SessionSettings::default()
     };
     let mut o = json!({
@@ -209,6 +238,7 @@ impl SessionHost for CodixSessionHost {
         }
         let hub = self.hub()?;
         let (origin, title) = self.origin(&spec).await;
+        let policy = self.policy(&spec.run).await;
         let project = spec
             .project_root
             .as_ref()
@@ -218,7 +248,7 @@ impl SessionHost for CodixSessionHost {
                 &session_id_of(&spec.key),
                 &spec.profile,
                 project.as_deref(),
-                options_of(&spec),
+                options_of(&spec, policy.as_ref()),
                 origin,
                 title,
             )
@@ -347,8 +377,8 @@ mod tests {
     fn options_depend_only_on_the_spec() {
         let mut spec = OpenSpec::new("flow:r@main", "r", "code", Delivery::FlowSubmit);
         spec.asks = vec!["Write".into(), "Bash(git:*)".into()];
-        let o = options_of(&spec);
-        assert_eq!(o, options_of(&spec.clone()));
+        let o = options_of(&spec, None);
+        assert_eq!(o, options_of(&spec.clone(), None));
         let p = &o["settings"]["permissions"];
         assert_eq!(p["mode"], TASK_PERMISSION_MODE);
         assert_eq!(p["ask"], json!(["Write", "Bash(git:*)"]));
@@ -360,8 +390,27 @@ mod tests {
 
         spec.placement.effort = Some("high".into());
         spec.tools = harnix_flow::runner::tool_specs();
-        let o = options_of(&spec);
+        let o = options_of(&spec, None);
         assert_eq!(o["settings"]["model"]["effort"], "high");
         assert_eq!(o["host_tools"].as_array().unwrap().len(), 3);
+        assert!(
+            o["settings"].get("sandbox").is_none(),
+            "不是作业起的运行：网络照设置"
+        );
+
+        let job = RunPolicy {
+            job: "nightly".into(),
+            network: port::Network::DenyAll,
+        };
+        let o = options_of(&spec, Some(&job));
+        assert_eq!(o["settings"]["sandbox"]["network"]["mode"], "deny_all");
+        assert_eq!(o["settings"]["permissions"]["deny"], json!(["CronCreate"]));
+        assert_eq!(o, options_of(&spec, Some(&job)), "同一次运行再开一样");
+        let inherit = RunPolicy {
+            network: port::Network::Inherit,
+            ..job
+        };
+        let o = options_of(&spec, Some(&inherit));
+        assert!(o["settings"].get("sandbox").is_none());
     }
 }

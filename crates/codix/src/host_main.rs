@@ -75,6 +75,7 @@ pub async fn run(name: String, project: PathBuf) -> Result<()> {
         max_tokens: text(&j.defaults.max_tokens),
         overlap: j.defaults.overlap.clone(),
         disable_after: j.defaults.disable_after,
+        network: j.defaults.network.clone(),
         limit_timeout: text(&j.limits.timeout),
         limit_max_tokens: text(&j.limits.max_tokens),
         daily_tokens: text(&j.daily_tokens),
@@ -135,6 +136,7 @@ pub async fn run(name: String, project: PathBuf) -> Result<()> {
             runs_dir: state.flow_runs(),
             worktrees_dir: host::flows::worktrees_root(&project),
             workspaces_dir: state.flow_workspaces(),
+            policies_file: Some(state.run_policies()),
         },
     )
     .await;

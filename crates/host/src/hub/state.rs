@@ -76,6 +76,8 @@ pub enum Todo2 {
         ok: bool,
         text: String,
         usage: Usage,
+        /// 引擎因为 token 预算用完结束了这一轮（会话、轮或目标的预算）。
+        budget: bool,
     },
     /// 订阅被引擎摘掉了（慢连接），重新订阅。
     Resubscribe { session: String },
@@ -377,9 +379,11 @@ impl St {
                 s.usage.add(&usage);
                 s.updated_ms = now;
                 let text = s.turn_text.clone();
+                let stop = stop_reason_of(&stop_reason, message.as_deref());
+                let budget = matches!(stop, StopReason::Budget(_));
                 out.events.push(Event::TurnEnded {
                     session: session(),
-                    stop: stop_reason_of(&stop_reason, message.as_deref()),
+                    stop,
                     usage,
                 });
                 self.upsert(sid, out);
@@ -388,6 +392,7 @@ impl St {
                     ok: true,
                     text,
                     usage,
+                    budget,
                 });
             }
             SessionEvent::Error { message } => {
@@ -456,6 +461,7 @@ impl St {
             ok: false,
             text: message,
             usage: Usage::default(),
+            budget: false,
         });
     }
 

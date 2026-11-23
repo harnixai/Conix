@@ -176,6 +176,11 @@ impl ProjectState {
     pub fn flow_workspaces(&self) -> PathBuf {
         self.dir().join("workspaces")
     }
+
+    /// 作业起的运行在会话上多出的限制（网络、禁 `CronCreate`），按运行记。
+    pub fn run_policies(&self) -> PathBuf {
+        self.dir().join("run-policies.json")
+    }
 }
 
 /// `host.log` 至多多大就轮转（只追加不轮转的话常驻实例的日志会一直长）。

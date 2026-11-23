@@ -4,6 +4,7 @@
 
 mod frames;
 mod map;
+pub(crate) mod policy;
 pub(crate) mod session_host;
 #[cfg(test)]
 mod tests;
@@ -56,6 +57,8 @@ pub struct FlowsConfig {
     pub worktrees_dir: PathBuf,
     /// 没有项目的运行在这里各有一个目录。
     pub workspaces_dir: PathBuf,
+    /// 作业起的运行在会话上多出的限制：`state/codix/run-policies.json`（[`policy`]）。
+    pub policies_file: Option<PathBuf>,
 }
 
 /// 项目所在仓库的根下的 [`WORKTREES_DIR`]；不在仓库里就是项目下的（那样的运行开不出 worktree）。
@@ -107,7 +110,7 @@ pub struct Flows {
 
 /// 派工器看到的会话宿主，单独拿出来给一致性套件查（`live_flows.rs`）。
 pub fn session_host(hub: &Hub) -> Arc<dyn harnix_flow::runner::SessionHost> {
-    CodixSessionHost::new(hub.downgrade())
+    CodixSessionHost::new(hub.downgrade(), Arc::new(policy::RunPolicies::in_memory()))
 }
 
 /// 装好流程、接到 Hub 上、起派工器（它把上次没做完的活接着做）。
@@ -143,7 +146,11 @@ pub async fn start(hub: &Hub, cfg: FlowsConfig) -> anyhow::Result<Arc<Flows>> {
         Ok(t) => rcfg.trust.set(&project, t),
         Err(e) => tracing::warn!("project.status: {e}"),
     }
-    let host = CodixSessionHost::new(hub.downgrade());
+    let policies = Arc::new(match cfg.policies_file {
+        Some(p) => policy::RunPolicies::open(p),
+        None => policy::RunPolicies::in_memory(),
+    });
+    let host = CodixSessionHost::new(hub.downgrade(), policies);
     let _ = host.engine.set(engine.clone());
     let sandbox = Arc::new(Sandbox::new(
         engine.packs().clone(),
@@ -518,7 +525,7 @@ impl FlowPort for Flows {
                 run: view.summary.id.clone(),
                 subject: view.summary.subject.clone(),
                 started_ms: view.summary.started_ms,
-                tokens: view.summary.usage.total(),
+                tokens: view.summary.usage.billed(),
                 paused: matches!(
                     view.summary.status,
                     port::RunStatus::Paused | port::RunStatus::Pausing

@@ -193,7 +193,7 @@ fn entry_line(e: &port::JobEntry, width: usize) -> Line {
             format!(
                 "{}  {}  {target}",
                 crate::sessions::fmt_elapsed(e.elapsed_ms),
-                crate::chat::fmt_k(e.usage.total())
+                crate::chat::fmt_k(e.usage.billed())
             ),
             Tone::Dim,
         ),

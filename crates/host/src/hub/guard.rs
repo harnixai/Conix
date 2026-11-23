@@ -10,10 +10,16 @@ pub(super) struct Meter {
     job: String,
     fired: u64,
     started: u64,
-    /// 主会话每次调用的用量之和。
+    /// 上一次从引擎读到的会话累计（`session.get` 的 `usage`：含子 Agent、团队成员、旁路调用，后台的也算）。
+    base: u64,
+    /// 已经结束的各轮的全部用量之和（`turn_complete.usage`，0.4 起含子 Agent 与旁路调用）。
+    turns: u64,
+    /// 那之后主会话每次调用的用量之和（`step_end`），等下次读累计时归零。
     steps: u64,
-    /// 子 Agent 各自到此刻的累计（任务帧带的是累计，不是增量）。
+    /// 后台子 Agent 各自到此刻的累计（任务帧带的是累计，不是增量）……
     tasks: HashMap<String, u64>,
+    /// ……与上一次读累计时它们各自的值：累计里已经有那一部分了，只算之后多出来的。
+    tasks_at_base: HashMap<String, u64>,
     /// 已经记进每日账的。
     counted: u64,
     /// 已经在停了：别再停一次。
@@ -154,8 +160,11 @@ impl Hub {
                 job: job.to_string(),
                 fired,
                 started: self.now(),
+                base: 0,
+                turns: 0,
                 steps: 0,
                 tasks: HashMap::new(),
+                tasks_at_base: HashMap::new(),
                 counted: 0,
                 stopping: false,
                 audit: Default::default(),
@@ -168,10 +177,16 @@ impl Hub {
         self.0.meters.locked().remove(session).map(|m| m.audit)
     }
 
-    /// 作业的会话来了一帧：每次调用、子 Agent 的累计用量记进账，超了单次上限或每日额度就停。
+    /// 作业的会话来了一帧：用量记进账，超了单次上限或每日额度就停。
+    ///
+    /// 用量的准数是引擎的会话累计（`session.get`）：0.4 起它含子 Agent、团队成员与旁路调用（压缩、记忆、
+    /// WebSearch、hook），口径与引擎的预算一致。帧里只看得到主会话自己的调用（`step_end`）与后台子 Agent
+    /// 的累计，所以平时按帧估、每轮结束与后台任务结束时读一次累计校准。真正拦住超支的是引擎的
+    /// `session.token_budget`（建会话时按这次触发的上限给），这里管的是每日额度与界面上的数。
+    ///
+    /// 一轮结束时直接用帧里这一轮的全部用量校准：紧接着 `turn_done` 就收走计数器，等不到异步读累计。
     pub(super) fn meter_frame(&self, session: &str, ev: &SessionEvent) {
-        let tokens = |u: &wire::frames::Usage| u.input_tokens + u.output_tokens;
-        let (job, fired, delta, total) = {
+        let sync = {
             let mut meters = self.0.meters.locked();
             let Some(m) = meters.get_mut(session) else {
                 return;
@@ -196,19 +211,74 @@ impl Hub {
                     }
                     return;
                 }
-                SessionEvent::StepEnd { usage } => m.steps += tokens(usage),
-                SessionEvent::TaskStarted { task }
-                | SessionEvent::TaskUpdated { task }
-                | SessionEvent::TaskFinished { task } => {
+                SessionEvent::StepEnd { usage } => {
+                    m.steps += billed(usage);
+                    false
+                }
+                SessionEvent::TaskStarted { task } | SessionEvent::TaskUpdated { task } => {
                     if let Some(u) = &task.usage {
-                        m.tasks.insert(task.task_id.clone(), tokens(u));
+                        m.tasks.insert(task.task_id.clone(), billed(u));
                     }
+                    false
+                }
+                SessionEvent::TaskFinished { task } => {
+                    if let Some(u) = &task.usage {
+                        m.tasks.insert(task.task_id.clone(), billed(u));
+                    }
+                    true
+                }
+                SessionEvent::TurnComplete { usage, .. } => {
+                    m.turns += billed(usage);
+                    m.base = m.turns;
+                    m.steps = 0;
+                    m.tasks_at_base = m.tasks.clone();
+                    false
                 }
                 _ => return,
             }
-            let total = m.steps + m.tasks.values().sum::<u64>();
+        };
+        self.meter_account(session);
+        if sync {
+            let hub = self.clone();
+            let session = session.to_string();
+            tokio::spawn(async move { hub.meter_sync(&session).await });
+        }
+    }
+
+    /// 读引擎的会话累计，校准估的数。
+    async fn meter_sync(&self, session: &str) {
+        let Ok(r) = self
+            .call("session.get", json!({"session_id": session}))
+            .await
+        else {
+            return;
+        };
+        let Ok(u) = serde_json::from_value::<wire::frames::Usage>(r["usage"].clone()) else {
+            return;
+        };
+        {
+            let mut meters = self.0.meters.locked();
+            let Some(m) = meters.get_mut(session) else {
+                return;
+            };
+            // 读到的可能比刚结束的那一轮校准的旧（帧先到）：不往回退。
+            m.base = m.base.max(billed(&u));
+            m.steps = 0;
+            m.tasks_at_base = m.tasks.clone();
+        }
+        self.meter_account(session);
+    }
+
+    /// 按此刻估的总数记账（只增不减：校准后比估的少，也不倒扣），超了单次上限或每日额度就停。
+    fn meter_account(&self, session: &str) {
+        let (job, fired, delta, total) = {
+            let mut meters = self.0.meters.locked();
+            let Some(m) = meters.get_mut(session) else {
+                return;
+            };
+            let total = meter_total(m);
             let delta = total.saturating_sub(m.counted);
-            m.counted = total;
+            m.counted = m.counted.max(total);
             (m.job.clone(), m.fired, delta, total)
         };
         let Ok(sched) = self.scheduler() else { return };
@@ -430,4 +500,63 @@ impl Hub {
 /// 下一次到点的时刻：排着的触发等到这时还没轮到就跳过。
 fn next_due(job: &Job, fired: u64) -> u64 {
     crate::jobs::cron::next_after(&job.cron, fired).unwrap_or(fired + 3_600_000)
+}
+
+/// 计费口径与 Agix 的预算、配额一致：未命中缓存的输入 + 缓存写入 + 输出，缓存命中不计。
+pub(super) fn billed(u: &wire::frames::Usage) -> u64 {
+    u.input_tokens + u.cache_creation_input_tokens + u.output_tokens
+}
+
+fn meter_total(m: &Meter) -> u64 {
+    let tasks: u64 = m
+        .tasks
+        .iter()
+        .map(|(id, v)| v.saturating_sub(m.tasks_at_base.get(id).copied().unwrap_or(0)))
+        .sum();
+    m.base + m.steps + tasks
+}
+
+#[cfg(test)]
+mod meter_tests {
+    use super::*;
+
+    fn usage(input: u64, write: u64, read: u64, output: u64) -> wire::frames::Usage {
+        wire::frames::Usage {
+            input_tokens: input,
+            cache_creation_input_tokens: write,
+            cache_read_input_tokens: read,
+            output_tokens: output,
+        }
+    }
+
+    #[test]
+    fn cache_reads_are_not_billed() {
+        assert_eq!(billed(&usage(100, 20, 5_000, 30)), 150);
+    }
+
+    #[test]
+    fn a_sync_replaces_the_estimate_without_counting_tasks_twice() {
+        let mut m = Meter {
+            job: "j".into(),
+            fired: 0,
+            started: 0,
+            base: 0,
+            turns: 0,
+            steps: 300,
+            tasks: HashMap::from([("t".to_string(), 1_000)]),
+            tasks_at_base: HashMap::new(),
+            counted: 0,
+            stopping: false,
+            audit: Default::default(),
+        };
+        assert_eq!(meter_total(&m), 1_300);
+        // 引擎的累计已含后台任务到此刻的 1000 与主会话的调用，再加旁路调用 200。
+        m.base = 1_500;
+        m.steps = 0;
+        m.tasks_at_base = m.tasks.clone();
+        assert_eq!(meter_total(&m), 1_500);
+        m.tasks.insert("t".into(), 1_400);
+        m.steps = 50;
+        assert_eq!(meter_total(&m), 1_950, "之后只加多出来的");
+    }
 }

@@ -34,9 +34,10 @@ jobs:
   # Used when a job does not set its own. Durations like 30m, 2h; tokens like 2M, 500k.
   defaults:
     timeout: 30m        # how long one firing may run
-    max_tokens: 2M      # how many tokens one firing may use (input + output, sub-agents included)
+    max_tokens: 2M      # how many tokens one firing may use (uncached input + cache writes + output, sub-agents included)
     overlap: skip       # when due while the previous one still runs: skip, queue one, or replace it
     disable_after: 3    # disable the job on this machine after this many failures in a row; 0 = never
+    network: deny_all   # network for a job's commands: deny_all none, allowlist only web.allowed_domains, inherit the settings
   # Ceilings: a job definition committed to the repository cannot go above them.
   limits:
     timeout: 4h

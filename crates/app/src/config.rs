@@ -51,6 +51,7 @@ pub struct JobDefaults {
     pub max_tokens: Option<Amount>,
     pub overlap: Option<String>,
     pub disable_after: Option<u32>,
+    pub network: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]

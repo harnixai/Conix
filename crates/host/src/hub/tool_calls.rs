@@ -422,7 +422,7 @@ fn firing_line(e: &port::JobEntry) -> String {
         e.fired_ms,
         outcome_text(&e.outcome),
         e.elapsed_ms / 1000,
-        e.usage.total()
+        e.usage.billed()
     )
 }
 

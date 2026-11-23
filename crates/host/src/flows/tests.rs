@@ -127,7 +127,10 @@ fn spec(key: &str) -> OpenSpec {
 #[tokio::test]
 async fn a_key_opens_the_same_session_and_another_spec_for_it_is_refused() {
     let r = rig().await;
-    let host = CodixSessionHost::new(r.hub.downgrade());
+    let host = CodixSessionHost::new(
+        r.hub.downgrade(),
+        std::sync::Arc::new(super::policy::RunPolicies::in_memory()),
+    );
     let a = host.open(spec("flow:r1@main")).await.unwrap();
     assert_eq!(a.id, session_id_of("flow:r1@main"));
     assert!(!a.existed);
@@ -153,7 +156,10 @@ async fn a_key_opens_the_same_session_and_another_spec_for_it_is_refused() {
 #[tokio::test]
 async fn frames_reach_the_runner_with_the_text_that_started_the_turn() {
     let r = rig().await;
-    let host = CodixSessionHost::new(r.hub.downgrade());
+    let host = CodixSessionHost::new(
+        r.hub.downgrade(),
+        std::sync::Arc::new(super::policy::RunPolicies::in_memory()),
+    );
     let id = host.open(spec("flow:r1@main")).await.unwrap().id;
     let mut w = host.watch(&id).await.unwrap();
     host.send(&id, "做这一站").await.unwrap();
@@ -207,7 +213,10 @@ async fn frames_reach_the_runner_with_the_text_that_started_the_turn() {
 #[tokio::test]
 async fn a_closed_session_is_gone_and_its_stream_ends() {
     let r = rig().await;
-    let host = CodixSessionHost::new(r.hub.downgrade());
+    let host = CodixSessionHost::new(
+        r.hub.downgrade(),
+        std::sync::Arc::new(super::policy::RunPolicies::in_memory()),
+    );
     let id = host.open(spec("flow:r1/s/t@x")).await.unwrap().id;
     let mut w = host.watch(&id).await.unwrap();
     host.close(&id).await.unwrap();
@@ -228,6 +237,7 @@ async fn a_flow_jobs_flow_is_resolved_and_its_inputs_checked() {
             runs_dir: dir.path().join("runs"),
             worktrees_dir: dir.path().join(".wkts"),
             workspaces_dir: dir.path().join("ws"),
+            policies_file: None,
         },
     )
     .await

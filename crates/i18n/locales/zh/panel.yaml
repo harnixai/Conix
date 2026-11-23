@@ -62,7 +62,11 @@ panel:
   job_on_hint: "启用 · 空格停用"
   job_off_hint: "已停用 · 空格启用"
   job_auto_off_hint: "自动停用（连续 {n} 次失败）· 空格启用"
-  job_guard: "超时 {timeout} · 单次 {tokens} · {overlap} · {disable}"
+  job_guard: "超时 {timeout} · 单次 {tokens} · {overlap} · {disable} · {network}"
+  network:
+    deny_all: "不出网"
+    allowlist: "网络按白名单"
+    inherit: "网络照设置"
   overlap:
     skip: "重叠时跳过"
     queue: "重叠时排队"

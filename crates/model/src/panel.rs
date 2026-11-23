@@ -759,12 +759,18 @@ pub(crate) fn guard_text(g: &port::JobGuard) -> String {
         Some(n) if n > 0 => i18n::t!("panel.disable_after", n = n),
         _ => i18n::t!("panel.disable_never"),
     };
+    let network = match g.network {
+        Some(port::Network::Allowlist) => i18n::t!("panel.network.allowlist"),
+        Some(port::Network::Inherit) => i18n::t!("panel.network.inherit"),
+        _ => i18n::t!("panel.network.deny_all"),
+    };
     i18n::t!(
         "panel.job_guard",
         timeout = fmt_span(g.timeout_ms.unwrap_or(0)),
         tokens = fmt_budget(g.max_tokens.unwrap_or(0)),
         overlap = overlap,
-        disable = disable
+        disable = disable,
+        network = network
     )
 }
 
@@ -791,7 +797,7 @@ pub(crate) fn job_stats(history: &[JobEntry]) -> Vec<Line> {
             ended.iter().map(|e| f(e)).sum::<u64>() / ended.len() as u64
         }
     };
-    let total: u64 = history.iter().map(|e| e.usage.total()).sum();
+    let total: u64 = history.iter().map(|e| e.usage.billed()).sum();
     vec![
         Line::toned(i18n::t!("panel.run_count", n = n), Tone::Normal)
             .push(i18n::t!("panel.run_ok", n = done), Tone::Ok)
@@ -808,7 +814,7 @@ pub(crate) fn job_stats(history: &[JobEntry]) -> Vec<Line> {
             i18n::t!(
                 "panel.run_avg",
                 elapsed = crate::sessions::fmt_elapsed(avg(|e| e.elapsed_ms)),
-                avg = crate::chat::fmt_k(avg(|e| e.usage.total())),
+                avg = crate::chat::fmt_k(avg(|e| e.usage.billed())),
                 total = crate::chat::fmt_k(total)
             ),
             Tone::Dim,

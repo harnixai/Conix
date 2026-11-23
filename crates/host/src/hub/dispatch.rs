@@ -67,7 +67,13 @@ impl Hub {
             }
             C::Close { session } => {
                 if self.0.job_runs.locked().contains_key(&session.0) {
-                    self.turn_done(&session.0, false, "session closed".into(), Usage::default());
+                    self.turn_done(
+                        &session.0,
+                        false,
+                        "session closed".into(),
+                        Usage::default(),
+                        false,
+                    );
                 }
                 // 没订阅过（冷会话）的退订失败无妨；关闭时冷会话答 SESSION_NOT_FOUND——本来就没有运行实体，
                 // 照样算关了。别的错误回给人，本地不动。
@@ -114,6 +120,7 @@ impl Hub {
                         false,
                         "session deleted".into(),
                         Usage::default(),
+                        false,
                     );
                 }
                 let _ = self

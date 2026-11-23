@@ -33,9 +33,10 @@ jobs:
   # 作业自己没写时用。时长写 30m、2h；token 写 2M、500k。
   defaults:
     timeout: 30m        # 一次触发至多跑多久
-    max_tokens: 2M      # 一次触发至多用多少 token（输入+输出，含子 Agent）
+    max_tokens: 2M      # 一次触发至多用多少 token（未命中缓存的输入 + 缓存写入 + 输出，含子 Agent）
     overlap: skip       # 到点时上一次还在跑：skip 跳过、queue 排一个、replace 停下上一次
     disable_after: 3    # 连续失败几次就在这台机器上停用；0 不停
+    network: deny_all   # 作业里命令的出网：deny_all 不出网、allowlist 只到 web.allowed_domains、inherit 照设置
   # 天花板：仓库里提交的作业定义写得再大也不超过它。
   limits:
     timeout: 4h

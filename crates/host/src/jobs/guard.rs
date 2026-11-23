@@ -1,7 +1,7 @@
 //! 无人值守的护栏（architecture §8.5）：全局缺省与天花板、作业自己写的项、实际生效的值。
 //! 天花板来自这台机器的 `codix.yaml`，作业定义来自仓库：仓库里的作业只能比天花板更紧。
 
-use port::{JobGuard, Overlap};
+use port::{JobGuard, Network, Overlap};
 
 const MIN: u64 = 60_000;
 
@@ -24,6 +24,7 @@ impl Default for GuardConfig {
                 max_tokens: Some(2_000_000),
                 overlap: Some(Overlap::Skip),
                 disable_after: Some(3),
+                network: Some(Network::DenyAll),
             },
             max_timeout_ms: 240 * MIN,
             max_tokens: 20_000_000,
@@ -66,6 +67,12 @@ impl GuardConfig {
                 max_tokens: Some(tokens),
                 overlap: g.overlap.or(self.defaults.overlap).or(Some(Overlap::Skip)),
                 disable_after: g.disable_after.or(self.defaults.disable_after).or(Some(0)),
+                // 网络没有天花板：放开网络是作业作者与这台机器的用户各自的决定，Agix 那边还有
+                // `sandbox.unattended_needs_network_policy` 守着（inherit 下没有 allow 规则的命令照样被拒）。
+                network: g
+                    .network
+                    .or(self.defaults.network)
+                    .or(Some(Network::DenyAll)),
             },
             capped,
         )
@@ -79,6 +86,7 @@ pub struct GuardText {
     pub max_tokens: Option<String>,
     pub overlap: Option<String>,
     pub disable_after: Option<u32>,
+    pub network: Option<String>,
     pub limit_timeout: Option<String>,
     pub limit_max_tokens: Option<String>,
     pub daily_tokens: Option<String>,
@@ -133,6 +141,14 @@ impl GuardConfig {
         }
         if let Some(n) = t.disable_after {
             c.defaults.disable_after = Some(n);
+        }
+        if let Some(s) = t.network.as_deref().map(str::trim) {
+            match Network::parse(s) {
+                Some(n) => c.defaults.network = Some(n),
+                None => problems.push(format!(
+                    "jobs.defaults.network: {s:?} is not deny_all, allowlist or inherit; the default is used"
+                )),
+            }
         }
         if let Some(n) = t.max_concurrent {
             c.max_concurrent = n.max(1);
@@ -208,6 +224,7 @@ mod tests {
             max_tokens: Some("lots".into()),
             overlap: Some("queue".into()),
             disable_after: Some(5),
+            network: Some("everywhere".into()),
             limit_timeout: Some("2h".into()),
             limit_max_tokens: None,
             daily_tokens: Some("0".into()),
@@ -220,7 +237,8 @@ mod tests {
         assert_eq!(c.max_timeout_ms, 120 * MIN);
         assert_eq!(c.daily_tokens, 0, "0 是不限");
         assert_eq!(c.max_concurrent, 4);
-        assert_eq!(problems.len(), 1, "{problems:?}");
+        assert_eq!(problems.len(), 2, "{problems:?}");
+        assert_eq!(c.defaults.network, Some(Network::DenyAll), "读不懂的用缺省");
     }
 
     #[test]
@@ -246,11 +264,13 @@ mod tests {
             max_tokens: Some(500_000),
             overlap: Some(Overlap::Queue),
             disable_after: None,
+            network: Some(Network::Inherit),
         });
         assert_eq!(g.timeout_ms, Some(240 * MIN));
         assert_eq!(g.max_tokens, Some(500_000));
         assert_eq!(g.overlap, Some(Overlap::Queue));
         assert_eq!(g.disable_after, Some(3));
+        assert_eq!(g.network, Some(Network::Inherit), "作业写了就照它");
         assert_eq!(capped, ["timeout"]);
         let (d, capped) = c.effective(&JobGuard::default());
         assert_eq!(d, c.defaults);
