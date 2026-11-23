@@ -77,7 +77,7 @@ xforge-constitution = "xforge.check"
 xforge-ledgers      = "xforge.check"
 xforge-integrated   = "xforge.check"
 xforge-unclaimed    = "xforge.check"
-xforge-unit-tests   = "xforge.check"
+xforge-unit-tests   = { function = "xforge.check", runs_commands = true }
 
 [x-codix.steps]
 xforge-open     = "xforge.open"

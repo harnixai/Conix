@@ -1,8 +1,8 @@
 //! 插件带来的 host 门禁与程序步骤（plugins.md §5.2）：按 [`PluginMap`] 找到插件函数，经 `plugin.call` 调。
 //!
 //! 不带会话：结果只取决于项目里的数据，与站的会话还在不在无关；不带会话的调用要问人的一律失败，
-//! 所以门禁里要跑命令的，规则得在项目设置里写好（函数会把被拒说清楚）。门禁"只读"靠的是插件函数声明的
-//! `writes` 为空，不是调用时的 `writes:false`（见 `PluginGates::run`）。
+//! 所以门禁里要跑命令的，规则得在项目设置里写好（函数会把被拒说清楚）。门禁缺省以 `writes:false` 调，
+//! 声明了 `runs_commands` 的以 `writes:true` 调（[`super::GateTarget`]）。
 
 use std::sync::{Arc, OnceLock, RwLock};
 
@@ -97,12 +97,10 @@ pub struct PluginGates(pub Arc<PluginCalls>);
 #[async_trait]
 impl Gates for PluginGates {
     async fn run(&self, run: &RunRecord, station: &str, gate: &str) -> GateResult {
-        let found = self
-            .0
-            .map
-            .read()
-            .ok()
-            .and_then(|m| m.gates.get(gate).cloned());
+        let (found, writes) = match self.0.map.read() {
+            Ok(m) => (m.gates.get(gate).cloned(), m.runs_commands.contains(gate)),
+            Err(_) => (None, false),
+        };
         let Some((_, function)) = found else {
             return GateResult {
                 pass: false,
@@ -111,10 +109,9 @@ impl Gates for PluginGates {
         };
         let (mut input, cwd) = self.0.input(run, station);
         input["gate"] = json!(gate);
-        // writes:true 而不是 false：false 时引擎把会改东西的命令（`cargo test` 之类）一律拒掉，规则也放不开，
-        // 跑测试的门禁就做不成。经文件工具能写的仍只是函数自己声明的 `writes`（门禁函数声明为空，安装时披露过），
-        // 命令按项目的规则判，要问人的照样失败。
-        match self.0.call(&function, input, cwd, true).await {
+        // 缺省 writes:false：只读命令不用规则就能跑（writes:true 时它们也要按规则判，不带会话没人可问）；
+        // 声明了 runs_commands 的才 writes:true，好跑测试这类命令（见 GateTarget）。
+        match self.0.call(&function, input, cwd, writes).await {
             Ok(v) => match serde_json::from_value::<GateResult>(v.clone()) {
                 Ok(g) => g,
                 Err(_) => GateResult {

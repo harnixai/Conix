@@ -16,12 +16,44 @@ pub struct CodixSection {
     /// 流程包目录（相对包根），布局同 harnix-flow 的 `DirPacks`。
     #[serde(default)]
     pub flows: Option<String>,
-    /// host 门禁名 → 插件函数的调用名（`<包名>.<函数名>`）。
+    /// host 门禁名 → 插件函数的调用名（`<包名>.<函数名>`），或 `{ function, runs_commands = true }`。
     #[serde(default)]
-    pub gates: BTreeMap<String, String>,
+    pub gates: BTreeMap<String, GateTarget>,
     /// program 步骤名 → 插件函数的调用名。
     #[serde(default)]
     pub steps: BTreeMap<String, String>,
+}
+
+/// 一道门禁由哪个函数判。缺省以 `writes:false` 调：只读的命令（`git status`）不用规则就能跑，会改东西的一律被拒。
+/// 要跑测试这类命令的门禁写 `runs_commands = true`，以 `writes:true` 调：经文件工具仍只写得了函数声明的
+/// `writes`，命令按项目设置的规则判（不带会话，要问人的失败）。安装时披露里写明。
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(untagged)]
+pub enum GateTarget {
+    Function(String),
+    Full {
+        function: String,
+        #[serde(default)]
+        runs_commands: bool,
+    },
+}
+
+impl GateTarget {
+    pub fn function(&self) -> &str {
+        match self {
+            GateTarget::Function(f) | GateTarget::Full { function: f, .. } => f,
+        }
+    }
+
+    pub fn runs_commands(&self) -> bool {
+        matches!(
+            self,
+            GateTarget::Full {
+                runs_commands: true,
+                ..
+            }
+        )
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -92,6 +124,8 @@ impl Mounted {
 pub struct PluginMap {
     pub gates: BTreeMap<String, (String, String)>,
     pub steps: BTreeMap<String, (String, String)>,
+    /// 以 `writes:true` 调的门禁（[`GateTarget::runs_commands`]）。
+    pub runs_commands: std::collections::BTreeSet<String>,
     /// 插件名 → 被遮住的东西，一条一句。
     pub conflicts: BTreeMap<String, Vec<String>>,
 }
@@ -102,8 +136,19 @@ impl PluginMap {
         sorted.sort_by(|a, b| a.name.cmp(&b.name));
         let mut m = PluginMap::default();
         for p in sorted {
+            let gates: BTreeMap<String, String> = p
+                .section
+                .gates
+                .iter()
+                .map(|(g, t)| (g.clone(), t.function().to_string()))
+                .collect();
+            for (g, t) in &p.section.gates {
+                if t.runs_commands() && !m.gates.contains_key(g) {
+                    m.runs_commands.insert(g.clone());
+                }
+            }
             for (kind, src, dst) in [
-                ("gate", &p.section.gates, &mut m.gates),
+                ("gate", &gates, &mut m.gates),
                 ("step", &p.section.steps, &mut m.steps),
             ] {
                 for (name, function) in src {
@@ -222,9 +267,15 @@ fn codix_disclosure(m: &Mounted, d: &mut port::PluginDisclosure) {
     for name in m.flow_names() {
         d.codix.push(format!("flow `{name}`"));
     }
-    for (gate, f) in &m.section.gates {
+    for (gate, t) in &m.section.gates {
+        let how = if t.runs_commands() {
+            "may run commands that change things, as the project's permission rules allow"
+        } else {
+            "read-only call"
+        };
         d.codix.push(format!(
-            "host gate `{gate}` → plugin function `{f}` (read-only call)"
+            "host gate `{gate}` → plugin function `{}` ({how})",
+            t.function()
         ));
     }
     for (step, f) in &m.section.steps {
@@ -319,7 +370,7 @@ xf-open = "xf.open"
         )
         .unwrap();
         let section = codix_section(dir.path()).unwrap();
-        assert_eq!(section.gates["xf-structure"], "xf.check");
+        assert_eq!(section.gates["xf-structure"].function(), "xf.check");
         let m = Mounted {
             name: "xf".into(),
             root: dir.path().to_path_buf(),
@@ -351,12 +402,19 @@ xf-open = "xf.open"
             name: name.into(),
             root: PathBuf::new(),
             section: CodixSection {
-                gates: BTreeMap::from([("g".to_string(), format!("{name}.check"))]),
+                gates: BTreeMap::from([(
+                    "g".to_string(),
+                    GateTarget::Full {
+                        function: format!("{name}.check"),
+                        runs_commands: name == "zeta",
+                    },
+                )]),
                 ..Default::default()
             },
         };
         let m = PluginMap::build(&[p("zeta"), p("alpha")]);
         assert_eq!(m.gates["g"], ("alpha".into(), "alpha.check".into()));
+        assert!(m.runs_commands.is_empty(), "胜出的那个没要跑命令");
         assert_eq!(m.conflicts["zeta"].len(), 1);
     }
 }
