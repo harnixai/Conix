@@ -272,6 +272,38 @@ impl Hub {
 }
 
 impl Hub {
+    /// Codix 在 cli 层开了 `permissions.client_may_loosen`（流程站要 `acceptEdits`）；部署方的 managed 层
+    /// 可以把它关掉，这时流程站的模式会被夹回去。按引擎实际的判定报（`config.explain`），不按我们写了什么。
+    async fn loosen_check(&self) -> port::HealthCheck {
+        use port::{HealthCheck, HealthStatus as H};
+        let r = self
+            .call(
+                "config.explain",
+                json!({"key": "permissions.client_may_loosen", "scene": "code",
+                       "project_root": self.0.project}),
+            )
+            .await;
+        let (status, summary) = match r {
+            Ok(v) if v["keys"][0]["value"] == true => (
+                H::Ok,
+                "Codix lets sessions ask for looser settings than the project's (flow stations run acceptEdits); managed settings still cap it".to_string(),
+            ),
+            Ok(v) => (
+                H::Degraded,
+                format!(
+                    "permissions.client_may_loosen is {} (managed settings?): flow stations' acceptEdits is clamped to the project's mode, so unattended runs may stop on permission questions",
+                    v["keys"][0]["value"]
+                ),
+            ),
+            Err(e) => (H::Degraded, format!("config.explain: {e}")),
+        };
+        HealthCheck {
+            name: "codix.session_loosen".into(),
+            status,
+            summary,
+        }
+    }
+
     /// `/doctor`：引擎的检查加上实例自己的几项（项目状态、`.gitignore`、配置、通知出口、流程）。
     pub(super) async fn doctor(&self) -> Vec<port::HealthCheck> {
         use port::{HealthCheck, HealthStatus as H};
@@ -343,6 +375,23 @@ impl Hub {
                 format!("{sinks} notification sink(s); /notify sends a test")
             },
         ));
+        out.push(self.loosen_check().await);
+        let network = self.guard_config().defaults.network.unwrap_or_default();
+        out.push(match network {
+            port::Network::Inherit => check(
+                "codix.jobs_network",
+                H::Degraded,
+                "jobs.defaults.network is inherit: unattended, Agix refuses a job's shell commands that have no allow rule unless the network is restricted (see sandbox.unattended_network)".into(),
+            ),
+            n => check(
+                "codix.jobs_network",
+                H::Ok,
+                format!(
+                    "jobs' shell commands run with network {} unless a job says otherwise",
+                    n.sandbox_mode().unwrap_or("inherit")
+                ),
+            ),
+        });
         out.push(if self.flows().is_some() {
             check("codix.flows", H::Ok, "flows are running".into())
         } else {

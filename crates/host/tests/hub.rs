@@ -1372,6 +1372,8 @@ async fn doctor_reports_the_engines_checks_and_the_instances_own() {
     let r = rig_with(Box::new(|m, p| match m {
         "daemon.doctor" => Ok(json!({"health": {"status": "ok", "checks": [
             {"name": "settings.tiers", "status": "ok", "summary": "every settings.json present parses"}]}})),
+        // 部署方的 managed 层把放宽关了：流程站的 acceptEdits 会被夹回去。
+        "config.explain" => Ok(json!({"key": p["key"], "keys": [{"key": p["key"], "value": false}]})),
         _ => default_handler(m, p),
     }))
     .await;
@@ -1389,6 +1391,11 @@ async fn doctor_reports_the_engines_checks_and_the_instances_own() {
         "这个搭法里没有流程"
     );
     assert!(status("codix.notify").is_some() && status("codix.gitignore").is_some());
+    assert_eq!(
+        status("codix.session_loosen"),
+        Some(port::HealthStatus::Degraded)
+    );
+    assert_eq!(status("codix.jobs_network"), Some(port::HealthStatus::Ok));
 }
 
 /// 无人值守的这一次做了什么记进触发记录：调了哪些工具各几次、出错几次、改了哪些文件。
