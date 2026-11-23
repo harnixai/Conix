@@ -593,6 +593,34 @@ schema；`job_validate` 不落盘，回下 5 次触发时刻与护栏的实际�
   （`/notify test`）发一条测试，回每个出口的结果。
 - **离开期间**：接入时实例推 `AwaySummary{since_ms, alerts}`（上一次有人脱离之后的 Alert），TUI 弹浮层（交互 §5.5）。
 
+### 8.11 配置与在会话里配置自己
+
+**谁的配置在哪**（手册 `config.md` 有全表）：
+
+| 面 | 归谁 | 读的时机 |
+|---|---|---|
+| `~/.codix/settings.json`、`<项目>/.codix/settings.json`（+ `.local`） | Agix：模型、provider、权限、沙箱…… | 引擎随写随读（`config.set` / 监视文件） |
+| cli 层（`host::hub::cli_settings`） | Codix 写给 Agix：只读工具与流程工具不问、`client_may_loosen`、`app.history` | 实例启动 |
+| `~/.codix/codix.yaml` | Codix：`ui`（TUI）、`instance`、`jobs`、`notify`、`engine` | 启动；`jobs`、`notify` 经 `codix_config_set` 改时实例当场重读 |
+| `~/.codix/keybindings.json` | Codix TUI | TUI 启动 |
+| 环境变量 | `CODIX_HOME`、`CODIX_LANG`、`CODIX_PLUGIN_DIRS`；`CODIX_MODEL` 覆盖 `engine.model` | 进程启动 |
+
+`engine.model`：引擎自带 `anthropic` 的模型（相当于 `agixd --model`），只在设置里没定义 `providers` 时用到；它是进程
+参数、不是 Agix 的设置键，所以归 `codix.yaml`。
+
+**在会话里配置自己：改与切分开。** 模型在会话里改配置，最怕"一改就生效，新的不通就没有模型可用"。所以：
+
+1. **加**：`config_provider_add` 经 `config.setProvider`（先 `dry_run`）加一个 provider 定义，**不动 `model.order`**——
+   现在的路由不变，会话照常用旧模型。
+2. **测**：`config_provider_test` 先 `config.listModels`（端点与凭据），再开一个临时会话（`provider` / `model` 指定、
+   `turn.token_budget` 极小、`attended: false`、不进列表）打一句、看它答没答、答了多久，测完删掉会话。
+3. **切**：`config_switch` 先把现在的 `model.order` 与 revision 记进 `~/.codix/config-backups/`，再 `config.set
+   model.order`（带 `if_revision`），立刻用新的缺省打一次；不通就写回备份，回"切换失败、已退回"与原因。
+4. **退**：`config_rollback` 回到上一次切换前。
+
+`codix.yaml` 的改动（`codix_config_set`）：按启动时同一个解析先校验，备份后写；`jobs`、`notify` 当场重读，`ui`、
+`instance`、`engine` 回"下次启动生效"。写配置的工具都不是只读的，照常问人；只有人开的会话有这些工具。
+
 ## 9. 旧实现踩过的坑
 
 | 坑 | 本设计如何避开 |
