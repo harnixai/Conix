@@ -51,7 +51,7 @@ share/codix/plugins/*.zip         自带插件目录：随程序装上，里面�
 
 项目
 <项目>/xforge/                    XForge 的数据：manifest、constitution、specs、changes/…，随项目提交
-<项目>/.codix/runs/<运行>/        流程运行的过程目录（harnix-flow，现有）
+<项目>/.codix/state/codix/runs/<运行>/  流程运行的过程目录（harnix-flow，不进 git）
 ```
 
 - 自带插件目录从 `current_exe()` 推：`<exe 所在目录>/../share/codix/plugins/`；`CODIX_PLUGIN_DIRS`
@@ -82,7 +82,7 @@ share/codix/plugins/*.zip         自带插件目录：随程序装上，里面�
    - **Agix 的** `disclosure`：能力（命令能写什么、`uses` 了哪个宿主库）、到达模型的每段文字。
    - **Codix 的**：Agix 不读 `x-` 段，`[x-codix]` 带来的由 Codix 自己披露——流程（名字、标题）、站的 skill
      正文（到达模型）、门禁与步骤各对应哪条插件命令、是否要 `command` 门禁。
-3. 确认后 `plugin.enable`；不确认就 `plugin.uninstall`。装完不该自动启用，见 §8 待定。
+3. Agix 0.4 起 `plugins.enable_on_install` 缺省为 false，装完插件是停用的：确认后 `plugin.enable`；不确认就 `plugin.uninstall`。
 
 **启停之后**：Agix 的命令只进此后新建的会话，提示里照实说；Codix 立刻重读插件流程包（§4），推
 `FlowUpserted` / `FlowRemoved`。在跑的运行不受影响（启动时已钉住定义与件）。
@@ -101,9 +101,9 @@ xforge-open = "xflow new"
 ```
 
 - **分层**：Codix 实现一层 `PluginPacks`，挂所有已启用插件的流程包。叠加顺序：项目 > `~/.codix/flows/`
-  可写层 > 插件 > 内置示例。来源记 `Origin::Plugin { name }`（Harnix#68，落地前当 `Builtin`）；可写层存同名的就是
+  可写层 > 插件 > 内置示例。来源记 `Origin::Plugin`（Harnix 0.4.7，不带名字；插件名从 `Packs::source(flow)` / `DefRow::source` 取）；可写层存同名的就是
   覆盖，删掉回到插件那份。两个插件同名的流程、件、门禁名、步骤名，按插件名排序先到的胜出，后到的报在
-  `/plugin` 里。
+  `/plugin` 里：被盖掉的同名流程在库里是 `Withheld::Shadowed`，`DirPacks::shadowed()` 列出它们。
 - **目录**（`Catalog`）：所有已启用插件 `[x-codix.gates]` 与 `[x-codix.steps]` 的名字并进 `gates` / `steps`。
   流程只用目录里有的名字，引用了停用插件的门禁的流程照校验规则报出来。
 - **信任**：插件的流程是人看过披露后装的，不受项目信任的约束；插件命令在会话里照常受 Agix 的项目信任与权限。
@@ -338,7 +338,7 @@ stations:
 
 ## 7. 实施顺序
 
-1. **依赖**：Agix#90、#91、#92 与 Harnix#68 发布后，bump Agix（单独提交）、按新标签重新拷 `harnix-flow`。
+1. **依赖**（已完成）：Agix 0.4.0（2bc0b39a）已 bump，harnix-flow 0.4.7 已拷入。
 2. **mock**：`/plugin` 浮层、两份披露、端口命令接 mock（脚本化插件），`crates/app/tests` 里验完。
 3. **接缝**：`Hub` 的 `plugin.*`、自带目录与 `plugin-store/`、`PluginPacks`。LIVE 用一个测试用的小插件（`tests/fixtures`，带一个流程、一道门禁、一个步骤）。
 4. **宿主库与 `ext.run`**：`codix.flow.*`、`PluginGates`、`PluginPrograms`。用 `ext.run` 直接跑插件命令就能测，不需要模型。
@@ -350,6 +350,6 @@ stations:
 
 | 问题 | 倾向 |
 |---|---|
-| 装完不自动启用 | Agix 的 `plugins.enable_on_install` 缺省还是 `true`（计划改成 `false`）。倾向请 Agix 给 `plugin.install` 一个 `enable: false`；在那之前装完立刻披露，不确认就卸 |
+| ~~装完不自动启用~~ | 已解决：Agix 0.4 的 `plugins.enable_on_install` 缺省 false，装完披露、确认后 `plugin.enable` |
 | XForge 已有项目 | `xforge/` 的格式不变就直接认；`.claude/`、`.codex/` 里的投影由人用原来的 `xforge remove` 清掉 |
 | 插件命令的测试 | 插件源码里带用例：经 `ext.run` 跑，放进 Codix 的 `cargo test`（嵌入真实引擎，不联网） |

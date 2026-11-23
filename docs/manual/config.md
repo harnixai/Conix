@@ -4,7 +4,7 @@
 
 ```
 ~/.codix/                       全局（CODIX_HOME 可改）；也是 Agix 的数据根
-  settings.json                 Agix 的设置：模型、provider、权限……
+  settings.json                 Agix 的设置：模型、provider、权限……（见「Agix 的设置」）
   codix.yaml                    Codix 自己的配置（下面）
   keybindings.json              键位覆盖（下面）
   flows/                        全局流程包
@@ -46,9 +46,10 @@ instance:
 jobs:
   defaults:                 # 作业没写时用
     timeout: 30m
-    max_tokens: 2M
+    max_tokens: 2M          # 一次触发的 token：未命中缓存的输入 + 缓存写入 + 输出（缓存命中不计）
     overlap: skip           # skip | queue | replace
     disable_after: 3        # 0 不自动停用
+    network: deny_all       # 作业里命令的出网：deny_all 不出网 | allowlist 只到 web.allowed_domains | inherit 照设置
   limits:                   # 天花板：作业定义写得再大也不超过它
     timeout: 4h
     max_tokens: 20M
@@ -57,6 +58,20 @@ jobs:
 
 notify: …                   # 见「通知」一章
 ```
+
+## Agix 的设置
+
+模型、provider、权限、沙箱这些是 Agix 的 `settings.json`：全局 `~/.codix/settings.json`，项目 `<项目>/.codix/settings.json`
+（个人的放 `settings.local.json`）。键与含义见 [Agix 设置](../../agix/docs/settings.md)，这里不重复。
+
+- **0.4 不再读旧键**（`model.model_name`、`execution.*`、`permission_rules` 之类）：读出来是空，不报错。升级后跑一遍 `/doctor`，
+  Agix 的 `settings.tiers` 一项会列出 `旧 → 新`，被丢掉的值也在里面。迁移说明见 [升级到 0.4](../../agix/docs/upgrading-0.4.md)。
+- **模型**：`providers` 是列表，缺省模型取 `model.order` 第一个 provider 的 balanced 档（没写取 strong 档）。没定义 `providers` 时用
+  Agix 自带的 `anthropic`，它的模型不在设置里，用环境变量 `CODIX_MODEL` 指定（不设就是 Agix 的缺省）。要按项目或档位选模型，就定义 `providers`。
+- **Codix 在 cli 层写的**（优先级低于你的设置，只补缺省）：`permissions.allow` 放行只读工具与流程自己的工具，免得每次都问；
+  `permissions.client_may_loosen: true`，让流程的站能用 `acceptEdits`（0.4 的会话选项只能收紧，不开这个就被夹回，无人看着的运行会停在权限提问上）；
+  `app.history: "project"`，受信项目的会话放进项目里。这个开关是 Agix 说的"安全缺省"而不是安全边界，部署方的 managed 设置仍然压过它，
+  能把它关掉；关了 `/doctor` 的 `codix.session_loosen` 会报 degraded。
 
 ## keybindings.json
 

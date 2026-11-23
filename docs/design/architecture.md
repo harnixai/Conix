@@ -292,6 +292,7 @@ loop {
             ├── jobs-state.json   作业在这台机器上的启用状态与调度基线
             ├── jobs/<作业 id>.jsonl  触发记录，一次一行
             ├── flow-runs/        流程运行的记录（harnix-flow 的 FileStore）
+            ├── run-policies.json 流程作业起的运行：按运行记下发起它的作业与开站会话用的网络（§8.5），续跑时沿用
             ├── runs/<运行>/      运行的过程目录（`ProjectLayout::with_runs_dir`，Harnix#69）：交付、门禁日志
             ├── workspaces/<运行>/ 没有项目的运行的工作目录（流程库要它；Codix 的运行都有项目）
             └── quarantine/<时刻>/ 认不出来的状态挪到这里，不读（§8.9）
@@ -350,7 +351,7 @@ codix（一个二进制）
 ### 8.4 Agix 接入：`Hub`
 
 - 实例进程里起一个 `Embedded`：`data_root = ~/.codix`、`cwd = 项目`、`project_dir = .codix`、
-  `product = Codix`、`history = Project`、`groups_file = instances/<名>/groups.json`，**不传 `instance`**（Agix 的实例锁
+  `product = Codix`、`groups_file = instances/<名>/groups.json`，**不传 `instance`**（Agix 的实例锁
   按"数据根 + 场景"算，一个场景只能锁一份；实例锁由 Codix 自己管）。经 `serve_stream` + `duplex`
   连上，`daemon.subscribeEvents` 订阅会话的生灭与轮的起止。
 - **实例是这个引擎唯一的客户端。** 它订阅内存里的每一个会话（`daemon.event` 的 `session_created` /
@@ -365,7 +366,10 @@ codix（一个二进制）
 - **会话归属**记在 `state/codix/sessions.json`：Codix 建的会话记下 `origin`（用户、作业的哪次触发、分叉）
   与建会话的时刻（会话列表的顺序、`#n` 按它）；没记过的按 `User`，时刻取引擎报的。子 Agent 的上级来自任务的
   `agent_session_id`。
-- 建会话一律带 `prompt_types: ["permission", "question"]` 与只读宿主工具的 allow 规则，项目根就是实例的项目。
+- 建会话一律带 `prompt_types: ["permission", "question"]`，项目根就是实例的项目。会话的其余选项（模式、ask / deny 规则、
+  `model.effort`、`prompt.append`、`sandbox.network.mode`、`session.token_budget`）进 `options.settings`（`hub::session_opts`），空的不写；
+  0.4 不再收 `options` 顶层的 `permission_mode` / `permission_rules` / `effort` / `prompt`（传了就 `INVALID_PARAMS`）。
+  `session.create` 回的 `clamped_options` 记日志。
 
 帧、方法与领域事件、命令的对应：
 
@@ -385,11 +389,26 @@ codix（一个二进制）
 | `Submit{mode}` | `session.run_turn{on_busy}`：`run_turn` 是长调用，`Hub` 另起任务等它，命令立刻回 `Submitted` |
 | `Watch` | `session.subscribe{resume: true}` → `session.history`（最后 500 条）→ `session.goal` / `session.tasks`，拼成 `Watched` |
 | `Interrupt` / `Answer` / `SetModel` / `Rename` / `Close` | `session.interrupt` / `session.respondToPrompt` / `session.setModel` / `session.rename` / `session.close` |
-| `SetPermissionMode` / `permission_mode_changed` 帧 | `session.setPermissionMode`（回实际生效的模式与是否被夹）；帧（宿主切的、模型 `EnterPlanMode` / `ExitPlanMode` 切的）改会话摘要的 `permission`。订阅之后用 `session.resume` 读一次 `permission.mode`：重建、恢复、设置夹紧都不推帧。`CreateSession` 带的模式进 `options.permission_mode` |
+| `SetPermissionMode` / `permission_mode_changed` 帧 | `session.setPermissionMode`（回实际生效的模式与是否被夹）；帧（宿主切的、模型 `EnterPlanMode` / `ExitPlanMode` 切的）改会话摘要的 `permission`。订阅之后用 `session.resume` 读一次 `permission.mode`：重建、恢复、设置夹紧都不推帧。`CreateSession` 带的模式进 `options.settings.permissions.mode`（0.4 删了 `options.permission_mode`） |
 | `SetGoal` / `UpdateGoal` | `session.setGoal` / `session.updateGoal` |
 | `SideQuestion` | `session.fork`，再在分叉出的会话上 `run_turn`（归属记为 `Fork`） |
 | `StopTask` / `MessageTask` / `TaskOutput` | `session.stopTask` / `session.messageTask` / `session.taskOutput`（任务所属的会话由 `Hub` 记着） |
 | `Commands` | `commands.list` |
+
+**接入时的几件事**：
+
+- **协议版本**：`Hub::start` 先 `daemon.ping`，`protocol_version` 不是 5、或缺 `session_settings` / `config_explain` 能力位，
+  就拒起实例并写明要 Agix 0.4。不按"大于等于"放过：0.4 对旧写法一律拒，版本不同就是不同的协议，这里不说清，
+  后面每个调用都会以 `INVALID_PARAMS` 之类的面目失败。
+- **cli 层**（`EmbedConfig.settings`，由 `host::hub::cli_settings` 给）：`permissions.allow` = 只读工具 + 流程自己的工具
+  （`flow_state` / `flow_submit` / `flow_propose`），`permissions.client_may_loosen: true`，另加 `app.history: "project"`
+  （0.4 删了 `EmbedConfig.history`）。为什么要在这一层写：0.4 的会话层（`options.settings`）只能收紧，比设置宽的值被夹回，
+  会话选项里的 allow 规则被扣下，除非 `client_may_loosen`；流程站的 `acceptEdits` 比项目缺省宽，没有它就被夹回、无人看着的运行会停在权限提问上。
+  协议把 `client_may_loosen` 叫安全缺省而不是安全边界；部署方的 managed 层仍压过它，能把它关掉，所以 `/doctor` 的
+  `codix.session_loosen` 按 `config.explain` 报实际值，关了报 degraded。
+- **缺省模型**：`providers` 是列表（0.4 没有 `model.model_name`）；缺省取 `model.order` 第一个 provider 的 balanced 档，
+  没写取 strong 档。没定义 `providers` 时引擎用自带的 anthropic，其模型是进程参数、设置里读不到，由 `codix host` 读
+  `CODIX_MODEL` 交给引擎（`EngineConfig.model`）。
 
 ### 8.5 作业
 
@@ -410,12 +429,12 @@ codix（一个二进制）
   列表按创建时刻排（`port::order::jobs`），`#n` 照旧。
 
 **护栏**（无人值守 = cron × 模型 × 没人看着）。Agix 已经做的不重复：`attended:false` 的会话权限询问直接拒绝、
-设置里一轮的调用次数与 token 上限、询问超时按拒绝。Codix 加三层上限，下层只能更紧：
+设置里一轮的调用次数与 token 上限、询问超时按拒绝。Codix 加三层上限，下层只能更紧，外加一项网络：
 
 ```yaml
 # ~/.codix/codix.yaml
 jobs:
-  defaults: {timeout: 30m, max_tokens: 2M, overlap: skip, disable_after: 3}   # 作业没写时用
+  defaults: {timeout: 30m, max_tokens: 2M, overlap: skip, disable_after: 3, network: deny_all}   # 作业没写时用
   limits:   {timeout: 4h,  max_tokens: 20M}                                   # 天花板
   daily_tokens: 50M      # 这个实例所有无人值守的工作一天合计；0 = 不限
   max_concurrent: 2      # 同时在跑的触发
@@ -432,7 +451,23 @@ jobs:
 | 每日额度 | `state/codix/usage/<YYYYMMDD>.json` 按作业累计 | 超了在跑的停下、当天剩下的 `Skipped{daily_budget}` |
 | 并发 | 在跑的触发数到 `max_concurrent` 就排队，排过一个周期 `Skipped` | |
 
-手动从流程页启动的运行不受作业护栏管（有人在）。Agix 若提供按会话收紧执行上限（[Codix 10]），超时之外的两项改由引擎执行。
+手动从流程页启动的运行不受作业护栏管（有人在）。
+
+- **用量口径**（`port::Usage::billed`）：未命中缓存的输入 + 缓存写入 + 输出，缓存命中不计，与 Agix 的预算、配额一致。
+  单次上限、每日额度、作业页与 `job_history` 都用它；会话页、流程页的 token 仍是全部。作业页的旧记录不改写，口径与新记录不同。
+  计数平时按 `step_end` 与后台任务的累计估，一轮结束用 `turn_complete.usage`（0.4 起含子 Agent、团队成员与旁路调用）校准，只增不减。
+- **单次 token 交给引擎**：简单作业的 `max_tokens` 下发为会话的 `session.token_budget`，引擎在每次调用前按剩余拦，
+  不会像事后数帧那样冲过头；一轮以 `budget_exceeded` 结束就记 `Stopped{budget}`，与 Codix 自己数到超额一样。
+  一次触发就是一个新会话，会话预算即这次触发的预算。流程作业仍按运行累计。
+- **网络 `network`**：`deny_all`（缺省）| `allowlist` | `inherit`，可写在 `jobs.defaults` 与作业定义里，没有天花板
+  （放开网络是作业作者与这台机器的用户各自的决定）。缺省是 `deny_all` 的原因：Agix 0.4 的
+  `sandbox.unattended_needs_network_policy` 缺省为真，无人值守的会话里没有 allow 规则的命令要沙箱兜得住**且**网络受限才执行，
+  而会话的网络缺省不受限，升级后作业里的命令大多会被拒。简单作业写进会话的 `sandbox.network.mode`；`inherit` 下 Agix 那条开关照样守着，
+  `job_validate` 给一条 notes 说清命令会被拒、怎么写 allow 规则；`/doctor` 的 `codix.jobs_network` 对缺省 `inherit` 报 degraded。
+- **禁 `CronCreate`**：作业会话与作业起的运行的站会话 deny 它；模型在无人值守时自建定时任务，就在作业与护栏之外了。
+- **流程作业的网络按运行记一次**（`state/codix/run-policies.json`），在第一次开站会话时按作业当时的护栏取并快照：引擎按
+  `session_id` 认会话，同一个键再开而 options 不同就拒绝，现查作业的话，改过护栏后续跑的站就开不出来。
+  取在第一次开站而不是启动运行时，免得与派工器开第一个会话抢先后。
 
 **宿主工具**（`hub/tools.rs`）：`session_list`、`session_show`、`session_rename`、`session_close`、`session_delete`、
 `job_list`、`job_show`、`job_save`、`job_validate`、`job_history`、`job_stop`、`job_delete`、`job_enable`、`job_run`
