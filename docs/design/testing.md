@@ -223,3 +223,128 @@ catch_up`（再按名字过滤）。凭据取仓库根的 `.env`（worktree 里�
 **加用例**：功能归哪个文件就加在哪个文件，或新开一个 `live_<功能>.rs`（`mod live;` 引入 harness，
 `scripts/live.sh` 自动带上）。等事件，不比时长；跑不稳先找原因，不放宽断言。为可测性给实例加的
 开关只走环境变量，名字以 `CODIX_TEST_` 开头（现有 `CODIX_TEST_HEARTBEAT_TIMEOUT_MS`），不进 `codix.yaml`。
+
+### 需求与用例的对照
+
+每条需求（`docs/reqs/codix-requirements.md`）一行，再加需求文档之后做的几项。**层**：LIVE（`crates/codix/tests/live_*.rs`，
+真实实例 + 真实模型）、mock 场景（`crates/app/tests/*.rs`，TUI 接 mock 后端）、真实引擎离线（`crates/engine/tests/`、
+`crates/codix/tests/e2e.rs`、`crates/host/tests/`）、单测。纯界面的需求（排版、键位、鼠标）只在 mock 场景里验；
+行为取决于真实的实例、引擎、模型、进程生命周期、磁盘上的文件或 socket 的，必须有 LIVE 行，没有的标 `缺`
+（用例写完就把 `缺` 换成用例名）。`app/` 前缀的文件在 `crates/app/tests/`；`live_*` 在 `crates/codix/tests/`。
+
+| id | 一句话 | 覆盖它的用例 | 层 |
+|---|---|---|---|
+| I-01 | 无参数 `codix`：有实例弹选择列表，没有就新建 | app/instances::m21_picker_lists_every_state、m21_attach_occupied_from_command_line_falls_back_to_picker（选择逻辑在终端里，进程级要 tty） | mock 场景 |
+| I-02 | `codix new` 新建并接入 | live_instance::a_new_instance_is_listed_with_its_discovery_file_meta_and_private_socket；codix/e2e::create_attach_talk_kick_and_stop_a_real_instance | LIVE |
+| I-03 | `codix list [--all]` 的纯文本输出 | app/instances::m21_picker_lists_every_state（只是选择列表）；`list` 子命令的文字：缺 | 缺 |
+| I-04 | `attach` / `start` / `stop` | live_attach::{hello_reports…, detaching_releases…}；live_instance::a_stopped_instance_is_started_again_from_its_meta；live_attach::the_stop_instance_command_shuts_the_instance_down；`codix stop` 子命令：缺 | LIVE（`codix stop` 缺） |
+| I-05 | 退出是脱离，`/stop` 才停实例（二次确认） | live_tui::the_keys_walk_the_workbench_of_a_real_instance（^X 后台运行后实例还在）；app/workbench::ctrl_x_exit_dialog_background_stop_or_back、ctrl_c_twice_detaches_and_mouse_command_releases_the_mouse；app/instances::m21_stop_needs_confirmation | LIVE + mock 场景 |
+| I-06 | 单一接入、被占用显示占用者、强制接入、被踢者看到谁踢的 | live_attach::a_second_client_is_refused_until_it_forces_and_then_the_first_is_kicked；host/server::second_client_is_told_who_holds_it、force_kicks_the_old_client；app/instances::m21_occupied_needs_confirmed_force、m21_kicked_goes_to_detached_then_back_to_picker | LIVE |
+| I-07 | 只走 unix socket，0600/0700，校验对端 uid，不监听网络 | live_instance::a_new_instance_is_listed_with_its_discovery_file_meta_and_private_socket（权限）；对端 uid 校验在 `host/src/server.rs`，换一个 uid 接入造不出来，只能靠代码审阅 | LIVE（uid 校验无用例） |
+| I-08 | 实例意外退出后 list 识别残留并清理 | live_instance::a_killed_instance_is_listed_as_stale_cleaned_and_can_be_started、a_crashed_instance_is_restarted_by_its_supervisor | LIVE |
+| I-09 | 断线重连、补齐、被占用就不再重试 | live_attach::a_silent_client_is_dropped_after_the_heartbeat_timeout_and_reconnects；app/crosscut::m15_reconnect_shows_state_and_refreshes；live_tui::the_keys_walk_the_workbench_of_a_real_instance（再接回来） | LIVE |
+| I-10 | 空闲脱离，时长可配、0 不超时 | live_attach::an_idle_client_is_detached_and_told_so；host/server::idle_fallback_detaches；app/instances::m21_idle_warns_then_detaches_then_any_key_reattaches | LIVE |
+| I-11 | 心跳保活，几次没收到就断开 | live_attach::a_silent_client_is_dropped_after_the_heartbeat_timeout_and_reconnects；host/server::silent_client_is_dropped_after_heartbeat_timeout；app/instances::m21_heartbeat_every_ten_seconds | LIVE |
+| L-01 | 左对话区、右三标签 | app/workbench::m17_wide_shows_both_panes；live_tui::the_keys_walk_the_workbench_of_a_real_instance | mock 场景 + LIVE |
+| L-02 | 宽屏并排、窄屏单栏切换 | app/workbench::m17_wide_shows_both_panes、m17_single_pane_switches_back_and_forth；app/keys::ctrl_g_switches_the_pane_when_only_one_fits | mock 场景 |
+| L-03 | 右栏可收起 | app/workbench::m17_collapse_and_ratio | mock 场景 |
+| L-04 | 标签头上等你处理的数量 | app/crosscut::tabs_with_waiting_items_get_a_mark_not_the_selected_color；等待数来自实例：live_turns::a_permission_prompt_waits_for_the_answer（`waiting == 1`） | mock 场景 + LIVE |
+| L-05 | 一个键跳到下一处等你处理 | app/crosscut::m14_ctrl_r_walks_every_waiting_place_across_tabs；live_tui::ctrl_r_finds_the_permission_prompt_and_the_answer_reaches_the_instance | mock 场景 + LIVE |
+| L-06 | 启动时请求终端尺寸 | 终端行为，人工（manual-smoke-checklist） | 无（L5） |
+| L-07 | 底栏保底几个键 | app/keys::the_basics_are_always_at_the_right_of_the_footer；app/workbench::m17_too_small_still_has_footer；live_tui（底栏那几项） | mock 场景 + LIVE |
+| L-08 | 退出要问一句 | app/workbench::ctrl_x_exit_dialog_background_stop_or_back；live_tui::the_keys_walk_the_workbench_of_a_real_instance | mock 场景 + LIVE |
+| L-09 | 配色可配；`codix.yaml` 不存在时生成带注释的缺省配置 | 配色：app 快照；生成文件：缺 | 缺 |
+| L-10 | 滚动统一 | app/crosscut::scroll_keys_act_on_the_focused_area、m19_long_lists_scroll_and_filter；app/sessions::a_long_panel_scrolls_under_the_wheel_and_never_takes_the_focus | mock 场景 |
+| L-11 | 多语言：界面、命令行帮助、配置模板 | app/i18n_en::{cli_help_resources_are_english, tui_footer_and_header_are_english}、app/i18n_guard::no_hardcoded_chinese_in_ui_code；codix/cli::cli_help_is_english；`codix list` 的行与配置模板按语言：缺 | 缺 |
+| L-12 | 命令键只用 Ctrl+字母 | app/keys::{the_rare_ones_are_slash_commands, the_terminals_own_editing_keys_still_work}（键位守卫） | mock 场景 |
+| M-01 | 点击切换焦点 | app/workbench::side_selection_by_keys_click_and_wheel；app/guards::mouse_only_hit_tests_and_drags | mock 场景 |
+| M-02 | 点击标签、列表项、展开 | app/crosscut::m22_mouse_on_picker_exit_dialog_tabs_and_ask；app/workbench::side_selection_by_keys_click_and_wheel | mock 场景 |
+| M-03 | 滚轮滚鼠标所在区域 | app/sessions::a_long_panel_scrolls_under_the_wheel_and_never_takes_the_focus；app/workbench::side_selection_by_keys_click_and_wheel | mock 场景 |
+| M-04 | 点击工具块头展开 | app/chat::m03_select_block_and_toggle_with_enter、m03_tools_render_like_claude_code_and_ctrl_o_expands | mock 场景 |
+| M-05 | 提问、确认、表单可点 | app/crosscut::mouse_click_ask_option_answers、m22_mouse_on_picker_exit_dialog_tabs_and_ask | mock 场景 |
+| M-06 | 拖动分隔线 | app/workbench::m17_drag_divider；app/guards::mouse_only_hit_tests_and_drags | mock 场景 |
+| M-07 | 拖选转录复制（OSC 52） | 拖选未做（P1），`y` 复制：app/chat::y_in_the_transcript_copies_the_last_reply | mock 场景 |
+| M-08 | `/mouse` 交还鼠标 | app/workbench::ctrl_c_twice_detaches_and_mouse_command_releases_the_mouse | mock 场景 |
+| C-01 | 流式正文与思考 | live_turns::a_turn_streams_text_and_ends_with_usage；app/chat::m01_streams_with_thinking_status_and_markdown | LIVE + mock 场景 |
+| C-02 | 工具块、折叠、改文件显示 diff | 工具块：live_turns::a_permission_prompt_waits_for_the_answer；app/chat::m03_*；真实引擎给的 `file_changes` 与 diff：缺 | 缺 |
+| C-03 | 步骤重发丢掉这一步的文字 | app/chat::m06_step_restart_discards_partial_text；host/hub::a_mid_turn_snapshot_adds_only_the_unpersisted_step；真实模型造不出确定的步骤重发：缺（不可确定地触发） | 缺 |
+| C-04 | 权限审批：允许一次、本会话总是、拒绝 | 允许一次：live_turns::a_permission_prompt_waits_for_the_answer；拒绝与「本会话总是」：缺；app/chat::m04_permission_question_and_withdrawn | 缺 |
+| C-05 | 模型提问作答；引擎撤回时对话框消失 | 作答：live_turns::a_model_question_is_answered_with_a_choice；撤回（超时）：缺；app/chat::m04_permission_question_and_withdrawn | 缺 |
+| C-06 | 中断这一轮 | live_turns::interrupt_ends_the_turn_as_cancelled；app/chat::m05_esc_interrupts_a_running_turn | LIVE |
+| C-07 | 运行中插话；退回的放回输入框 | live_turns::a_turn_while_busy_is_returned_and_a_steer_is_delivered、a_queued_message_runs_as_the_next_turn；app/chat::m07_steer_delivered_and_returned | LIVE |
+| C-08 | 输入框编辑 | app/chat::m08_composer_picker_modes_and_keys、m08_ctrl_c_and_ctrl_d_like_claude_code；app/keys::the_terminals_own_editing_keys_still_work | mock 场景 |
+| C-09 | slash 补全：本地加引擎命令表 | live_sessions::set_model_is_recorded_and_the_command_table_is_listed；app/chat::m08_composer_picker_modes_and_keys | LIVE + mock 场景 |
+| C-10 | 状态行：耗时、token、压缩中 | token：live_turns::a_turn_streams_text_and_ends_with_usage；压缩（`Compacting` / `Compacted` 从真实引擎来）：缺 | 缺 |
+| C-11 | 转录滚动与回到底部 | app/crosscut::scroll_keys_act_on_the_focused_area；app/chat::m16_storm_relayouts_one_block_per_delta | mock 场景 |
+| C-12 | 归属：来源与状态 | live_sessions::the_first_line_names_a_session_and_renames_and_closes_survive_a_restart（User 与实例名）；live_turns::a_side_question_forks_a_session_and_reports_back（Fork）、a_sub_agent_shows_up_as_a_task_with_its_own_session（SubAgent）；live_jobs::run_now_fires_a_job_session_and_records_the_outcome（Job）；live_flows::a_run_goes_from_start_to_finish（FlowStation）；app/sessions::m25_ownership_line_for_every_origin | LIVE |
+| C-13 | `/model` 切换，下一轮生效 | live_sessions::set_model_is_recorded_and_the_command_table_is_listed；可选模型列表 `ListModels`：缺；app/chat::slash_model_opens_a_picker_and_switches | 缺 |
+| C-14 | 侧问 `/btw` | live_turns::a_side_question_forks_a_session_and_reports_back | LIVE |
+| C-15 | 通知显示在底栏并消失 | live_turns::a_side_question_forks_a_session_and_reports_back（`Notice`）；live_tui::the_first_line_in_the_draft_makes_a_session_and_ctrl_o_reads_it（notice） | LIVE |
+| C-16 | 子 Agent 上下文里输入送达；只读时禁用 | live_turns::a_sub_agent_shows_up_as_a_task_with_its_own_session；app/sessions::drill_into_sub_agent_message_it_and_come_back | LIVE + mock 场景 |
+| C-17 | 对话区照 Claude Code | app/chat::demo_history_renders_every_block_kind 与快照 | mock 场景 |
+| C-18 | 开场欢迎块 | app 快照；live_tui::the_keys_walk_the_workbench_of_a_real_instance | mock 场景 |
+| C-19 | ^O、^T、`?` | app/keys::ctrl_o_reads_the_transcript_and_any_way_out_brings_brief_back、ctrl_t_toggles_the_panel_and_hands_the_keyboard_to_the_composer；live_tui（^T、^O） | mock 场景 + LIVE |
+| C-20 | Shift+Tab 权限模式，会话的、跨重启 | live_sessions::the_permission_mode_is_the_sessions_and_takes_effect_at_once；app/permission_mode::shift_tab_sets_the_open_sessions_mode_and_the_display_follows_the_session、a_drafts_mode_goes_with_the_session_it_creates | LIVE |
+| C-21 | `@` 补全、`!` 命令、搜历史、双击 Esc 回退 | 回退：live_sessions::checkpoints_list_turns_and_rewind_removes_the_later_ones；app/chat::double_esc_rewinds_to_before_a_turn_and_puts_it_back；`@` 的文件列表 `ProjectFiles`：缺；app/chat::at_completes_project_files | 缺 |
+| S-01 | 上半会话列表 | live_sessions::only_this_projects_sessions_are_listed；app/sessions::upper_lists_main_agents_with_origin_and_expands_goal_and_todo | LIVE |
+| S-02 | goal 与 todo | live_turns::goal_changes_are_pushed_and_in_the_snapshot；live_sessions::a_watch_snapshot_rebuilds_history_and_todos | LIVE |
+| S-03 | goal 的设定、暂停、恢复、修改、清除 | live_turns::goal_changes_are_pushed_and_in_the_snapshot；app/sessions::goal_pause_and_clear | LIVE |
+| S-04 | 下半拆分树 | live_turns::a_sub_agent_shows_up_as_a_task_with_its_own_session、a_background_task_streams_output_and_can_be_stopped；app/sessions::lower_tree_three_levels_and_finished_group | LIVE |
+| S-05 | 进子 Agent 侧链；看任务输出 | live_turns::a_sub_agent_shows_up_as_a_task_with_its_own_session、a_background_task_streams_output_and_can_be_stopped；app/sessions::task_output_is_read_only_and_follows | LIVE |
+| S-06 | 任务停止、发消息 | live_turns::a_background_task_streams_output_and_can_be_stopped、a_sub_agent_shows_up_as_a_task_with_its_own_session | LIVE |
+| S-07 | 新建会话：项目、场景、模型 | 缺省的新建：每个 LIVE 的 `new_session`；带模型 / 场景 / 权限的 `CreateSession`：缺（权限：live_sessions::the_permission_mode_is_the_sessions_and_takes_effect_at_once） | 缺 |
+| S-08 | 恢复历史、重命名、关闭；已关闭的列出、查看、重开、删除；被别的实例占着时提示 | 历史与改名关闭：live_sessions::a_watch_snapshot_rebuilds_history_and_todos、the_first_line_names_a_session_and_renames_and_closes_survive_a_restart；已关闭的列出、重开、删除：缺（host/hub::closed_sessions_are_listed_viewed_reopened_and_deleted 是离线的）；`held_by`：缺（要两个实例争一个会话） | 缺 |
+| S-09 | 结束的子 Agent 与任务缺省收起 | app/sessions::lower_tree_three_levels_and_finished_group | mock 场景 |
+| S-10 | 选中即切换 | app/crosscut::selection_follows_in_sessions_tab_without_enter；app/side_follow::*；live_tui::the_first_line_in_the_draft_makes_a_session_and_ctrl_o_reads_it | mock 场景 + LIVE |
+| S-11 | 顶部面板 Goal & Todo | app/sessions::a_long_panel_scrolls_under_the_wheel_and_never_takes_the_focus、m10_goal_rounds_and_blocked | mock 场景 |
+| S-12 | 任务图标 | app/sessions::lower_tree_three_levels_and_finished_group；任务种类来自引擎：live_turns::a_background_task_streams_output_and_can_be_stopped | mock 场景 + LIVE |
+| S-13 | 会话列表只列人发起的；第一行新建；启动即草稿 | live_sessions::only_this_projects_sessions_are_listed、live_turns::a_sub_agent_shows_up_as_a_task_with_its_own_session（子 Agent 不进列表）；live_flows::a_run_goes_from_start_to_finish（流程会话不进列表）；app/side_follow::the_workbench_starts_on_a_draft；app/sessions::new_session_row_opens_a_draft_and_the_first_words_create_it | LIVE + mock 场景 |
+| S-14 | todo 带编号，完成的在下，面板 10 行 | app/sessions::todos_are_numbered_open_first_done_last | mock 场景 |
+| S-15 | `#n` 与 ID | app/side_follow::numbers_follow_the_canonical_order_and_ignore_the_filter；live_tools::a_user_session_manages_jobs_and_names_itself_with_host_tools（`#n` 与 ID） | mock 场景 + LIVE |
+| S-16 | 每个会话都有会话、流程、作业的工具；作用域与权限 | live_tools::{a_user_session_manages_jobs_and_names_itself_with_host_tools, a_job_session_cannot_touch_another_job}；live_flows::a_user_session_validates_and_creates_a_flow_once_the_project_is_trusted、a_user_session_creates_and_runs_a_flow_job_with_the_job_tools | LIVE |
+| F-01 | 列出流程定义（名字、来源、运行数） | live_flows::the_builtin_example_flow_is_offered；app/flows_jobs::selecting_a_flow_keeps_the_chat_and_shows_its_design_below | LIVE |
+| F-02 | 展开流程看运行 | live_flows::a_run_goes_from_start_to_finish；app/flows_jobs::ended_runs_sit_under_ended_and_show_where_they_came_from | LIVE |
+| F-03 | 运行的各站与状态 | live_flows::a_run_goes_from_start_to_finish、run_ops_release_pause_resume_rework_force_and_confirm；app/flows_jobs::m11_run_progresses_live | LIVE |
+| F-04 | 选中运行切到主会话；站里的会话可进 | live_flows::a_run_goes_from_start_to_finish（主会话归属）；app/flows_jobs::selecting_a_run_follows_its_main_agent_and_shows_stations、run_stations_are_flat_colored_and_switch_to_their_context | LIVE |
+| F-05 | 运行的操作：确认、放行、强制放行、返工、重试、暂停、恢复、取消 | live_flows::run_ops_release_pause_resume_rework_force_and_confirm、a_flow_with_runs_not_finished_cannot_be_changed_until_they_are_cancelled；app/flows_jobs::station_ops_and_run_ops | LIVE |
+| F-06 | 启动一次运行（用户会话里说） | live_flows::a_run_goes_from_start_to_finish；live_flows::a_user_session_creates_and_runs_a_flow_job_with_the_job_tools | LIVE |
+| F-07 | 流程设计图；会话里设计、校验、保存；有运行时不许改 | live_flows::a_user_session_validates_and_creates_a_flow_once_the_project_is_trusted、a_flow_with_runs_not_finished_cannot_be_changed_until_they_are_cancelled；app/flows_jobs::m12_change_the_flow_by_talking_and_the_design_updates | LIVE |
+| F-08 | 看 YAML 与每站配置 | live_flows::the_builtin_example_flow_is_offered（`yaml`、站的 `needs`）；app/flows_jobs::a_station_of_a_definition_opens_its_config_in_an_overlay | LIVE + mock 场景 |
+| F-09a | 全局流程与项目流程区分（`◎`）；项目里的转全局 | 来源标记：app/flows_jobs::global_flows_are_marked_and_flow_jobs_jump_to_their_flow；`~/.codix/flows/` 里的流程被实例读到并标为 Global、项目同名的为 Override：缺 | 缺 |
+| F-09b | 流程格式与 Harnix 兼容 | live_flows::our_session_host_passes_the_conformance_suite | LIVE |
+| J-01 | 列作业：触发规则、类型、启用、下次、上次结果 | live_jobs::jobs_are_saved_listed_toggled_and_deleted；app/flows_jobs::jobs_list_details_history_and_follow | LIVE |
+| J-02 | 触发历史，跳到那一次的会话 / 运行 | live_jobs::run_now_fires_a_job_session_and_records_the_outcome；app/flows_jobs::jobs_list_details_history_and_follow | LIVE |
+| J-03 | 作业定义、新建修改删除在会话里说 | live_tools::a_user_session_manages_jobs_and_names_itself_with_host_tools；live_flows::a_user_session_creates_and_runs_a_flow_job_with_the_job_tools；app/side_follow::n_e_d_put_a_lead_in_into_the_user_session | LIVE |
+| J-04 | 启用 / 停用、立即运行 | live_jobs::jobs_are_saved_listed_toggled_and_deleted、run_now_fires_a_job_session_and_records_the_outcome；live_flows::a_flow_job_starts_a_run_when_it_fires | LIVE |
+| J-05a | 右上一行一个作业；右下定义、统计、触发记录 | live_jobs::jobs_are_saved_listed_toggled_and_deleted、run_now_fires_a_job_session_and_records_the_outcome（触发记录落盘）；app/flows_jobs::jobs_list_details_history_and_follow | LIVE |
+| J-05b | 作业属于实例；错过的触发按配置补跑或跳过 | live_jobs::a_missed_firing_is_caught_up_once_only_when_asked、a_firing_left_running_by_a_crash_is_marked_interrupted_on_start、a_firing_cut_short_by_a_stop_is_recorded_as_stopped_by_the_instance | LIVE |
+| D-01 | `/doctor`：生效配置与引擎自检 | host/hub::doctor_reports_the_engines_checks_and_the_instances_own（离线、假引擎）；真实实例的 `Doctor`：缺 | 缺 |
+| D-02 | 键位覆盖、冲突启动时报出 | keys 单测（`crates/keys`）；app/keys::*；app/guards | 单测 + mock 场景 |
+| D-03 | 一键帮助 | app/keys::the_help_lists_the_focused_context_with_shared_keys_on_one_line、ctrl_h_erases_while_typing_and_is_help_otherwise | mock 场景 |
+| D-04 | 数据放 `~/.codix`（`CODIX_HOME`），Agix 数据同处 | 每个 LIVE 用例都用 `CODIX_HOME`（harness 的 `Live::new`）；live_sessions::a_trusted_projects_sessions_are_kept_in_the_project；live_config::a_provider_is_added_tested_switched_to_and_rolled_back_from_a_session（`settings.json` 在 `CODIX_HOME`） | LIVE |
+| N-01 | 80×24 可用，120 列并排 | app/workbench::m17_too_small_still_has_footer、m17_wide_shows_both_panes | mock 场景 |
+| N-02 | 流式开销与转录长度无关 | app/chat::m16_storm_relayouts_one_block_per_delta | mock 场景 |
+| N-03 | IO 不阻塞界面 | host/server::slow_command_does_not_block_heartbeats；app/crosscut::m15_reconnect_shows_state_and_refreshes | 真实引擎离线 + mock 场景 |
+| N-04 | CJK、emoji、制表符按显示宽度 | app/chat::m02_hard_text_never_overflows；`crates/tui`、`model` 的排版单测 | mock 场景 + 单测 |
+| N-05 | 阶段 2 不需要网络、key、Agix | app/deps::layers_point_one_way；mock 场景全部离线 | mock 场景 |
+| N-06 | 常见终端都能用 | 人工（manual-smoke-checklist） | 无（L5） |
+| N-07 | 不支持的按键有替代键 | app/keys::the_rare_ones_are_slash_commands、ctrl_g_walks_composer_upper_lower_and_skips_transcript_and_panel | mock 场景 |
+
+需求文档之后做的：
+
+| 项 | 一句话 | 覆盖它的用例 | 层 |
+|---|---|---|---|
+| 插件 | 装、披露、启用、停用、卸载，插件带来的流程能跑 | live_plugins::a_plugin_from_the_package_dirs_is_installed_enabled_and_its_flow_runs；engine/plugins::a_plugin_is_installed_enabled_and_its_flow_runs_on_its_functions；app/plugins::*（`/plugin` 的界面） | LIVE |
+| xforge | 内置的 xforge 流程从 open 到 archive | live_plugins::xforge_quick_goes_from_open_to_archive_with_a_real_model；engine/xforge::xforge_installs_offers_both_flows_and_carries_a_change_from_open_to_archive | LIVE |
+| 会话里配置：provider | 加、测、切、退 provider | live_config::a_provider_is_added_tested_switched_to_and_rolled_back_from_a_session；engine/config::an_unreachable_provider_is_added_tested_and_not_switched_to | LIVE |
+| 会话里配置：`config_show` 与 `codix_config_set` | 看生效配置；改 `codix.yaml`（jobs / notify 当场重读） | host 离线测试里没有，LIVE：缺 | 缺 |
+| provider_switched 通知 | 引擎换了 provider，转录里出一条提示 | model/chat（`ProviderSwitched` 的排版）；真实引擎换 provider 的 `Event::ProviderSwitched`：缺 | 缺 |
+| 作业网络 | `jobs.defaults.network` 与作业的 `network` 下发到会话沙箱 | live_jobs::a_job_with_no_network_still_runs_local_commands | LIVE |
+| 作业预算 | `max_tokens` 下发为会话预算，那次记成被预算停下 | live_jobs::a_job_over_its_token_budget_is_stopped_by_the_engine | LIVE |
+| CronCreate | 作业会话里模型不能自建定时任务 | live_jobs::a_job_session_cannot_create_scheduled_tasks | LIVE |
+| `budget_exceeded` | 引擎因预算收尾，端口上是 `StopReason::Budget` | live_jobs::a_job_over_its_token_budget_is_stopped_by_the_engine（作业侧）；普通会话里的 `TurnEnded { stop: Budget }`：缺 | 缺 |
+| `max_turns` | 一轮里调用次数到顶，端口上是 `StopReason::MaxTurns` | host/src/hub/state.rs 的 `stop_reason_of` 单测；app 的 model/chat 单测；真实引擎：缺 | 缺 |
+| `/doctor`：`codix.session_loosen` | 部署方关了放宽时报降级 | host/hub::doctor_reports_the_engines_checks_and_the_instances_own；live_sessions::the_permission_mode_is_the_sessions_and_takes_effect_at_once（放宽生效）；engine/settings::the_cli_layer_lets_a_session_loosen_its_mode；真实实例的 `Doctor` 里这一项：缺 | 缺 |
+| `/doctor`：`codix.jobs_network` | `inherit` 时报降级 | host/hub::doctor_reports_the_engines_checks_and_the_instances_own；真实实例：缺 | 缺 |
+| 会话累计用量 | 重启后会话摘要的 usage 来自引擎的 `session.get` 累计 | host/hub::a_watched_sessions_usage_is_what_the_engine_reports；真实实例重启后：缺 | 缺 |
+| 离开期间摘要 | 脱离期间作业失败等，再接入时推一次 `AwaySummary` | host/hub::what_happened_while_detached_is_shown_on_attach；app/flows_jobs::the_away_summary_lists_what_happened_and_enter_goes_there；真实实例：缺 | 缺 |
