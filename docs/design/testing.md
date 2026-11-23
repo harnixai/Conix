@@ -236,8 +236,8 @@ catch_up`（再按名字过滤）。凭据取仓库根的 `.env`（worktree 里�
 |---|---|---|---|
 | I-01 | 无参数 `codix`：有实例弹选择列表，没有就新建 | app/instances::m21_picker_lists_every_state、m21_attach_occupied_from_command_line_falls_back_to_picker（选择逻辑在终端里，进程级要 tty） | mock 场景 |
 | I-02 | `codix new` 新建并接入 | live_instance::a_new_instance_is_listed_with_its_discovery_file_meta_and_private_socket；codix/e2e::create_attach_talk_kick_and_stop_a_real_instance | LIVE |
-| I-03 | `codix list [--all]` 的纯文本输出 | app/instances::m21_picker_lists_every_state（只是选择列表）；`list` 子命令的文字：缺 | 缺 |
-| I-04 | `attach` / `start` / `stop` | live_attach::{hello_reports…, detaching_releases…}；live_instance::a_stopped_instance_is_started_again_from_its_meta；live_attach::the_stop_instance_command_shuts_the_instance_down；`codix stop` 子命令：缺 | LIVE（`codix stop` 缺） |
+| I-03 | `codix list [--all]` 的纯文本输出 | app/instances::m21_picker_lists_every_state（选择列表）；live_cli::list_and_stop_work_from_the_command_line（纯文本一行：名字、pid、项目、接入者；`--all` 列出已停的） | LIVE |
+| I-04 | `attach` / `start` / `stop` | live_attach::{hello_reports…, detaching_releases…}；live_instance::a_stopped_instance_is_started_again_from_its_meta；live_attach::the_stop_instance_command_shuts_the_instance_down；live_cli::list_and_stop_work_from_the_command_line（`codix stop`） | LIVE |
 | I-05 | 退出是脱离，`/stop` 才停实例（二次确认） | live_tui::the_keys_walk_the_workbench_of_a_real_instance（^X 后台运行后实例还在）；app/workbench::ctrl_x_exit_dialog_background_stop_or_back、ctrl_c_twice_detaches_and_mouse_command_releases_the_mouse；app/instances::m21_stop_needs_confirmation | LIVE + mock 场景 |
 | I-06 | 单一接入、被占用显示占用者、强制接入、被踢者看到谁踢的 | live_attach::a_second_client_is_refused_until_it_forces_and_then_the_first_is_kicked；host/server::second_client_is_told_who_holds_it、force_kicks_the_old_client；app/instances::m21_occupied_needs_confirmed_force、m21_kicked_goes_to_detached_then_back_to_picker | LIVE |
 | I-07 | 只走 unix socket，0600/0700，校验对端 uid，不监听网络 | live_instance::a_new_instance_is_listed_with_its_discovery_file_meta_and_private_socket（权限）；对端 uid 校验在 `host/src/server.rs`，换一个 uid 接入造不出来，只能靠代码审阅 | LIVE（uid 校验无用例） |
@@ -253,9 +253,9 @@ catch_up`（再按名字过滤）。凭据取仓库根的 `.env`（worktree 里�
 | L-06 | 启动时请求终端尺寸 | 终端行为，人工（manual-smoke-checklist） | 无（L5） |
 | L-07 | 底栏保底几个键 | app/keys::the_basics_are_always_at_the_right_of_the_footer；app/workbench::m17_too_small_still_has_footer；live_tui（底栏那几项） | mock 场景 + LIVE |
 | L-08 | 退出要问一句 | app/workbench::ctrl_x_exit_dialog_background_stop_or_back；live_tui::the_keys_walk_the_workbench_of_a_real_instance | mock 场景 + LIVE |
-| L-09 | 配色可配；`codix.yaml` 不存在时生成带注释的缺省配置 | 配色：app 快照；生成文件：缺 | 缺 |
+| L-09 | 配色可配；`codix.yaml` 不存在时生成带注释的缺省配置 | 配色：app 快照；生成文件：live_cli::the_first_run_writes_a_commented_default_config_in_the_chosen_language；app/src/config.rs 的单测 | LIVE + mock 场景 |
 | L-10 | 滚动统一 | app/crosscut::scroll_keys_act_on_the_focused_area、m19_long_lists_scroll_and_filter；app/sessions::a_long_panel_scrolls_under_the_wheel_and_never_takes_the_focus | mock 场景 |
-| L-11 | 多语言：界面、命令行帮助、配置模板 | app/i18n_en::{cli_help_resources_are_english, tui_footer_and_header_are_english}、app/i18n_guard::no_hardcoded_chinese_in_ui_code；codix/cli::cli_help_is_english；`codix list` 的行与配置模板按语言：缺 | 缺 |
+| L-11 | 多语言：界面、命令行帮助、配置模板 | app/i18n_en::{cli_help_resources_are_english, tui_footer_and_header_are_english}、app/i18n_guard::no_hardcoded_chinese_in_ui_code；codix/cli::cli_help_is_english；live_cli::list_and_stop_work_from_the_command_line（`list` 的行按语言）、the_first_run_writes_a_commented_default_config_in_the_chosen_language（配置模板按语言） | LIVE + mock 场景 |
 | L-12 | 命令键只用 Ctrl+字母 | app/keys::{the_rare_ones_are_slash_commands, the_terminals_own_editing_keys_still_work}（键位守卫） | mock 场景 |
 | M-01 | 点击切换焦点 | app/workbench::side_selection_by_keys_click_and_wheel；app/guards::mouse_only_hit_tests_and_drags | mock 场景 |
 | M-02 | 点击标签、列表项、展开 | app/crosscut::m22_mouse_on_picker_exit_dialog_tabs_and_ask；app/workbench::side_selection_by_keys_click_and_wheel | mock 场景 |
@@ -277,7 +277,7 @@ catch_up`（再按名字过滤）。凭据取仓库根的 `.env`（worktree 里�
 | C-10 | 状态行：耗时、token、压缩中 | token：live_turns::a_turn_streams_text_and_ends_with_usage；压缩（`Compacting` / `Compacted` 从真实引擎来）：缺 | 缺 |
 | C-11 | 转录滚动与回到底部 | app/crosscut::scroll_keys_act_on_the_focused_area；app/chat::m16_storm_relayouts_one_block_per_delta | mock 场景 |
 | C-12 | 归属：来源与状态 | live_sessions::the_first_line_names_a_session_and_renames_and_closes_survive_a_restart（User 与实例名）；live_turns::a_side_question_forks_a_session_and_reports_back（Fork）、a_sub_agent_shows_up_as_a_task_with_its_own_session（SubAgent）；live_jobs::run_now_fires_a_job_session_and_records_the_outcome（Job）；live_flows::a_run_goes_from_start_to_finish（FlowStation）；app/sessions::m25_ownership_line_for_every_origin | LIVE |
-| C-13 | `/model` 切换，下一轮生效 | live_sessions::set_model_is_recorded_and_the_command_table_is_listed；可选模型列表 `ListModels`：缺；app/chat::slash_model_opens_a_picker_and_switches | 缺 |
+| C-13 | `/model` 切换，下一轮生效 | live_sessions::set_model_is_recorded_and_the_command_table_is_listed；live_diagnostics::models_and_project_files_are_listed_for_the_pickers（`ListModels`；本仓库的第三方端点不给模型列表，只验命令成功与每项的形状）；app/chat::slash_model_opens_a_picker_and_switches | LIVE |
 | C-14 | 侧问 `/btw` | live_turns::a_side_question_forks_a_session_and_reports_back | LIVE |
 | C-15 | 通知显示在底栏并消失 | live_turns::a_side_question_forks_a_session_and_reports_back（`Notice`）；live_tui::the_first_line_in_the_draft_makes_a_session_and_ctrl_o_reads_it（notice） | LIVE |
 | C-16 | 子 Agent 上下文里输入送达；只读时禁用 | live_turns::a_sub_agent_shows_up_as_a_task_with_its_own_session；app/sessions::drill_into_sub_agent_message_it_and_come_back | LIVE + mock 场景 |
@@ -285,7 +285,7 @@ catch_up`（再按名字过滤）。凭据取仓库根的 `.env`（worktree 里�
 | C-18 | 开场欢迎块 | app 快照；live_tui::the_keys_walk_the_workbench_of_a_real_instance | mock 场景 |
 | C-19 | ^O、^T、`?` | app/keys::ctrl_o_reads_the_transcript_and_any_way_out_brings_brief_back、ctrl_t_toggles_the_panel_and_hands_the_keyboard_to_the_composer；live_tui（^T、^O） | mock 场景 + LIVE |
 | C-20 | Shift+Tab 权限模式，会话的、跨重启 | live_sessions::the_permission_mode_is_the_sessions_and_takes_effect_at_once；app/permission_mode::shift_tab_sets_the_open_sessions_mode_and_the_display_follows_the_session、a_drafts_mode_goes_with_the_session_it_creates | LIVE |
-| C-21 | `@` 补全、`!` 命令、搜历史、双击 Esc 回退 | 回退：live_sessions::checkpoints_list_turns_and_rewind_removes_the_later_ones；app/chat::double_esc_rewinds_to_before_a_turn_and_puts_it_back；`@` 的文件列表 `ProjectFiles`：缺；app/chat::at_completes_project_files | 缺 |
+| C-21 | `@` 补全、`!` 命令、搜历史、双击 Esc 回退 | 回退：live_sessions::checkpoints_list_turns_and_rewind_removes_the_later_ones；app/chat::double_esc_rewinds_to_before_a_turn_and_puts_it_back；live_diagnostics::models_and_project_files_are_listed_for_the_pickers（`@` 的文件列表 `ProjectFiles`，含未提交的新文件、不含被忽略的）；app/chat::at_completes_project_files | LIVE |
 | S-01 | 上半会话列表 | live_sessions::only_this_projects_sessions_are_listed；app/sessions::upper_lists_main_agents_with_origin_and_expands_goal_and_todo | LIVE |
 | S-02 | goal 与 todo | live_turns::goal_changes_are_pushed_and_in_the_snapshot；live_sessions::a_watch_snapshot_rebuilds_history_and_todos | LIVE |
 | S-03 | goal 的设定、暂停、恢复、修改、清除 | live_turns::goal_changes_are_pushed_and_in_the_snapshot；app/sessions::goal_pause_and_clear | LIVE |
@@ -318,7 +318,7 @@ catch_up`（再按名字过滤）。凭据取仓库根的 `.env`（worktree 里�
 | J-04 | 启用 / 停用、立即运行 | live_jobs::jobs_are_saved_listed_toggled_and_deleted、run_now_fires_a_job_session_and_records_the_outcome；live_flows::a_flow_job_starts_a_run_when_it_fires | LIVE |
 | J-05a | 右上一行一个作业；右下定义、统计、触发记录 | live_jobs::jobs_are_saved_listed_toggled_and_deleted、run_now_fires_a_job_session_and_records_the_outcome（触发记录落盘）；app/flows_jobs::jobs_list_details_history_and_follow | LIVE |
 | J-05b | 作业属于实例；错过的触发按配置补跑或跳过 | live_jobs::a_missed_firing_is_caught_up_once_only_when_asked、a_firing_left_running_by_a_crash_is_marked_interrupted_on_start、a_firing_cut_short_by_a_stop_is_recorded_as_stopped_by_the_instance | LIVE |
-| D-01 | `/doctor`：生效配置与引擎自检 | host/hub::doctor_reports_the_engines_checks_and_the_instances_own（离线、假引擎）；真实实例的 `Doctor`：缺 | 缺 |
+| D-01 | `/doctor`：生效配置与引擎自检 | host/hub::doctor_reports_the_engines_checks_and_the_instances_own（离线、假引擎）；live_diagnostics::doctor_reports_the_engines_checks_and_the_instances_own（真实实例的每一项）、doctor_flags_an_inherited_job_network_and_an_unreadable_config | LIVE |
 | D-02 | 键位覆盖、冲突启动时报出 | keys 单测（`crates/keys`）；app/keys::*；app/guards | 单测 + mock 场景 |
 | D-03 | 一键帮助 | app/keys::the_help_lists_the_focused_context_with_shared_keys_on_one_line、ctrl_h_erases_while_typing_and_is_help_otherwise | mock 场景 |
 | D-04 | 数据放 `~/.codix`（`CODIX_HOME`），Agix 数据同处 | 每个 LIVE 用例都用 `CODIX_HOME`（harness 的 `Live::new`）；live_sessions::a_trusted_projects_sessions_are_kept_in_the_project；live_config::a_provider_is_added_tested_switched_to_and_rolled_back_from_a_session（`settings.json` 在 `CODIX_HOME`） | LIVE |
@@ -344,7 +344,7 @@ catch_up`（再按名字过滤）。凭据取仓库根的 `.env`（worktree 里�
 | CronCreate | 作业会话里模型不能自建定时任务 | live_jobs::a_job_session_cannot_create_scheduled_tasks | LIVE |
 | `budget_exceeded` | 引擎因预算收尾，端口上是 `StopReason::Budget` | live_jobs::a_job_over_its_token_budget_is_stopped_by_the_engine（作业侧）；普通会话里的 `TurnEnded { stop: Budget }`：缺 | 缺 |
 | `max_turns` | 一轮里调用次数到顶，端口上是 `StopReason::MaxTurns` | host/src/hub/state.rs 的 `stop_reason_of` 单测；app 的 model/chat 单测；真实引擎：缺 | 缺 |
-| `/doctor`：`codix.session_loosen` | 部署方关了放宽时报降级 | host/hub::doctor_reports_the_engines_checks_and_the_instances_own；live_sessions::the_permission_mode_is_the_sessions_and_takes_effect_at_once（放宽生效）；engine/settings::the_cli_layer_lets_a_session_loosen_its_mode；真实实例的 `Doctor` 里这一项：缺 | 缺 |
-| `/doctor`：`codix.jobs_network` | `inherit` 时报降级 | host/hub::doctor_reports_the_engines_checks_and_the_instances_own；真实实例：缺 | 缺 |
+| `/doctor`：`codix.session_loosen` | 部署方关了放宽时报降级 | host/hub::doctor_reports_the_engines_checks_and_the_instances_own；live_sessions::the_permission_mode_is_the_sessions_and_takes_effect_at_once（放宽生效）；engine/settings::the_cli_layer_lets_a_session_loosen_its_mode；live_diagnostics::doctor_reports_the_engines_checks_and_the_instances_own（真实实例里是 ok） | LIVE |
+| `/doctor`：`codix.jobs_network` | `inherit` 时报降级 | host/hub::doctor_reports_the_engines_checks_and_the_instances_own；live_diagnostics::doctor_flags_an_inherited_job_network_and_an_unreadable_config | LIVE |
 | 会话累计用量 | 重启后会话摘要的 usage 来自引擎的 `session.get` 累计 | host/hub::a_watched_sessions_usage_is_what_the_engine_reports；真实实例重启后：缺 | 缺 |
 | 离开期间摘要 | 脱离期间作业失败等，再接入时推一次 `AwaySummary` | host/hub::what_happened_while_detached_is_shown_on_attach；app/flows_jobs::the_away_summary_lists_what_happened_and_enter_goes_there；真实实例：缺 | 缺 |
