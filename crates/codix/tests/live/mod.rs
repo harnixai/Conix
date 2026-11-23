@@ -3,7 +3,7 @@
 //! 事件。只测 Codix 自己做的事（实例、接入、会话代理、作业……），Agix 的特性它自己测。
 //!
 //! 每个用例一个 [`Live`]：独立的 `CODIX_HOME`（放在 /tmp 下的短路径，socket 路径有 104 字节的
-//! 上限）、一个 git 示例项目、写好模型名的 Agix `settings.json`。凭据从仓库根的 `.env` 读，只交给
+//! 上限）、一个 git 示例项目、写好提问超时的 Agix `settings.json`。凭据从仓库根的 `.env` 读，只交给
 //! 实例进程的环境，不进测试进程、不打印。用例结束不论成败都停掉它起的实例。
 
 #![allow(dead_code)]
@@ -119,12 +119,12 @@ impl Live {
             .prefix("cxl")
             .tempdir_in("/tmp")
             .unwrap();
-        // Agix 不读 ANTHROPIC_MODEL：模型名写进它的设置。提问超时放长，等人回答的不会自己撤掉。
+        // 提问超时放长，等人回答的不会自己撤掉。模型不写设置：0.4 里没定义 providers 时，
+        // 自带的 anthropic 用进程参数取模型，由 CODIX_MODEL 交给实例进程（见下面的 env）。
         std::fs::write(
             home.path().join("settings.json"),
             serde_json::to_string_pretty(&serde_json::json!({
-                "model": {"model_name": model()},
-                "execution": {"permission_prompt_timeout_secs": 600},
+                "permissions": {"prompt_timeout_secs": 600},
             }))
             .unwrap(),
         )
@@ -137,6 +137,7 @@ impl Live {
             .iter()
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
+        env.push(("CODIX_MODEL".to_string(), model()));
         env.extend(opts.env.iter().cloned());
         let instances =
             Arc::new(SocketInstances::new(Layout::new(home.path()), codix()).with_env(env.clone()));
