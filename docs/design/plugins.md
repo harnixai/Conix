@@ -125,6 +125,7 @@ TUI 照常收到事件。
 | `codix.flow.runs({ flow?, active? })` | 运行列表 |
 | `codix.flow.run(id)` | 一次运行：阶段、各站状态与输出 |
 | `codix.flow.current()` | 发起调用的会话所在的运行与站；不在运行里为 `null` |
+| `codix.plugin.call({ function, input })` | 插件命令调**自己包里**的插件函数（不带会话、`writes: true`）。流程站的会话里派工器逐次判 `Write`（会话上有 ask 规则），命令里的子调用问不了人，命令要写自己的数据就交给函数；写入仍只限函数声明的 `writes`。门禁与步骤里（`via: host`）不能调 |
 
 **谁能调**，按 `HostCallContext`：
 - 会话的作用域规则同宿主工具（architecture §8.5）：流程运行里的会话只看得到自己的运行、不能 `start`；作业会话对流程只能看。
@@ -362,7 +363,8 @@ stations:
 
 - **守卫脚本**（`tool.around`）：`via` 是 `model` 时，拒绝直接写 `xforge/**`（Write、Edit、NotebookEdit、明显的 Bash 写）；
   `via` 是 `RunExt:<命令>` 且 `plugin` 是 `xforge` 的放行。守卫要同时核对命令名与包名（`runext.md` §6）。
-- **站的策略** `xforge-station`：再在流程这一层拒绝写 `${workspace}/xforge/**`，允许 `RunExt` 的 `xflow` / `xspec`；`deny` 永远赢。
+- **站的策略** `xforge-station`：只放行 `RunExt` 的 `xflow` / `xspec` / `xforge`，**不**按路径拒写：按路径判的规则让这一站的每次
+  `Write` 都先问派工器，插件命令里的写问不了人，命令写 `xforge/` 就一律失败（LIVE 里踩到的）。模型直接写由守卫拒。
 - 命令自己的 `writes = ["xforge/**"]` 管住它经文件工具能写到哪。
 
 ### 6.6 第一版的数据与行为
@@ -424,7 +426,7 @@ XForge 原来的文件格式（回执、投影、审计链、多方案）第一�
 
 **谁能写 `xforge/`**：模型可以直接写 `changes/*/` 下的三份 `.md`；其余（`delta.yaml`、台账、工作包、`change.yaml`、
 `specs/`、`archive/`、`manifest.yaml`）只经命令与函数写。守卫（`tool.around`）在 `via` 是 `model` 时拒绝写这些
-路径的 `Write` / `Edit` / `NotebookEdit` 与点名它们的会改东西的 `Bash`；站的策略 `xforge-station` 在流程这一层再拒一次。
+路径的 `Write` / `Edit` / `NotebookEdit` 与点名它们的会改东西的 `Bash`（站的策略不再按路径拒，见 §6.5）。
 
 **流程**：`xforge-quick`（风险 `low`）：`open` → `propose`（会话，门禁 structure、spec-delta）→ `apply`（会话，门禁 unclaimed）
 → `verify`（会话，门禁 structure，确认）→ `archive`。`xforge-solid`（风险 `low`、`medium`）同 §6.3。

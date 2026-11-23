@@ -156,10 +156,60 @@ pub async fn handle(hub: Hub, call: HostLibCall) -> Result<Value, HostLibError> 
                 r => Err(unexpected(r)),
             }
         }
+        "plugin.call" => plugin_call(&hub, &call).await,
         other => Err(HostLibError::new(
             "unknown",
             format!("codix.{other} is not a function"),
         )),
+    }
+}
+
+/// 插件命令调自己包里的插件函数（不带会话）。为什么要有：流程站的会话里，派工器要逐次判 `Write`、`Edit`、
+/// `Bash`（会话上有这几样的 ask 规则），而插件命令里的子调用问不了人，命令写自己的数据就一律失败。
+/// 经这里，写入仍走 Agix 的权限：只写得了函数声明的 `writes`（安装时披露过），不带会话也就没有站的 ask。
+/// 只许调自己包的函数；门禁与步骤里（`via: host`，本来就是函数）不许再调，免得绕圈。
+async fn plugin_call(hub: &Hub, call: &HostLibCall) -> Result<Value, HostLibError> {
+    if call.via == "host" {
+        return Err(HostLibError::new(
+            "denied",
+            "a plugin function cannot call plugin functions through the host",
+        ));
+    }
+    let function = call.input["function"]
+        .as_str()
+        .ok_or_else(|| HostLibError::new("invalid_input", "function is required"))?;
+    if !function.starts_with(&format!("{}.", call.plugin)) {
+        return Err(HostLibError::new(
+            "denied",
+            format!(
+                "plugin `{}` may call only its own functions, not `{function}`",
+                call.plugin
+            ),
+        ));
+    }
+    let cwd = call
+        .project_root
+        .as_ref()
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|| hub.project().to_string());
+    let r = hub
+        .call(
+            "plugin.call",
+            json!({"function": function, "input": call.input.get("input").cloned().unwrap_or(Value::Null),
+                   "cwd": cwd, "writes": true, "timeout_ms": 120_000}),
+        )
+        .await
+        .map_err(|e| HostLibError::new("failed", e.to_string()))?;
+    if r["ok"] == true {
+        Ok(r["value"].clone())
+    } else {
+        Err(HostLibError::new(
+            r["error"]["code"].as_str().unwrap_or("failed"),
+            r["error"]["message"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
+        ))
     }
 }
 

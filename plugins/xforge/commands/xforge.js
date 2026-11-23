@@ -517,9 +517,44 @@ async function runCommand(name, args, input, ctx) {
   }
 }
 
-const xflowMain = (argv, input, ctx) => runCommand("xflow", argv, input, ctx);
-const xspecMain = (argv, input, ctx) => runCommand("xspec", argv, input, ctx);
-const xforgeMain = (argv, input, ctx) => runCommand("xforge", argv, input, ctx);
+// 与 plugin.toml 的 read_only 一致：这些子命令在会话里直接跑。
+const READ_ONLY = {
+  xflow: ["help", "show", "ledger list", "plan list", "check"],
+  xspec: ["help", "list", "get", "delta", "pending", "check"],
+  xforge: ["doctor", "status", "start", "help"],
+};
+
+function readOnly(name, args) {
+  const line = args.join(" ");
+  return args.length === 0 || READ_ONLY[name].some((p) => line === p || line.startsWith(`${p} `));
+}
+
+// 会改数据的子命令不在会话里写：流程站的会话里派工器要逐次判 Write（会话上有 Write 的 ask 规则），
+// 而命令里的子调用问不了人，一写就失败。所以先在会话里认出当前变更（要 codix.flow.current），再交给本包的
+// 函数 xforge.command 去做——宿主以不带会话的 plugin.call 调它，写入只限函数声明的 xforge/**。
+// `xforge start` 例外：它要以人的会话的身份开运行，留在会话里。
+async function commandMain(name, argv, input, ctx) {
+  if (readOnly(name, argv)) return runCommand(name, argv, input, ctx);
+  begin(ctx, input);
+  const args = [...argv];
+  if (!args.includes("--change") && !(name === "xforge" && args[0] === "init")) {
+    try {
+      const ch = await currentChange(null, { needOpen: false });
+      args.push("--change", ch.id);
+    } catch (_) {
+      // 认不出就交给函数自己报
+    }
+  }
+  try {
+    return await codix.plugin.call({ function: "xforge.command", input: { argv: [name, ...args] } });
+  } catch (e) {
+    return { ok: false, error: { code: (e && e.code) || "failed", message: String((e && e.message) || e) } };
+  }
+}
+
+const xflowMain = (argv, input, ctx) => commandMain("xflow", argv, input, ctx);
+const xspecMain = (argv, input, ctx) => commandMain("xspec", argv, input, ctx);
+const xforgeMain = (argv, input, ctx) => commandMain("xforge", argv, input, ctx);
 
 const USAGE = {
   xflow: [

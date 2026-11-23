@@ -11,12 +11,13 @@ use std::sync::Arc;
 use serde_json::Value;
 
 /// `codix.*` 的函数（点分路径，命名空间之下）。
-pub const FUNCTIONS: [&str; 5] = [
+pub const FUNCTIONS: [&str; 6] = [
     "flow.defs",
     "flow.runs",
     "flow.run",
     "flow.current",
     "flow.start",
+    "plugin.call",
 ];
 
 /// 一次调用：哪个函数、传了什么，以及谁在调（Agix 的 `HostCallContext`）。

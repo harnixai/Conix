@@ -56,6 +56,7 @@ Codix 的 `[x-codix]` 一段由 Codix 读：它带来的流程包、host 门禁�
 | `codix.flow.run({run})` | 一次运行：状态、各站与输出 |
 | `codix.flow.current()` | 调用所在的运行与站；不在运行里为 `null` |
 | `codix.flow.start({flow, subject, inputs})` | 开一次运行，回 `{run}` |
+| `codix.plugin.call({function, input})` | 调本包自己的插件函数（不带会话）：流程站的会话里命令写不了文件（写要逐次问派工器，命令问不了人），写数据交给函数 |
 
 能做什么看是谁在调，不看包名（包名是包自报的）：门禁与步骤里、没有会话时、作业的会话里只能读；流程站的会话
 只看得到自己那次运行；只有人开的会话能开运行。
