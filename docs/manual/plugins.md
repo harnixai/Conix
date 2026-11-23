@@ -1,0 +1,61 @@
+# 插件
+
+插件是一个带 `plugin.toml` 的包（zip）。包里的命令、函数、脚本、skill、agent 由引擎 Agix 兑现；包里写给
+Codix 的 `[x-codix]` 一段由 Codix 读：它带来的流程包、host 门禁与程序步骤各由哪个插件函数做。设计见
+`docs/design/plugins.md`，包的格式见 Agix 的 `docs/plugin_packages.md` 与 `docs/runext.md`。
+
+## 从哪装
+
+`/plugin` 列出两处的包，只按文件名 `<名>-<版本>.zip` 认：
+
+- **自带目录**：`<codix 所在目录>/../share/codix/plugins/`，随程序装上；开发与测试时用 `CODIX_PLUGIN_DIRS`
+  （`:` 分隔）换掉它。`scripts/build-plugins.sh` 把仓库里的 `plugins/*` 打到 `target/plugins/`。
+- **你自己放的**：`~/.codix/plugin-store/`。
+
+装好的插件放在 `~/.codix/plugins/cache/`，启停状态在 `~/.codix/plugins/enabled.json`，都归 Agix 管，对所有项目生效。
+
+## `/plugin`
+
+| 写法 | 做什么 |
+|---|---|
+| `/plugin` | 浮层：装好的（启用与否、带来的流程、冲突）在前，可装的在后 |
+| `/plugin install <名或 zip 路径>` | 装，然后看披露、决定启不启用 |
+| `/plugin enable <名>` / `disable <名>` | 启停 |
+| `/plugin remove <名>` | 卸载 |
+| `/plugin info <名>` | 再看一次披露 |
+
+浮层里：Enter 装（可装的）或看披露（装好的），空格启停，`d` 连按两次卸载，Esc 关。
+
+**装完是停用的。** 浮层摆出两份披露，确认（`y` / Enter）才启用，不确认（`n` / Esc）就卸掉：
+
+- **Agix 的**：命令能写什么、给宿主调的函数、绑在哪个扩展点上的脚本、用了宿主库 `codix`、要起的 MCP 服务器，
+  以及每一段会一字不差到达模型的文字（插件描述、agent 提示词、skill、命令描述）。
+- **Codix 的**：它带来的流程、host 门禁与程序步骤各对应哪个插件函数、流程包里到达模型的 skill 与规则。
+
+文字到达模型是隔离挡不住的，唯一的防线是有人去读。
+
+**启停之后**：插件的命令只进此后新建的会话；它带来的流程立刻出现在流程标签里（来源写「全局 · 插件 <名>」），
+停用就撤下。已经在跑的运行不受影响：定义、策略、门禁在启动时就钉在运行记录里。
+
+## 插件带来的流程
+
+- 叠加次序：项目自己的 > `~/.codix/flows/` > 插件（按插件名）> 自带的示例。在可写层存同名的就是覆盖，删掉
+  回到插件那份。两个插件有同名的流程、门禁或步骤，插件名排在前面的胜出，另一个的在 `/plugin` 里报冲突。
+- 插件的 host 门禁与程序步骤经引擎的 `plugin.call` 调插件函数，不带会话，在运行干活的目录里跑：门禁只读，
+  步骤只写得了函数声明的范围，时限 120 秒。**不带会话的调用要问人的一律失败**：门禁里要跑命令的（比如
+  `git status`），在项目的 `.codix/settings.json` 里给它写 `permissions.allow` 规则，门禁没过时 `detail` 会写明要哪条。
+
+## 插件里能用的宿主库 `codix.*`
+
+包顶层写 `uses = ["codix"]`，它的命令与函数里就有全局 `codix`：
+
+| 函数 | 做什么 |
+|---|---|
+| `codix.flow.defs()` | 这个项目能用的流程（名字、标题、来源、插件名） |
+| `codix.flow.runs({flow?, active?})` | 运行列表 |
+| `codix.flow.run({run})` | 一次运行：状态、各站与输出 |
+| `codix.flow.current()` | 调用所在的运行与站；不在运行里为 `null` |
+| `codix.flow.start({flow, subject, inputs})` | 开一次运行，回 `{run}` |
+
+能做什么看是谁在调，不看包名（包名是包自报的）：门禁与步骤里、没有会话时、作业的会话里只能读；流程站的会话
+只看得到自己那次运行；只有人开的会话能开运行。
