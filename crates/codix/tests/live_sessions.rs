@@ -332,3 +332,149 @@ async fn checkpoints_list_turns_and_rewind_removes_the_later_ones() {
     };
     assert_eq!(removed_turns, 1);
 }
+
+/// 新建会话时带上模型、场景、权限模式（草稿里选的）：摘要与 `sessions.json` 记的是选定的那些，那个模型能答话。
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "live"]
+async fn a_session_is_created_with_the_chosen_model_scene_and_mode() {
+    let lv = Live::new();
+    let mut c = lv.start().await;
+    let creds = live::credentials();
+    let other = creds
+        .get("ANTHROPIC_SMALL_FAST_MODEL")
+        .or(creds.get("ANTHROPIC_DEFAULT_HAIKU_MODEL"))
+        .cloned()
+        .unwrap_or_else(live::model);
+    let Reply::Session(s) = c
+        .ok(Command::CreateSession {
+            project: Some(lv.project_path()),
+            scene: Some("code".into()),
+            model: Some(other.clone()),
+            permission: Some(PermissionMode::Plan),
+        })
+        .await
+    else {
+        panic!("create_session")
+    };
+    assert_eq!(s.provenance.model, other, "{s:?}");
+    assert_eq!(s.permission, PermissionMode::Plan, "{s:?}");
+    assert_eq!(
+        s.provenance.project.as_deref(),
+        Some(lv.project_path().as_str())
+    );
+    c.watch(&s.id).await;
+    c.turn(&s.id, OK).await.ended();
+    let reg = lv.read_state("sessions.json");
+    assert_eq!(reg[&s.id.0]["model"], other.as_str());
+}
+
+async fn closed_ids(c: &live::Client) -> Vec<SessionId> {
+    match c.call(Command::ListClosedSessions).await {
+        Ok(Reply::Sessions(v)) => v.into_iter().map(|s| s.id).collect(),
+        r => panic!("list_closed_sessions：{r:?}"),
+    }
+}
+
+/// 关掉的会话进「已关闭」：列得出、只读地看得到转录（不放回会话表）、跨重启还在、重新打开回到会话表、删掉就没了。
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "live"]
+async fn closed_sessions_are_listed_viewed_reopened_and_deleted() {
+    let lv = Live::new();
+    let mut c = lv.start().await;
+    let keep = c.new_session().await;
+    c.turn(&keep, OK).await.ended();
+    let gone = c.new_session().await;
+    c.turn(&gone, "Reply with only the word MARKER.")
+        .await
+        .ended();
+    c.ok(Command::Close {
+        session: gone.clone(),
+    })
+    .await;
+
+    let ids = closed_ids(&c).await;
+    assert!(ids.contains(&gone) && !ids.contains(&keep), "{ids:?}");
+
+    // 只读地看：转录在，会话表里仍没有它。
+    let w = c.watch(&gone).await;
+    assert!(
+        w.history
+            .iter()
+            .any(|h| matches!(h, HistoryItem::Assistant { text } if text.contains("MARKER"))),
+        "{:?}",
+        w.history
+    );
+    assert!(c.sessions().await.iter().all(|s| s.id != gone));
+
+    // 跨重启：已关闭的还在，会话表里依旧没有。
+    drop(c);
+    let mut c = lv.restart().await;
+    assert!(closed_ids(&c).await.contains(&gone));
+    assert!(c.sessions().await.iter().all(|s| s.id != gone));
+
+    // 重新打开：回到会话表，能接着说。
+    c.ok(Command::ReopenSession {
+        session: gone.clone(),
+    })
+    .await;
+    assert!(c.sessions().await.iter().any(|s| s.id == gone));
+    assert!(!closed_ids(&c).await.contains(&gone));
+    c.watch(&gone).await;
+    c.turn(&gone, "Reply with only the word AGAIN.")
+        .await
+        .ended();
+
+    // 删掉：关了再删，哪里都没有了。
+    c.ok(Command::Close {
+        session: gone.clone(),
+    })
+    .await;
+    c.ok(Command::DeleteSession {
+        session: gone.clone(),
+    })
+    .await;
+    assert!(!closed_ids(&c).await.contains(&gone));
+    assert!(c.sessions().await.iter().all(|s| s.id != gone));
+    drop(c);
+    let c = lv.restart().await;
+    assert!(!closed_ids(&c).await.contains(&gone), "删除跨重启");
+    assert!(c.sessions().await.iter().any(|s| s.id == keep));
+}
+
+/// 会话摘要里的累计用量来自引擎的 `session.get`：重启后 Watch 一下，仍是之前各轮的总和，不是零。
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "live"]
+async fn a_sessions_cumulative_usage_survives_a_restart() {
+    let lv = Live::new();
+    let mut c = lv.start().await;
+    let s = c.new_session().await;
+    let t1 = c.turn(&s, OK).await;
+    t1.ended();
+    let t2 = c.turn(&s, "Reply with only the word TWO.").await;
+    t2.ended();
+    let before = c
+        .sessions()
+        .await
+        .into_iter()
+        .find(|x| x.id == s)
+        .unwrap()
+        .usage;
+    assert!(
+        before.output >= t1.usage.output + t2.usage.output,
+        "两轮累计：{before:?} / {:?} / {:?}",
+        t1.usage,
+        t2.usage
+    );
+    drop(c);
+    // 重启后内存里是零：Watch 时向引擎要累计（`session.get`），快照与随后的摘要都带着它。
+    let c = lv.restart().await;
+    let after = c.watch(&s).await.session.usage;
+    assert!(
+        after.output > 0 && after.input > 0,
+        "重启后用量不该归零：{after:?}"
+    );
+    assert!(
+        after.output >= t1.usage.output + t2.usage.output,
+        "{after:?}"
+    );
+}

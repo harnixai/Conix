@@ -292,8 +292,8 @@ catch_up`（再按名字过滤）。凭据取仓库根的 `.env`（worktree 里�
 | S-04 | 下半拆分树 | live_turns::a_sub_agent_shows_up_as_a_task_with_its_own_session、a_background_task_streams_output_and_can_be_stopped；app/sessions::lower_tree_three_levels_and_finished_group | LIVE |
 | S-05 | 进子 Agent 侧链；看任务输出 | live_turns::a_sub_agent_shows_up_as_a_task_with_its_own_session、a_background_task_streams_output_and_can_be_stopped；app/sessions::task_output_is_read_only_and_follows | LIVE |
 | S-06 | 任务停止、发消息 | live_turns::a_background_task_streams_output_and_can_be_stopped、a_sub_agent_shows_up_as_a_task_with_its_own_session | LIVE |
-| S-07 | 新建会话：项目、场景、模型 | 缺省的新建：每个 LIVE 的 `new_session`；带模型 / 场景 / 权限的 `CreateSession`：缺（权限：live_sessions::the_permission_mode_is_the_sessions_and_takes_effect_at_once） | 缺 |
-| S-08 | 恢复历史、重命名、关闭；已关闭的列出、查看、重开、删除；被别的实例占着时提示 | 历史与改名关闭：live_sessions::a_watch_snapshot_rebuilds_history_and_todos、the_first_line_names_a_session_and_renames_and_closes_survive_a_restart；已关闭的列出、重开、删除：缺（host/hub::closed_sessions_are_listed_viewed_reopened_and_deleted 是离线的）；`held_by`：缺（要两个实例争一个会话） | 缺 |
+| S-07 | 新建会话：项目、场景、模型 | 缺省的新建：每个 LIVE 的 `new_session`；live_sessions::a_session_is_created_with_the_chosen_model_scene_and_mode（带模型 / 场景 / 权限的 `CreateSession`）；live_sessions::the_permission_mode_is_the_sessions_and_takes_effect_at_once | LIVE |
+| S-08 | 恢复历史、重命名、关闭；已关闭的列出、查看、重开、删除；被别的实例占着时提示 | 历史与改名关闭：live_sessions::a_watch_snapshot_rebuilds_history_and_todos、the_first_line_names_a_session_and_renames_and_closes_survive_a_restart；live_sessions::closed_sessions_are_listed_viewed_reopened_and_deleted（已关闭的列出、只读查看、跨重启、重开、删除；host/hub 里有离线的同名用例）；被别的实例占着（`held_by`，要两个实例争一个会话，一个项目只允许一个实例，造不出来）：只有 host/hub 的离线用例 | LIVE（`held_by` 无 LIVE） |
 | S-09 | 结束的子 Agent 与任务缺省收起 | app/sessions::lower_tree_three_levels_and_finished_group | mock 场景 |
 | S-10 | 选中即切换 | app/crosscut::selection_follows_in_sessions_tab_without_enter；app/side_follow::*；live_tui::the_first_line_in_the_draft_makes_a_session_and_ctrl_o_reads_it | mock 场景 + LIVE |
 | S-11 | 顶部面板 Goal & Todo | app/sessions::a_long_panel_scrolls_under_the_wheel_and_never_takes_the_focus、m10_goal_rounds_and_blocked | mock 场景 |
@@ -346,5 +346,5 @@ catch_up`（再按名字过滤）。凭据取仓库根的 `.env`（worktree 里�
 | `max_turns` | 一轮里调用次数到顶，端口上是 `StopReason::MaxTurns` | host/src/hub/state.rs 的 `stop_reason_of` 单测；app 的 model/chat 单测；真实引擎：缺 | 缺 |
 | `/doctor`：`codix.session_loosen` | 部署方关了放宽时报降级 | host/hub::doctor_reports_the_engines_checks_and_the_instances_own；live_sessions::the_permission_mode_is_the_sessions_and_takes_effect_at_once（放宽生效）；engine/settings::the_cli_layer_lets_a_session_loosen_its_mode；live_diagnostics::doctor_reports_the_engines_checks_and_the_instances_own（真实实例里是 ok） | LIVE |
 | `/doctor`：`codix.jobs_network` | `inherit` 时报降级 | host/hub::doctor_reports_the_engines_checks_and_the_instances_own；live_diagnostics::doctor_flags_an_inherited_job_network_and_an_unreadable_config | LIVE |
-| 会话累计用量 | 重启后会话摘要的 usage 来自引擎的 `session.get` 累计 | host/hub::a_watched_sessions_usage_is_what_the_engine_reports；真实实例重启后：缺 | 缺 |
+| 会话累计用量 | 重启后会话摘要的 usage 来自引擎的 `session.get` 累计 | host/hub::a_watched_sessions_usage_is_what_the_engine_reports；live_sessions::a_sessions_cumulative_usage_survives_a_restart | LIVE |
 | 离开期间摘要 | 脱离期间作业失败等，再接入时推一次 `AwaySummary` | host/hub::what_happened_while_detached_is_shown_on_attach；app/flows_jobs::the_away_summary_lists_what_happened_and_enter_goes_there；真实实例：缺 | 缺 |
