@@ -43,8 +43,8 @@ impl Embedded {
         c.groups_file = Some(cfg.groups_file);
         c.project_dir = Some(PROJECT_DIR.into());
         c.product = PRODUCT_NAME.into();
-        // 会话是项目的（architecture §8.4）：受信项目的会话放进 `.codix/state/history/`，全局只留索引。
-        c.history = Some(agix::embed::HistoryLocation::Project);
+        // 会话是项目的（architecture §8.4）：受信项目的会话放进 `.codix/state/history/`，全局只留索引；0.4 起经 cli 层设置 `app.history` 给。
+        c.settings = Some(serde_json::json!({"app": {"history": "project"}}));
         let engine = agix::embed::Embedded::start(c)
             .await
             .context("start the Agix engine")?;
