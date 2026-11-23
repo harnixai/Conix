@@ -25,7 +25,7 @@ Codix 不跟 Claude Code 这类聊天式编程 CLI 拼打磨。它的位置是 A
 
 - **常驻实例 + 可接入的 TUI。** 实例是本机上一个常驻的 `codix host` 进程，引擎、流程、作业都跑在里面。TUI 通过本机 unix socket 接入实例，退出 TUI 就是脱离。**一个实例同时只允许一个 TUI 接入**：可以强制接入（踢掉对方），空闲超时会自动脱离。可以用 `codix list` 查看实例、`codix attach` 接入。
 - **不监听任何网络端口。** 远程使用就是 ssh 登录到那台机器后运行 `codix`，安全交给 ssh 和操作系统。
-- **引擎只走 Agix 的 JSON-RPC 协议**（`agix/docs/daemon_rpc_protocol.md`）：实例进程内部用 `agix::embed` 嵌入引擎，通过 duplex 通信。不使用 `agix::pool` 这一层 Rust 门面，因为它不承诺兼容。
+- **引擎只走 Agix 的 JSON-RPC 协议**（`agix/docs/daemon_rpc_protocol.md`）：实例进程内部用 `agix::embed` 嵌入引擎，通过 duplex 通信。不使用 `agix::pool` 这一层 Rust 门面，因为它不承诺兼容。唯一的例外是启动时的装配：`EmbedConfig` 本来就是 Rust 的，cli 层设置与给插件的宿主 JS 库（`codix.*`，`js_libs`）在这里登记（`docs/design/plugins.md` §5.1）。
 - **项目级的放项目，全局的放全局。** 会话、流程、作业都是项目的，放在项目的 `.codix/`（Agix 的项目层目录）里：定义（流程、作业）进 git，本机数据与过程数据在 `.codix/state/` 下、不进 git，Codix 自己的在 `state/codix/`。全局目录是 `~/.codix`（可以用 `CODIX_HOME` 改），Agix 的 `data_root` 也指向这里，不使用 `~/.agix`；它只放用户级的配置（`codix.yaml`、`flows/` 等）和实例的运行时文件（`instances/`），不往 Agix 的 `settings.json` 里写东西。布局见 `docs/design/architecture.md` §8.1。
 - **TUI 与后端之间只有一个端口**：`Instances` 和 `Backend` 两个 trait 加上领域事件，定义见 `docs/design/architecture.md` §3。mock 与真实实现走的是同一个端口；端口的消息序列化之后就是 TUI 与实例之间的协议。
 - **流程来自 Harnix**：拷贝，不引用，见下面的 `3rds/`。流程格式与 Harnix 兼容。流程不放进 Agix。

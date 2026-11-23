@@ -6,7 +6,7 @@
 |---|---|
 | harnixai/Agix#90 | JS 基础库只叫 `agix`，`codix` 这个全局名留给宿主 |
 | harnixai/Agix#91 | 嵌入方经 `EmbedConfig` 给插件命令注册宿主 JS 库（JSON 进出，不交出 rquickjs 类型），插件以 `uses` 声明 |
-| harnixai/Agix#92 | `ext.run`：宿主经 RPC 运行插件命令，取回结构化结果 |
+| harnixai/Agix#92 | 插件函数：包里的 `[[function]]` 只给宿主调，宿主经 `plugin.call` 传结构化的 `input`、取回结构化结果（Agix 0.4.0 落地的形状；早先设想的 `ext.run` 不再用） |
 | harnixai/Harnix#68 | 流程包来源加一种"插件"（`Origin::Plugin`） |
 
 XForge 原来的实现（TypeScript + Node，`harnixai/xforge`）只作参考：**数据归插件命令，过程归 Harnix 流程**。
@@ -15,7 +15,7 @@ XForge 自己的状态机、编排者、往 `.claude/` `.codex/` 投影的脚手
 ## 1. 三条通道
 
 ```
-                 plugin.* · ext.run              （JSON-RPC，运行时）
+                 plugin.*（含 plugin.call）      （JSON-RPC，运行时）
   Codix 实例 ─────────────────────────────────►  Agix
   （Hub、流程派工器）                               │ RunExt：插件命令跑在 QuickJS 里
         ▲                                          │
@@ -25,7 +25,7 @@ XForge 自己的状态机、编排者、往 `.claude/` `.codex/` 投影的脚手
 | 方向 | 机制 | Codix 拿它做什么 |
 |---|---|---|
 | 宿主 → 插件 | `plugin.*`（装、列、启停、卸） | `/plugin` |
-| 宿主 → 插件 | `ext.run` | 流程的门禁（`Gates`）与程序步骤（`Programs`）跑插件命令 |
+| 宿主 → 插件 | `plugin.call` | 流程的门禁（`Gates`）与程序步骤（`Programs`）调插件函数（`[[function]]`） |
 | 插件 → 宿主 | `codix.*` 宿主库 | 插件命令开流程运行、查运行状态 |
 | 插件 → 引擎 | `tools.*`、`agix.*` | 读写项目文件、YAML / JSON Schema 等纯计算 |
 
@@ -93,11 +93,11 @@ share/codix/plugins/*.zip         自带插件目录：随程序装上，里面�
 [x-codix]
 flows = "flows"                                  # 一个 harnix-flow 流程包：flows/ skills/ rules/ policies/ gates/
 
-[x-codix.gates]                                  # host 门禁名 → 插件命令（只读）
-xforge-structure = "xflow check structure"
+[x-codix.gates]                                  # host 门禁名 → 插件函数的调用名（只读调用）
+xforge-structure = "xforge.check"
 
-[x-codix.steps]                                  # program 步骤名 → 插件命令（可写）
-xforge-open = "xflow new"
+[x-codix.steps]                                  # program 步骤名 → 插件函数的调用名（可写调用）
+xforge-open = "xforge.open"
 ```
 
 - **分层**：Codix 实现一层 `PluginPacks`，挂所有已启用插件的流程包。叠加顺序：项目 > `~/.codix/flows/`
@@ -114,7 +114,8 @@ xforge-open = "xflow new"
 
 ### 5.1 宿主库 `codix.*`
 
-实例起来时在 `EmbedConfig` 注册（`host/src/plugins/hostlib.rs`），执行走 `Hub` 的 `dispatch`，和端口命令同一条路，
+实例起来时在 `EmbedConfig.js_libs` 注册：`engine` 登记函数表（engine 不依赖 host），每次调用转给实例起来后接上的
+处理者（`host/src/plugins/hostlib.rs`），执行走 `Hub` 的 `dispatch`，和端口命令同一条路，
 TUI 照常收到事件。
 
 | 函数 | 做什么 |
@@ -127,21 +128,27 @@ TUI 照常收到事件。
 
 **谁能调**，按 `HostCallContext`：
 - 会话的作用域规则同宿主工具（architecture §8.5）：流程运行里的会话只看得到自己的运行、不能 `start`；作业会话对流程只能看。
-- `via` 是 `host`（经 `ext.run`，即门禁与步骤里）或者没有会话时：**只开放读的函数**，免得一次门禁检查反过来推进了流程。
+- `via` 是 `host`（经 `plugin.call`，即门禁与步骤里）或者没有会话时：**只开放读的函数**，免得一次门禁检查反过来推进了流程。
+- 不认 `plugin` 名字认包：`HostCallContext.plugin` 是包自报的，谁都能装一个叫 `xforge` 的包。`start` 只给装了、
+  且 Codix 读到它带 `[x-codix]` 的包；这一版不区分自带与否（Codix 没有宿主自带的包）。
 - `start` 本身不再问人：调它的插件命令不是 `read_only` 的子命令，那次 `RunExt` 已经过了 Agix 的权限询问（用户亲手敲的算已批准）。
 
-### 5.2 门禁与步骤：`ext.run`
+### 5.2 门禁与步骤：`plugin.call`
 
-- **门禁**（`PluginGates`，实现 harnix-flow 的 `Gates`）：门禁名按 `[x-codix.gates]` 找到命令；
-  `ext.run { command, cwd: 运行的工作目录, writes: false, input }`，**不带会话**——结果只取决于项目里的数据，与站的会话还在不在无关。
-  `input` 是 `{ run, flow, station, gate, inputs, outputs: { <站>: <输出> }, workspace, project_root }`；
-  命令回 `{ pass, detail }`，原样成为 `GateResult`。`ok: false`（插件出错、要问人）算不过，`detail` 写原因，同时记进事件日志。
-- **要跑命令的门禁**（单测）：同样是 host 门禁，`ext.run` 带上这一站解析好的权限（换成 Agix 的规则，同
-  `session_host` 现有的换法），命令里的 `tools.Bash` 照这些规则判；要问人的直接失败。
-- **步骤**（`PluginPrograms`，实现 `Programs`）：步骤名按 `[x-codix.steps]` 找到命令，`writes: true`，`input` 同上再加 `item`；
-  返回值交给 `Engine::submit`，错误交给 `Engine::fail`。
-- 门禁缺省时限 600 秒，步骤 300 秒；实例停时在跑的 `ext.run` 取消，派工器下次启动重做（同现有的租约规则）。
-- `ext.run` 带会话的用法这一版不用，留给以后面板上的操作。
+插件函数（`[[function]]`，Agix `runext.md` §12）不进模型的工具表，只给宿主按调用名 `<包名>.<函数名>` 调。
+
+- **门禁**（`PluginGates`，实现 harnix-flow 的 `Gates`）：门禁名按 `[x-codix.gates]` 找到函数；
+  `plugin.call { function, input, cwd: 运行的工作目录, writes: false, timeout_ms }`，**不带会话**——结果只取决于项目里的
+  数据，与站的会话还在不在无关。`input` 是 `{ gate, run, flow, station, inputs, outputs: { <站>: <输出> }, workspace,
+  project_root }`（`gate` 让一个函数管几道门禁）；函数回 `{ pass, detail }`，原样成为 `GateResult`。`ok: false`
+  （插件出错、`refused`、`timeout`……）算不过，`detail` 写 `code` 与 `message`，同时记进事件日志。
+- **要跑命令的门禁**（单测）：同样是 host 门禁；不带会话的调用"要问人的一律失败"，所以 `plugin.call` 带上这一站
+  解析好的权限（`permission_rules`，§4.6 的对象形状），命令照这些规则判。
+- **步骤**（`PluginPrograms`，实现 `Programs`）：步骤名按 `[x-codix.steps]` 找到函数，`writes: true`（只写得了函数声明的
+  `writes`），`input` 同上把 `gate` 换成 `step`，再加 `item`；返回值交给 `Engine::submit`，错误交给 `Engine::fail`。
+- 时限：`plugin.call` 至多 120 秒，门禁与步骤都用它；每次带一个 `run_id`（`<运行>/<站>/<门禁或步骤>`），实例停时
+  `plugin.cancel`，派工器下次启动重做（同现有的租约规则）。
+- 带会话的调用这一版不用，留给以后面板上的操作。
 
 ## 6. 插件 `xforge`
 
@@ -161,30 +168,56 @@ plugins/xforge/
 ```
 
 ```toml
+uses = ["codix"]
+
+[plugin]
 name = "xforge"
 version = "0.1.0"
+api_version = "0.1"
+requires_engine = ">=0.4.0, <0.5"
 description = "规格驱动的变更：规格增量、台账、门禁，按 quick / solid 流程推进"
-uses = ["codix"]
 
 [[command]]
 name = "xflow"
-entry = "commands/xflow.js"
-description = "变更：新建、修订、台账、计划、检查、查看"
+entry = "commands/xflow.js:main"
+description = "变更：修订、台账、工作包、检查、查看"
 read_only = ["show", "ledger list", "plan list", "check"]
 writes = ["xforge/**"]
 
 [[command]]
 name = "xspec"
-entry = "commands/xspec.js"
+entry = "commands/xspec.js:main"
 description = "规格与规格增量"
 read_only = ["list", "get", "delta", "pending", "check"]
 writes = ["xforge/**"]
 
 [[command]]
 name = "xforge"
-entry = "commands/xforge.js"
+entry = "commands/xforge.js:main"
 description = "项目初始化、体检、开始一次变更、查看进行中的变更"
 read_only = ["doctor", "status"]
+writes = ["xforge/**"]
+
+[[function]]                       # 门禁：input.gate 说是哪一道
+name = "check"
+entry = "commands/functions.js:check"
+description = "XForge 的门禁检查（只读）"
+
+[[function]]
+name = "open"
+entry = "commands/functions.js:open"
+description = "开一次变更：建 xforge/changes/<id>/"
+writes = ["xforge/**"]
+
+[[function]]
+name = "packages"
+entry = "commands/functions.js:packages"
+description = "列出这次变更的工作包"
+
+[[function]]
+name = "close"
+entry = "commands/functions.js:close"
+description = "归档变更：规格增量并进 specs/"
 writes = ["xforge/**"]
 
 [[agent]]
@@ -194,24 +227,24 @@ prompt = "agents/xforge-executor.md"
 
 [[script]]
 point = "tool.around"
-entry = "scripts/guard.js"
+entry = "scripts/guard.js:around"
 
 [x-codix]
 flows = "flows"
 
 [x-codix.gates]
-xforge-structure    = "xflow check structure"
-xforge-spec-delta   = "xflow check spec-delta"
-xforge-constitution = "xflow check constitution"
-xforge-ledgers      = "xflow check ledgers"
-xforge-integrated   = "xflow check integrated"
-xforge-unclaimed    = "xflow check unclaimed"
-xforge-unit-tests   = "xflow check unit-tests"
+xforge-structure    = "xforge.check"
+xforge-spec-delta   = "xforge.check"
+xforge-constitution = "xforge.check"
+xforge-ledgers      = "xforge.check"
+xforge-integrated   = "xforge.check"
+xforge-unclaimed    = "xforge.check"
+xforge-unit-tests   = "xforge.check"
 
 [x-codix.steps]
-xforge-open     = "xflow new"
-xforge-packages = "xflow plan list"
-xforge-archive  = "xflow close"
+xforge-open     = "xforge.open"
+xforge-packages = "xforge.packages"
+xforge-archive  = "xforge.close"
 ```
 
 - 命令写成普通的 ES2023，不引入 Node 构建链；XForge 的 TS 代码按段参考着重写，文件 I/O 换成 `tools.Read` /
@@ -223,10 +256,10 @@ xforge-archive  = "xflow close"
 | XForge | 插件 | 说明 |
 |---|---|---|
 | `xspec list/get/delta/pending/check`、`add/modify/remove/revert` | `xspec` 同名 | 全部保留 |
-| `xflow new/amend` | `xflow new/amend` | `new` 由步骤 `xforge-open` 跑，id 与基线提交由命令定 |
+| `xflow new/amend` | 函数 `xforge.open`、命令 `xflow amend` | 开变更由步骤 `xforge-open` 调函数，id 与基线提交由函数定 |
 | `xflow ledger …`、`xflow plan …` | 同名 | 保留 |
-| `xflow close` | `xflow close` | 由步骤 `xforge-archive` 跑：增量并进 `specs/`、归档 |
-| — | `xflow check <门禁>` | 新的：七道门禁的检查逻辑，只读，回 `{ pass, detail }` |
+| `xflow close` | 函数 `xforge.close` | 由步骤 `xforge-archive` 调：增量并进 `specs/`、归档 |
+| — | 函数 `xforge.check`、命令 `xflow check <门禁>` | 新的：七道门禁的检查逻辑，只读，回 `{ pass, detail }`；命令给人和模型看同一份结果 |
 | `xflow state/show/inspect` | `xflow show` | 数据加上 `codix.flow.run` 的运行状态 |
 | `xflow run/advance/attest/guide` | 不要 | 推进与署名是派工器与 `confirm` 的事；站要做什么由 skill 与站消息说 |
 | `xforge init/doctor/repair` | `xforge init/doctor/repair` | 只管 `xforge/` 下的数据 |
@@ -245,7 +278,7 @@ XForge 的概念到 harnix-flow：
 | stage + skill | 站 + 站的 `skill`（流程包里的） |
 | `human: body` | 站在运行的主会话里做（`executor: {kind: session}`，不写 `scene`），人在主会话里插话 |
 | `human: tail` | 站做完后的 `confirm` 出口 |
-| `exit: gate` / `ledger all-resolved` / `unclaimed-changes` | `gate` 出口，host 门禁 → `xflow check …` |
+| `exit: gate` / `ledger all-resolved` / `unclaimed-changes` | `gate` 出口，host 门禁 → 函数 `xforge.check` |
 | `exit: attested` / `approval` | `confirm` 出口；署名者就是确认的人，记在运行上 |
 | 工作包 ready → running → integrated | `packages` 步骤列出工作包，`apply` 站 `foreach` 每包一个子 Agent 工作项 |
 | `XFORGE-REPORT: done\|blocked\|needs-human` | 工作项的输出契约 `{ package, status: done\|blocked\|needs-human, summary }` |
@@ -341,8 +374,8 @@ stations:
 1. **依赖**（已完成）：Agix 0.4.0（2bc0b39a）已 bump，harnix-flow 0.4.7 已拷入。
 2. **mock**：`/plugin` 浮层、两份披露、端口命令接 mock（脚本化插件），`crates/app/tests` 里验完。
 3. **接缝**：`Hub` 的 `plugin.*`、自带目录与 `plugin-store/`、`PluginPacks`。LIVE 用一个测试用的小插件（`tests/fixtures`，带一个流程、一道门禁、一个步骤）。
-4. **宿主库与 `ext.run`**：`codix.flow.*`、`PluginGates`、`PluginPrograms`。用 `ext.run` 直接跑插件命令就能测，不需要模型。
-5. **xforge 第一版**：命令、`quick` 与 `solid`、§6.4 的门禁、站的 skill、守卫。命令的用例经 `ext.run` 跑，不需要模型；
+4. **宿主库与 `plugin.call`**：`codix.flow.*`、`PluginGates`、`PluginPrograms`。用 `plugin.call` 直接调插件函数就能测，不需要模型。
+5. **xforge 第一版**：命令、`quick` 与 `solid`、§6.4 的门禁、站的 skill、守卫。函数与命令的用例经 `plugin.call` 跑（命令的逻辑放在函数能调的同一份模块里），不需要模型；
    LIVE 用真实模型把 `xforge-quick` 走完一次。
 6. **第二版**：§6.6。
 
@@ -352,4 +385,4 @@ stations:
 |---|---|
 | ~~装完不自动启用~~ | 已解决：Agix 0.4 的 `plugins.enable_on_install` 缺省 false，装完披露、确认后 `plugin.enable` |
 | XForge 已有项目 | `xforge/` 的格式不变就直接认；`.claude/`、`.codex/` 里的投影由人用原来的 `xforge remove` 清掉 |
-| 插件命令的测试 | 插件源码里带用例：经 `ext.run` 跑，放进 Codix 的 `cargo test`（嵌入真实引擎，不联网） |
+| 插件命令的测试 | 插件源码里带用例：经 `plugin.call` 跑，放进 Codix 的 `cargo test`（嵌入真实引擎，不联网） |

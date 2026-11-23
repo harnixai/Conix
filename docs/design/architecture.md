@@ -549,7 +549,7 @@ schema；`job_validate` 不落盘，回下 5 次触发时刻与护栏的实际�
 ### 8.8 插件
 
 插件就是 Agix 的插件包，Codix 加三样：`/plugin`（安装前摆出 Agix 与 Codix 两份披露）、给插件命令的宿主 JS 库
-`codix.*`、插件经 `[x-codix]` 带来的流程包（门禁与程序步骤经 `ext.run` 跑插件命令）。第一个插件是 `xforge`。
+`codix.*`、插件经 `[x-codix]` 带来的流程包（门禁与程序步骤经 `plugin.call` 调插件函数）。第一个插件是 `xforge`。
 设计见 `plugins.md`，依赖 Agix#90、#91、#92 与 Harnix#68。
 
 ### 8.9 项目状态的认领
