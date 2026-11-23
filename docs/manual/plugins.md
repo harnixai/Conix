@@ -60,3 +60,20 @@ Codix 的 `[x-codix]` 一段由 Codix 读：它带来的流程包、host 门禁�
 
 能做什么看是谁在调，不看包名（包名是包自报的）：门禁与步骤里、没有会话时、作业的会话里只能读；流程站的会话
 只看得到自己那次运行；只有人开的会话能开运行。
+
+## 随 Codix 的插件：xforge
+
+规格驱动的变更：提案与规格增量、台账、工作包、门禁，按流程推进。数据在项目的 `xforge/` 下，随项目提交。
+
+1. `/plugin install xforge`，看过披露后启用。
+2. 在对话里让模型跑 `xforge init`（建 `xforge/manifest.yaml` 与 `constitution.md`），把验证命令写进 manifest 的
+   `verification.commands`。
+3. 开一次变更：`xforge start quick "<标题>"`（低风险：提案 → 实施 → 验证 → 归档）或
+   `xforge start solid "<标题>" --risk medium`（多设计、检查、按工作包实施）。也可以在流程标签里直接开
+   `xforge-quick` / `xforge-solid`，输入写 `title` 与 `risk`。
+4. 运行走到验证站时停下等你确认；确认后归档：规格增量并进 `xforge/specs/`，变更拷进 `xforge/archive/`。
+
+模型直接写的只有 `xforge/changes/<id>/` 下的 `proposal.md`、`design.md`、`verification.md`；规格增量、台账、工作包
+只经 `xspec` / `xflow` 命令写（守卫挡住直接改）。门禁 `xforge-unclaimed` 跑 `git status`，`xforge-unit-tests` 跑
+manifest 里的验证命令：要在项目设置里给它们 `permissions.allow` 规则，没给时门禁不过并写明要哪条。
+数据格式与七道门禁的判定见 `docs/design/plugins.md` §6.6。
