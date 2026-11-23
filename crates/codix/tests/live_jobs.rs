@@ -468,3 +468,103 @@ async fn a_failed_firing_reaches_the_configured_notification_command() {
         "{v}"
     );
 }
+
+/// 跑完一个简单作业，回它的结局与触发出的会话。
+async fn run_to_end(c: &mut live::Client, j: Job) -> (port::JobEntry, port::SessionId) {
+    let j = save(c, j).await;
+    c.skip_past();
+    c.ok(Command::RunJobNow {
+        job: j.id.clone(),
+        subject: None,
+        prompt_append: None,
+    })
+    .await;
+    let done = fired(c, &j.id, "触发（结局）", |e| {
+        e.outcome != JobOutcome::Running
+    })
+    .await;
+    let Some(JobTarget::Session { id, .. }) = done.target.clone() else {
+        panic!("{done:?}")
+    };
+    (done, id)
+}
+
+/// Agix 0.4 起无人值守的会话里，没有 allow 规则的命令要网络受限才执行。作业缺省 deny_all：
+/// 本地命令照样能跑（升级前的缺省网络下这条会被拒）。
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "live"]
+async fn a_job_with_no_network_still_runs_local_commands() {
+    let lv = Live::new();
+    let mut c = lv.start_trusted().await;
+    let j = job(
+        "local-cmd",
+        "0 3 * * *",
+        "Use the Bash tool to run exactly: echo LIVE-$((40+2)) . Then reply with exactly the command's output.",
+        false,
+    );
+    let (done, sid) = run_to_end(&mut c, j).await;
+    assert_eq!(done.outcome, JobOutcome::Done, "{done:?}");
+    let audit = done.audit.clone().unwrap_or_default();
+    assert!(audit.tools.contains_key("Bash"), "{audit:?}");
+    assert_eq!(audit.errors, 0, "命令没被拒：{audit:?}");
+    let w = c.watch(&sid).await;
+    assert!(
+        w.history.iter().any(
+            |h| matches!(h, port::HistoryItem::Assistant { text } if text.contains("LIVE-42"))
+        ),
+        "{:?}",
+        w.history
+    );
+}
+
+/// 作业的 max_tokens 下发为会话预算：引擎在调用前就拦住，那一轮以 budget_exceeded 收尾，记成被预算停下。
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "live"]
+async fn a_job_over_its_token_budget_is_stopped_by_the_engine() {
+    let lv = Live::new();
+    let mut c = lv.start_trusted().await;
+    let mut j = job(
+        "tiny-budget",
+        "0 3 * * *",
+        "Write a 3000-word essay about the history of compilers.",
+        false,
+    );
+    // 比一次调用的输入（系统提示词与工具定义）还小：第一次调用前就付不起。
+    j.guard.max_tokens = Some(1_000);
+    let (done, _) = run_to_end(&mut c, j).await;
+    assert_eq!(
+        done.outcome,
+        JobOutcome::Stopped {
+            reason: port::StopCause::Budget
+        },
+        "{done:?}"
+    );
+}
+
+/// 作业会话里模型不能自建定时任务：CronCreate 被拒，作业照常完成。
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "live"]
+async fn a_job_session_cannot_create_scheduled_tasks() {
+    let lv = Live::new();
+    let mut c = lv.start_trusted().await;
+    let j = job(
+        "no-cron",
+        "0 3 * * *",
+        "Use the CronCreate tool to schedule the prompt \"say hi\" every minute. If the tool is refused or unavailable, reply with exactly: CRON-REFUSED.",
+        false,
+    );
+    let (done, sid) = run_to_end(&mut c, j).await;
+    assert_eq!(done.outcome, JobOutcome::Done, "{done:?}");
+    let audit = done.audit.clone().unwrap_or_default();
+    if audit.tools.contains_key("CronCreate") {
+        assert!(audit.errors > 0, "调了就该被拒：{audit:?}");
+    }
+    let w = c.watch(&sid).await;
+    assert!(
+        w.history.iter().any(
+            |h| matches!(h, port::HistoryItem::Assistant { text } if text.contains("CRON-REFUSED"))
+        ),
+        "{:?}",
+        w.history
+    );
+}

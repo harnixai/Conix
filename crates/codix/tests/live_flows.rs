@@ -563,6 +563,13 @@ async fn a_flow_job_starts_a_run_when_it_fires() {
             .then_some(())
     })
     .await;
+    // 作业起的运行：第一次开站会话时按作业的护栏记下网络（缺省 deny_all），这次运行的站会话都照它开。
+    let policies: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(lv.state().run_policies()).expect("run-policies.json"),
+    )
+    .unwrap();
+    assert_eq!(policies[&id.0]["network"], "deny_all", "{policies}");
+    assert_eq!(policies[&id.0]["job"], job.id.0.as_str());
 }
 
 /// 作业工具对齐流程：用户会话在对话里先校验、再建出一个流程作业（流程按名字认、主题照给），
