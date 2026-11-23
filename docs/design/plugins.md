@@ -363,7 +363,71 @@ stations:
 - **站的策略** `xforge-station`：再在流程这一层拒绝写 `${workspace}/xforge/**`，允许 `RunExt` 的 `xflow` / `xspec`；`deny` 永远赢。
 - 命令自己的 `writes = ["xforge/**"]` 管住它经文件工具能写到哪。
 
-### 6.6 第一版不做
+### 6.6 第一版的数据与行为
+
+XForge 原来的文件格式（回执、投影、审计链、多方案）第一版不搬，按下面这一套从头定；`xforge/` 随项目提交。
+
+**数据**（项目根下 `xforge/`）：
+
+| 文件 | 形状 |
+|---|---|
+| `manifest.yaml` | `{version: 1, verification: {commands: {<名>: <命令行>}}}`；`xforge init` 建 |
+| `constitution.md` | 原则一行一条：`- **P1** …`；编号 `P<n>` |
+| `specs/<能力>.yaml` | `{capability, title, requirements: [{id, title, text}]}`；需求编号 `<能力>/R<n>`，删掉的编号不再用（`retired: [id]`） |
+| `changes/<id>/change.yaml` | `{id, title, flow, risk, status: open \| archived, run, baseline_commit?, created_at}` |
+| `changes/<id>/proposal.md`、`design.md`、`verification.md` | 模型写的正文；`open` 放模板（带 `<!-- xforge:template -->` 标记，门禁据此认出"还没写"） |
+| `changes/<id>/delta.yaml` | `{added: [{capability, id, title, text}], modified: [{id, title?, text}], removed: [id]}` |
+| `changes/<id>/work-packages.yaml` | `{packages: [{id, title, paths: [glob], verify?: <manifest 里的命令名>, criteria: [text], status: ready \| done \| blocked, summary?}]}` |
+| `changes/<id>/ledgers/<种类>.yaml` | 种类 `decisions` / `risks` / `findings`；`{entries: [{id, text, conclusion: open \| accepted \| rejected \| resolved \| deferred, refs: []}]}` |
+| `archive/<id>/` | 归档时整份变更拷过去，`change.yaml` 的 `status` 改成 `archived` |
+
+变更 id：`<YYYYMMDD>-<由标题得的 ASCII 短名>`，重名加 `-2`、`-3`。
+
+**插件函数**（Codix 给的 `input`：`{gate | step, run, flow, station, inputs, outputs, workspace, project_root, item?}`；
+变更 id 一律从 `outputs.open.change` 取）：
+
+| 函数 | 做什么 |
+|---|---|
+| `xforge.open` | 按 `inputs.title`、`inputs.risk` 建 `changes/<id>/`（`change.yaml`、空的 `delta.yaml`、三个台账、三份模板）；`baseline_commit` 读得到就记（`git rev-parse HEAD`，读不到不算错）。回 `{change}` |
+| `xforge.packages` | 读 `work-packages.yaml`，回 `{items: [{package, title, paths, criteria}]}`（只列没 `done` 的） |
+| `xforge.close` | 把 `delta.yaml` 并进 `specs/`（新增、修改、删除→进 `retired`），整份变更拷进 `archive/<id>/`。回 `{change, specs: [改了的能力]}` |
+| `xforge.check` | 按 `input.gate` 判一道门禁，回 `{pass, detail}` |
+| `xforge.command` | 宿主跑三个命令之一：`{argv: ["xflow", "plan", "list"], change?}` → 命令的结果（测试与以后的面板用） |
+
+**门禁**（`xforge.check`，只读）：
+
+| 门禁 | 过的条件 |
+|---|---|
+| `xforge-structure` | 按站：`propose` 要 `proposal.md` 写过（没有模板标记、非空）且 `delta.yaml` 读得出；`design` 要 `design.md` 写过、`work-packages.yaml` 至少一个包且每个包有 `paths`；`verify` 要 `verification.md` 写过 |
+| `xforge-spec-delta` | 增量非空；每条字段齐；`added` 的编号在基线里没有、也不在 `retired` 里；`modified` / `removed` 的编号在基线里有 |
+| `xforge-constitution` | `constitution.md` 有原则时，`design.md` 里提到每个编号（`P1` …）；缺的列出来 |
+| `xforge-ledgers` | 三个台账里没有 `conclusion: open` 的条目 |
+| `xforge-integrated` | 工作包都 `done` |
+| `xforge-unclaimed` | `git status --porcelain` 里改过的路径都落在某个包的 `paths` 里或在 `xforge/` 下；不落的列出来 |
+| `xforge-unit-tests` | 每个写了 `verify` 的包，跑 `manifest.yaml` 里那条命令，退出码都是 0 |
+
+不带会话的调用要问人的一律失败：`unclaimed`、`unit-tests` 跑的命令被拒时，`detail` 写明要在项目设置里给哪条
+`permissions.allow` 规则（如 `"Bash(git status:*)"`）。
+
+**命令**（`RunExt` 与 `/xflow …`；当前变更：`--change <id>` > 所在运行的 `outputs.open.change`（`codix.flow.current`
+加 `codix.flow.run`）> 唯一一个 `open` 的变更）：
+
+| 命令 | 子命令 |
+|---|---|
+| `xforge` | `init`、`doctor`（布局与文件格式的问题）、`status`（开着的变更与它们的运行）、`start <quick\|solid> "<标题>" [--risk low\|medium]`（按流程的风险范围查，`codix.flow.start`） |
+| `xflow` | `show`、`ledger list [种类]`、`ledger add <种类> "<文字>" [--refs a,b]`、`ledger set <种类> <id> <结论>`、`plan list`、`plan add <id> "<标题>" --paths a,b [--verify 名] [--criteria "…;…"]`、`plan set <id> <状态> ["<小结>"]`、`check <门禁>` |
+| `xspec` | `list`、`get <id>`、`delta`、`pending`（各开着的变更动到的编号）、`check`（同 spec-delta 门禁）、`add <能力> "<标题>" "<正文>"`、`modify <id> "<正文>" [--title …]`、`remove <id>`、`revert <id>`（从增量里撤掉一条） |
+
+返回 XForge 的信封：`{ok: true, data}` / `{ok: false, error: {code, message}}`。
+
+**谁能写 `xforge/`**：模型可以直接写 `changes/*/` 下的三份 `.md`；其余（`delta.yaml`、台账、工作包、`change.yaml`、
+`specs/`、`archive/`、`manifest.yaml`）只经命令与函数写。守卫（`tool.around`）在 `via` 是 `model` 时拒绝写这些
+路径的 `Write` / `Edit` / `NotebookEdit` 与点名它们的会改东西的 `Bash`；站的策略 `xforge-station` 在流程这一层再拒一次。
+
+**流程**：`xforge-quick`（风险 `low`）：`open` → `propose`（会话，门禁 structure、spec-delta）→ `apply`（会话，门禁 unclaimed）
+→ `verify`（会话，门禁 structure，确认）→ `archive`。`xforge-solid`（风险 `low`、`medium`）同 §6.3。
+
+### 6.7 第一版不做
 
 `major` 流程与 `clarify` 站、`xarch` 与两道接口门禁、XForge 的回执链与审计链（含 HMAC）、多人审批
 （`min_approvers`、实现者与审批者分离、MCP 审批）、多方案并行、工作包并行（要各自的 worktree）。
