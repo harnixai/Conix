@@ -542,11 +542,14 @@ impl Client {
         mut want: impl FnMut(&Event) -> Option<T>,
     ) -> T {
         let deadline = Instant::now() + timeout;
+        // 每个事件只交给 `want` 一次：`finish_turn` 的闭包会往 `TurnOutcome` 里累加，重复看会重复累加。
+        let mut seen = self.cursor;
         loop {
             let notified = self.shared.more.notified();
             {
                 let evs = self.shared.events.lock().unwrap();
-                for (i, (_, e)) in evs.iter().enumerate().skip(self.cursor) {
+                for (i, (_, e)) in evs.iter().enumerate().skip(seen) {
+                    seen = i + 1;
                     if let Some(t) = want(e) {
                         self.cursor = i + 1;
                         return t;

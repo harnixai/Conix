@@ -266,15 +266,15 @@ catch_up`（再按名字过滤）。凭据取仓库根的 `.env`（worktree 里�
 | M-07 | 拖选转录复制（OSC 52） | 拖选未做（P1），`y` 复制：app/chat::y_in_the_transcript_copies_the_last_reply | mock 场景 |
 | M-08 | `/mouse` 交还鼠标 | app/workbench::ctrl_c_twice_detaches_and_mouse_command_releases_the_mouse | mock 场景 |
 | C-01 | 流式正文与思考 | live_turns::a_turn_streams_text_and_ends_with_usage；app/chat::m01_streams_with_thinking_status_and_markdown | LIVE + mock 场景 |
-| C-02 | 工具块、折叠、改文件显示 diff | 工具块：live_turns::a_permission_prompt_waits_for_the_answer；app/chat::m03_*；真实引擎给的 `file_changes` 与 diff：缺 | 缺 |
+| C-02 | 工具块、折叠、改文件显示 diff | 工具块：live_turns::a_permission_prompt_waits_for_the_answer；app/chat::m03_*；live_prompts::a_file_edit_arrives_as_a_change_with_a_diff（真实引擎的 `file_changes`：路径、种类、unified diff） | LIVE + mock 场景 |
 | C-03 | 步骤重发丢掉这一步的文字 | app/chat::m06_step_restart_discards_partial_text；host/hub::a_mid_turn_snapshot_adds_only_the_unpersisted_step；真实模型造不出确定的步骤重发：缺（不可确定地触发） | 缺 |
-| C-04 | 权限审批：允许一次、本会话总是、拒绝 | 允许一次：live_turns::a_permission_prompt_waits_for_the_answer；拒绝与「本会话总是」：缺；app/chat::m04_permission_question_and_withdrawn | 缺 |
-| C-05 | 模型提问作答；引擎撤回时对话框消失 | 作答：live_turns::a_model_question_is_answered_with_a_choice；撤回（超时）：缺；app/chat::m04_permission_question_and_withdrawn | 缺 |
+| C-04 | 权限审批：允许一次、本会话总是、拒绝 | 允许一次：live_turns::a_permission_prompt_waits_for_the_answer；live_prompts::a_denied_permission_stops_the_tool_and_the_turn_goes_on（拒绝）、allow_for_the_session_is_asked_once（本会话总是允许）；app/chat::m04_permission_question_and_withdrawn | LIVE + mock 场景 |
+| C-05 | 模型提问作答；引擎撤回时对话框消失 | 作答：live_turns::a_model_question_is_answered_with_a_choice；撤回（超时）：live_prompts::an_unanswered_prompt_is_withdrawn_by_the_engine_when_it_times_out；app/chat::m04_permission_question_and_withdrawn | LIVE + mock 场景 |
 | C-06 | 中断这一轮 | live_turns::interrupt_ends_the_turn_as_cancelled；app/chat::m05_esc_interrupts_a_running_turn | LIVE |
 | C-07 | 运行中插话；退回的放回输入框 | live_turns::a_turn_while_busy_is_returned_and_a_steer_is_delivered、a_queued_message_runs_as_the_next_turn；app/chat::m07_steer_delivered_and_returned | LIVE |
 | C-08 | 输入框编辑 | app/chat::m08_composer_picker_modes_and_keys、m08_ctrl_c_and_ctrl_d_like_claude_code；app/keys::the_terminals_own_editing_keys_still_work | mock 场景 |
 | C-09 | slash 补全：本地加引擎命令表 | live_sessions::set_model_is_recorded_and_the_command_table_is_listed；app/chat::m08_composer_picker_modes_and_keys | LIVE + mock 场景 |
-| C-10 | 状态行：耗时、token、压缩中 | token：live_turns::a_turn_streams_text_and_ends_with_usage；压缩（`Compacting` / `Compacted` 从真实引擎来）：缺 | 缺 |
+| C-10 | 状态行：耗时、token、压缩中 | token：live_turns::a_turn_streams_text_and_ends_with_usage；压缩：缺——引擎只在真压掉了东西之后发 `compact` 帧（历史太短时 `/compact` 什么也不发），要造出够长的历史很贵，Agix 自己有 LIVE；也没有「开始压缩」的帧，所以端口上的 `Compacting` 实例不产出（只有 `Compacted`），界面的「压缩中」目前没有真实来源 | 缺 |
 | C-11 | 转录滚动与回到底部 | app/crosscut::scroll_keys_act_on_the_focused_area；app/chat::m16_storm_relayouts_one_block_per_delta | mock 场景 |
 | C-12 | 归属：来源与状态 | live_sessions::the_first_line_names_a_session_and_renames_and_closes_survive_a_restart（User 与实例名）；live_turns::a_side_question_forks_a_session_and_reports_back（Fork）、a_sub_agent_shows_up_as_a_task_with_its_own_session（SubAgent）；live_jobs::run_now_fires_a_job_session_and_records_the_outcome（Job）；live_flows::a_run_goes_from_start_to_finish（FlowStation）；app/sessions::m25_ownership_line_for_every_origin | LIVE |
 | C-13 | `/model` 切换，下一轮生效 | live_sessions::set_model_is_recorded_and_the_command_table_is_listed；live_diagnostics::models_and_project_files_are_listed_for_the_pickers（`ListModels`；本仓库的第三方端点不给模型列表，只验命令成功与每项的形状）；app/chat::slash_model_opens_a_picker_and_switches | LIVE |
@@ -342,8 +342,8 @@ catch_up`（再按名字过滤）。凭据取仓库根的 `.env`（worktree 里�
 | 作业网络 | `jobs.defaults.network` 与作业的 `network` 下发到会话沙箱 | live_jobs::a_job_with_no_network_still_runs_local_commands | LIVE |
 | 作业预算 | `max_tokens` 下发为会话预算，那次记成被预算停下 | live_jobs::a_job_over_its_token_budget_is_stopped_by_the_engine | LIVE |
 | CronCreate | 作业会话里模型不能自建定时任务 | live_jobs::a_job_session_cannot_create_scheduled_tasks | LIVE |
-| `budget_exceeded` | 引擎因预算收尾，端口上是 `StopReason::Budget` | live_jobs::a_job_over_its_token_budget_is_stopped_by_the_engine（作业侧）；普通会话里的 `TurnEnded { stop: Budget }`：缺 | 缺 |
-| `max_turns` | 一轮里调用次数到顶，端口上是 `StopReason::MaxTurns` | host/src/hub/state.rs 的 `stop_reason_of` 单测；app 的 model/chat 单测；真实引擎：缺 | 缺 |
+| `budget_exceeded` | 引擎因预算收尾，端口上是 `StopReason::Budget` | live_jobs::a_job_over_its_token_budget_is_stopped_by_the_engine（作业侧）；live_limits::a_turn_over_the_token_budget_ends_as_budget（普通会话里的 `TurnEnded { stop: Budget }`） | LIVE |
+| `max_turns` | 一轮里调用次数到顶，端口上是 `StopReason::MaxTurns` | host/src/hub/state.rs 的 `stop_reason_of` 单测；app 的 model/chat 单测；live_limits::a_turn_over_the_model_call_limit_ends_as_max_turns（`turn.max_model_calls`） | LIVE |
 | `/doctor`：`codix.session_loosen` | 部署方关了放宽时报降级 | host/hub::doctor_reports_the_engines_checks_and_the_instances_own；live_sessions::the_permission_mode_is_the_sessions_and_takes_effect_at_once（放宽生效）；engine/settings::the_cli_layer_lets_a_session_loosen_its_mode；live_diagnostics::doctor_reports_the_engines_checks_and_the_instances_own（真实实例里是 ok） | LIVE |
 | `/doctor`：`codix.jobs_network` | `inherit` 时报降级 | host/hub::doctor_reports_the_engines_checks_and_the_instances_own；live_diagnostics::doctor_flags_an_inherited_job_network_and_an_unreadable_config | LIVE |
 | 会话累计用量 | 重启后会话摘要的 usage 来自引擎的 `session.get` 累计 | host/hub::a_watched_sessions_usage_is_what_the_engine_reports；live_sessions::a_sessions_cumulative_usage_survives_a_restart | LIVE |
