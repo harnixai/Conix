@@ -235,8 +235,9 @@ async fn the_permission_mode_is_the_sessions_and_takes_effect_at_once() {
         "重启后还是 plan"
     );
 
-    // 缺省设置下客户端只能把会话收紧：比设置宽的 acceptEdits 被夹回 default，回复照实说
-    // （界面据此在底栏提示实际是什么；要放开得在 Agix 的设置里开 allow_client_permission_override）。
+    // Codix 在 cli 层开了 permissions.client_may_loosen（流程站要 acceptEdits），它与
+    // session.setPermissionMode 的放宽是同一个开关：人在界面上切到比设置宽的 acceptEdits 照样生效。
+    // 部署方的 managed 层关掉它时会被夹回，/doctor 的 codix.session_loosen 报出来。
     let r = c
         .ok(Command::SetPermissionMode {
             session: s.clone(),
@@ -246,13 +247,13 @@ async fn the_permission_mode_is_the_sessions_and_takes_effect_at_once() {
     assert_eq!(
         r,
         Reply::PermissionMode {
-            mode: PermissionMode::Default,
-            clamped: true
+            mode: PermissionMode::AcceptEdits,
+            clamped: false
         }
     );
     let me = s.clone();
-    c.wait_upsert("会话回到 default", |x| {
-        x.id == me && x.permission == PermissionMode::Default
+    c.wait_upsert("会话到了 acceptEdits", |x| {
+        x.id == me && x.permission == PermissionMode::AcceptEdits
     })
     .await;
 }
