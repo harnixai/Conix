@@ -4,7 +4,7 @@ members = ["crates/*"]
 exclude = ["agix", "3rds", "archive"]
 
 [workspace.package]
-version = "0.1.1-2026111901"
+version = "0.1.2-2026112301"
 edition = "2024"
 rust-version = "1.88"
 license = "Apache-2.0"
