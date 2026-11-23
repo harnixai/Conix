@@ -116,6 +116,29 @@ Agix 的数据根），项目 `<项目>/.codix/settings.json`（进 git），两
   `app.history: "project"`，受信项目的会话放进项目里。这个开关是 Agix 说的"安全缺省"而不是安全边界，部署方的 managed 设置仍然压过它，
   能把它关掉；关了 `/doctor` 的 `codix.session_loosen` 会报 degraded。
 
+## 在会话里改配置
+
+可以直接让会话里的模型改 Codix 的配置，比如"加一个 DeepSeek 的 provider，测通了再切过去"。它用的是六个工具，
+只有你自己开的会话有，作业与流程里的会话没有；会改东西的几个照常先问你。
+
+| 工具 | 做什么 |
+|---|---|
+| `config_show` | 现在的缺省模型、路由（`model.order`）、每个 provider（端点、key 放在哪个环境变量、在不在）、`codix.yaml` |
+| `config_provider_add` | 加一个 provider，**不切换**：路由不变，会话照常用现在的模型 |
+| `config_provider_test` | 测通：先问端点，再开一个临时会话用它答一句（不进会话列表，测完删掉） |
+| `config_switch` | 切过去：先测，不通不切；备份现在的路由；切完立刻再答一句，不通自动退回 |
+| `config_rollback` | 退回上一次切换前 |
+| `codix_config_set` | 改 `codix.yaml` 的一项：先校验（读不懂的值直接拒），备份后写；`jobs`、`notify` 当场生效，其余下次启动生效 |
+
+为什么要分"加、测、切"：改了立刻生效的话，新的 provider 不通，会话当场就没有模型可用，也就没法再改回来。
+
+- **key 不写进设置**：provider 只写 `api_key_env`（放 key 的环境变量名）。实例进程要看得到这个变量。
+- **只有自带 provider 时**：设置里一个 provider 都没定义时，引擎用自带的 `anthropic`；一旦定义了任何一个，自带的
+  就没了。所以加第一个 provider 之前，Codix 先把自带的照原样写成显式的 `anthropic` 并钉住路由，测一句通了才继续，
+  不通就撤回、什么都不加。自带的本来就不通（还没给 key）时没什么要保住的，加了就走新的。
+- **备份**：切换前的路由在 `~/.codix/config-backups/<时刻>.json`，`codix.yaml` 的旧文件在
+  `config-backups/codix-<时刻>.yaml`。`codix_config_set` 重写文件时不保留注释，注释在备份里。
+
 ## keybindings.json
 
 一个数组，每条把某个上下文里的一个键（或空格隔开的和弦）绑到一个动作，`action` 为 `null` 是解绑：
