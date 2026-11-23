@@ -1439,3 +1439,32 @@ async fn a_firing_records_what_it_did() {
     assert_eq!(audit.errors, 1);
     assert_eq!(audit.files, ["src/a.rs"]);
 }
+
+#[tokio::test]
+async fn a_watched_sessions_usage_is_what_the_engine_reports() {
+    let r = rig_with(Box::new(|m, p| {
+        if m == "session.get" {
+            return Ok(json!({"session_id": p["session_id"], "turn_state":"idle",
+                "usage":{"input_tokens":100,"output_tokens":20,
+                         "cache_creation_input_tokens":3,"cache_read_input_tokens":4}}));
+        }
+        default_handler(m, p)
+    }))
+    .await;
+    let Reply::Watched(w) = r
+        .hub
+        .handle(Command::Watch {
+            session: SessionId("s1".into()),
+        })
+        .await
+        .unwrap()
+    else {
+        panic!()
+    };
+    let u = &w.session.usage;
+    assert_eq!(
+        (u.input, u.output, u.cache_write, u.cache_read),
+        (100, 20, 3, 4),
+        "重启后内存里是 0，累计以引擎的为准"
+    );
+}

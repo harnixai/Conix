@@ -174,6 +174,11 @@ impl Hub {
             model,
             origin: rec.origin.clone(),
             parent: info.parent_session_id.clone(),
+            usage: info
+                .usage
+                .as_ref()
+                .map(state::map_usage)
+                .unwrap_or_default(),
             live: info.status == "active",
             running: info.turn_state.as_deref() == Some("running"),
             updated_ms: parse_rfc3339_ms(&info.last_active)
@@ -463,6 +468,12 @@ impl Hub {
                 self.subscribe(id, true).await.map_err(rpc_err)?;
                 if let Ok(g) = self.call("session.get", json!({"session_id": id})).await {
                     running_hint = Some(g["turn_state"].as_str() == Some("running"));
+                    // 累计用量以引擎为准：重启后内存里的是 0，轮间的调用也只有引擎知道。
+                    if let Ok(u) = serde_json::from_value::<wire::frames::Usage>(g["usage"].clone())
+                        && let Some(s) = self.0.st.locked().sessions.get_mut(id)
+                    {
+                        s.usage = state::map_usage(&u);
+                    }
                 }
                 if let Ok(g) = self.call("session.goal", json!({"session_id": id})).await {
                     let goal = serde_json::from_value::<wire::frames::GoalView>(g["goal"].clone())

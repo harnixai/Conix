@@ -340,6 +340,9 @@ pub struct SessionInfo {
     pub turn_state: Option<String>,
     #[serde(default)]
     pub parent_session_id: Option<String>,
+    /// 会话自创建以来的累计用量（只有 `session.get` 带；旧引擎与 `session.list` 没有）。
+    #[serde(default)]
+    pub usage: Option<Usage>,
 }
 
 /// `session.history` 里的一条消息（协议 §4.1 加上 `seq` / `origin` / `usage`）。
