@@ -21,6 +21,8 @@ pub struct MockState {
     pub jobs: BTreeMap<JobId, (Job, Vec<JobEntry>)>,
     /// 已关闭的会话，关掉的新的在前。
     pub closed: Vec<SessionSeed>,
+    pub plugin_packages: Vec<port::PluginPackage>,
+    pub plugins: Vec<port::PluginInfo>,
 }
 
 impl MockState {
@@ -39,6 +41,8 @@ impl MockState {
             tasks: seed.tasks.into_iter().map(|t| (t.id.clone(), t)).collect(),
             task_output: seed.task_output,
             flows: seed.flows,
+            plugin_packages: seed.plugin_packages,
+            plugins: vec![],
             runs: seed
                 .runs
                 .into_iter()
@@ -244,6 +248,10 @@ impl MockState {
                         yaml: String::new(),
                     }),
                 }
+                None
+            }
+            FlowRemoved { name } => {
+                self.flows.retain(|x| &x.summary.name != name);
                 None
             }
             RunUpserted(r) => {

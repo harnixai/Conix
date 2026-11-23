@@ -996,3 +996,7 @@ jobs:
         outcome: running
         usage: {input: 900000, output: 30000}
         target: {session: {id: s2, title: 夜间测试}}
+
+# 可装的插件包（plugins.md §3）；装好的从零起步。
+plugin_packages:
+  - {name: xforge, version: 0.1.0, path: /opt/codix/share/codix/plugins/xforge-0.1.0.zip}

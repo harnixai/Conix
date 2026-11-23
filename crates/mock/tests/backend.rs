@@ -12,6 +12,9 @@ sessions:
       title: 测试
       state: idle
       provenance: {instance: dev, host: h, scene: code, model: m}
+
+plugin_packages:
+  - {name: xforge, version: 0.1.0, path: /opt/p/xforge-0.1.0.zip}
 "#;
 
 fn backend(scenario: &str) -> std::sync::Arc<ScriptedBackend> {
@@ -191,4 +194,79 @@ fn builtin_seeds_and_scenarios_parse() {
     for name in mock::scenario_names() {
         mock::load_scenario(name).unwrap_or_else(|e| panic!("{e}"));
     }
+}
+
+#[tokio::test(start_paused = true)]
+async fn plugin_install_enable_uninstall_moves_flows() {
+    let b = backend("seed: x");
+    let mut rx = b.events();
+    let Reply::Plugins(p) = b.call(Command::ListPlugins).await.unwrap() else {
+        panic!()
+    };
+    assert_eq!(p.available.len(), 1);
+    assert!(!p.available[0].installed && p.installed.is_empty());
+
+    assert!(
+        b.call(Command::InstallPlugin {
+            source: "nope".into()
+        })
+        .await
+        .is_err()
+    );
+    let Reply::Plugin { plugin, disclosure } = b
+        .call(Command::InstallPlugin {
+            source: "/somewhere/xforge-0.1.0.zip".into(),
+        })
+        .await
+        .unwrap()
+    else {
+        panic!()
+    };
+    assert!(!plugin.enabled && !disclosure.capabilities.is_empty());
+    assert!(
+        drain(&mut rx, 10)
+            .await
+            .iter()
+            .any(|e| matches!(e, Event::PluginsChanged))
+    );
+
+    b.call(Command::SetPluginEnabled {
+        name: "xforge".into(),
+        enabled: true,
+    })
+    .await
+    .unwrap();
+    let evs = drain(&mut rx, 10).await;
+    assert_eq!(
+        evs.iter()
+            .filter(
+                |e| matches!(e, Event::FlowUpserted(f) if f.source.as_deref() == Some("xforge"))
+            )
+            .count(),
+        2
+    );
+    let Reply::Flows(f) = b.call(Command::ListFlows).await.unwrap() else {
+        panic!()
+    };
+    assert!(f.iter().any(|f| f.name == "xforge-quick"));
+
+    b.call(Command::UninstallPlugin {
+        name: "xforge".into(),
+    })
+    .await
+    .unwrap();
+    let evs = drain(&mut rx, 10).await;
+    assert_eq!(
+        evs.iter()
+            .filter(|e| matches!(e, Event::FlowRemoved { .. }))
+            .count(),
+        2
+    );
+    assert!(
+        b.call(Command::PluginDisclosure {
+            name: "xforge".into()
+        })
+        .await
+        .is_err()
+    );
 }

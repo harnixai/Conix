@@ -4,6 +4,7 @@
 mod backend;
 mod catalog;
 mod instances;
+mod plugins;
 mod scenario;
 mod seed;
 mod state;

@@ -604,11 +604,36 @@ impl ScriptedBackend {
                 }
                 Ok(Reply::Ok)
             }
-            ListPlugins
-            | InstallPlugin { .. }
-            | SetPluginEnabled { .. }
-            | UninstallPlugin { .. }
-            | PluginDisclosure { .. } => Err(PortError::Failed("plugins: not scripted yet".into())),
+            ListPlugins => Ok(Reply::Plugins(crate::plugins::list(&st()))),
+            InstallPlugin { source } => {
+                let (plugin, disclosure) = crate::plugins::install(&mut st(), source)?;
+                if effects {
+                    self.emit_now(Event::PluginsChanged);
+                }
+                Ok(Reply::Plugin { plugin, disclosure })
+            }
+            SetPluginEnabled { name, enabled } => {
+                let events = crate::plugins::set_enabled(&mut st(), name, *enabled)?;
+                if effects {
+                    for e in events {
+                        self.emit_now(e);
+                    }
+                }
+                Ok(Reply::Ok)
+            }
+            UninstallPlugin { name } => {
+                let events = crate::plugins::uninstall(&mut st(), name)?;
+                if effects {
+                    for e in events {
+                        self.emit_now(e);
+                    }
+                }
+                Ok(Reply::Ok)
+            }
+            PluginDisclosure { name } => {
+                let (plugin, disclosure) = crate::plugins::disclosure(&st(), name)?;
+                Ok(Reply::Plugin { plugin, disclosure })
+            }
             ValidateJob { job } => Ok(Reply::JobCheck(port::JobCheck {
                 next_fire_ms: job.next_fire_ms.into_iter().collect(),
                 guard: job.guard.clone(),

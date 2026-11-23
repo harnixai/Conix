@@ -19,6 +19,8 @@ pub struct Seed {
     pub flows: Vec<FlowSeed>,
     pub runs: Vec<RunView>,
     pub jobs: Vec<JobSeed>,
+    /// 可装的插件包；装好的不进种子，从 `nothing installed` 起步。
+    pub plugin_packages: Vec<port::PluginPackage>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
