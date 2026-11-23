@@ -1,0 +1,90 @@
+name: xforge-solid
+title: 常规变更
+description: 低到中风险的变更：提案、设计、检查、按工作包实施、验证后归档。
+inputs:
+  title:
+    schema: {type: string, minLength: 1}
+    description: 变更的标题
+  risk:
+    schema: {type: string, enum: [low, medium]}
+    default: medium
+    description: 风险等级；solid 收 low 与 medium
+policies: [xforge-station]
+stations:
+  - id: open
+    title: 开变更
+    executor: {kind: program, step: xforge-open}
+    output: {type: object}
+    exit: [{kind: output}]
+  - id: propose
+    title: 提案
+    executor: {kind: session}
+    skill: xforge-propose
+    output:
+      type: object
+      required: [summary]
+      properties: {summary: {type: string}}
+    exit: [{kind: output}, {kind: gate, gate: xforge-structure}, {kind: gate, gate: xforge-spec-delta}]
+  - id: design
+    title: 设计
+    executor: {kind: session}
+    skill: xforge-design
+    output:
+      type: object
+      required: [summary]
+      properties: {summary: {type: string}}
+    exit:
+      - {kind: output}
+      - {kind: gate, gate: xforge-structure}
+      - {kind: gate, gate: xforge-constitution}
+      - {kind: gate, gate: xforge-ledgers}
+    rework_to: [propose]
+  - id: check
+    title: 检查
+    executor: {kind: agent}
+    skill: xforge-check
+    output:
+      type: object
+      required: [summary]
+      properties: {summary: {type: string}}
+    exit: [{kind: output}, {kind: gate, gate: xforge-ledgers}, {kind: confirm}]
+    rework_to: [design, propose]
+  - id: packages
+    title: 列工作包
+    executor: {kind: program, step: xforge-packages}
+    output: {type: object}
+    exit: [{kind: output}]
+  - id: apply
+    title: 实施
+    foreach: ${stations.packages.output.items}
+    max_parallel: 1
+    executor: {kind: agent, agent_type: xforge-executor}
+    skill: xforge-apply
+    output:
+      type: object
+      required: [package, status]
+      properties:
+        package: {type: string}
+        status: {enum: [done, blocked, needs-human]}
+        summary: {type: string}
+    exit:
+      - {kind: output}
+      - {kind: gate, gate: xforge-integrated}
+      - {kind: gate, gate: xforge-unclaimed}
+      - {kind: gate, gate: xforge-unit-tests}
+    rework_to: [design]
+  - id: verify
+    title: 验证
+    executor: {kind: session}
+    skill: xforge-verify
+    output:
+      type: object
+      required: [summary]
+      properties: {summary: {type: string}}
+    exit: [{kind: output}, {kind: gate, gate: xforge-structure}, {kind: confirm}]
+    rework_to: [apply, design]
+  - id: archive
+    title: 归档
+    executor: {kind: program, step: xforge-archive}
+    output: {type: object}
+    exit: [{kind: output}]

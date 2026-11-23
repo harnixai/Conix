@@ -1,0 +1,52 @@
+name: xforge-quick
+title: 快速变更
+description: 低风险的小变更：提案与规格增量、直接实施、验证后归档。
+inputs:
+  title:
+    schema: {type: string, minLength: 1}
+    description: 变更的标题
+  risk:
+    schema: {type: string, enum: [low]}
+    default: low
+    description: 风险等级；quick 只收 low
+policies: [xforge-station]
+stations:
+  - id: open
+    title: 开变更
+    executor: {kind: program, step: xforge-open}
+    output: {type: object}
+    exit: [{kind: output}]
+  - id: propose
+    title: 提案
+    executor: {kind: session}
+    skill: xforge-propose
+    output:
+      type: object
+      required: [summary]
+      properties: {summary: {type: string}}
+    exit: [{kind: output}, {kind: gate, gate: xforge-structure}, {kind: gate, gate: xforge-spec-delta}]
+  - id: apply
+    title: 实施
+    executor: {kind: session}
+    skill: xforge-apply
+    output:
+      type: object
+      required: [summary]
+      properties: {summary: {type: string}}
+    exit: [{kind: output}, {kind: gate, gate: xforge-unclaimed}]
+    rework_to: [propose]
+  - id: verify
+    title: 验证
+    executor: {kind: session}
+    skill: xforge-verify
+    output:
+      type: object
+      required: [summary]
+      properties: {summary: {type: string}}
+    exit: [{kind: output}, {kind: gate, gate: xforge-structure}, {kind: confirm}]
+    rework_to: [apply, propose]
+  - id: archive
+    title: 归档
+    executor: {kind: program, step: xforge-archive}
+    output: {type: object}
+    exit: [{kind: output}]

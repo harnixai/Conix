@@ -1,0 +1,85 @@
+uses = ["codix"]
+
+[plugin]
+name = "xforge"
+version = "0.1.0"
+api_version = "0.1"
+requires_engine = ">=0.4.0, <0.5"
+description = "规格驱动的变更：规格增量、台账、门禁，按 quick / solid 流程推进"
+
+# 所有命令与函数共用 commands/xforge.js：入口文件各自单独求值，没有 require / import，
+# 拆成 lib/*.js 就得在打包时拼进每个入口；一份文件省掉构建（引擎只收源码，见 runext.md §4）。
+[[command]]
+name = "xflow"
+entry = "commands/xforge.js:xflowMain"
+description = "变更：查看、台账、工作包、门禁检查"
+read_only = ["help", "show", "ledger list", "plan list", "check"]
+writes = ["xforge/**"]
+
+[[command]]
+name = "xspec"
+entry = "commands/xforge.js:xspecMain"
+description = "规格与规格增量"
+read_only = ["help", "list", "get", "delta", "pending", "check"]
+writes = ["xforge/**"]
+
+[[command]]
+name = "xforge"
+entry = "commands/xforge.js:xforgeMain"
+description = "项目初始化、体检、开始一次变更、查看进行中的变更"
+read_only = ["help", "doctor", "status"]
+writes = ["xforge/**"]
+
+[[function]]
+name = "check"
+entry = "commands/xforge.js:fnCheck"
+description = "XForge 的门禁检查（只读）：input.gate 说是哪一道"
+
+[[function]]
+name = "open"
+entry = "commands/xforge.js:fnOpen"
+description = "开一次变更：建 xforge/changes/<id>/"
+writes = ["xforge/**"]
+
+[[function]]
+name = "packages"
+entry = "commands/xforge.js:fnPackages"
+description = "列出这次变更还没完成的工作包"
+
+[[function]]
+name = "close"
+entry = "commands/xforge.js:fnClose"
+description = "归档变更：规格增量并进 specs/"
+writes = ["xforge/**"]
+
+[[function]]
+name = "command"
+entry = "commands/xforge.js:fnCommand"
+description = "宿主跑 xflow / xspec / xforge 之一：测试与以后的面板用"
+writes = ["xforge/**"]
+
+[[agent]]
+name = "xforge-executor"
+description = "按一个工作包实施并验证，把结果登记回台账"
+prompt = "agents/xforge-executor.md"
+
+[[script]]
+point = "tool.around"
+entry = "scripts/guard.js:around"
+
+[x-codix]
+flows = "flows"
+
+[x-codix.gates]
+xforge-structure    = "xforge.check"
+xforge-spec-delta   = "xforge.check"
+xforge-constitution = "xforge.check"
+xforge-ledgers      = "xforge.check"
+xforge-integrated   = "xforge.check"
+xforge-unclaimed    = "xforge.check"
+xforge-unit-tests   = "xforge.check"
+
+[x-codix.steps]
+xforge-open     = "xforge.open"
+xforge-packages = "xforge.packages"
+xforge-archive  = "xforge.close"

@@ -1,0 +1,18 @@
+name: xforge-station
+title: XForge 站的写入边界
+description: xforge/ 下的结构化数据只经 xflow / xspec / xforge 命令写；模型直接写只限 proposal.md、design.md、verification.md。
+permissions:
+  - effect: deny
+    tools: [Write, Edit, NotebookEdit]
+    paths:
+      - "${workspace}/xforge/manifest.yaml"
+      - "${workspace}/xforge/specs/**"
+      - "${workspace}/xforge/archive/**"
+      - "${workspace}/xforge/changes/*/change.yaml"
+      - "${workspace}/xforge/changes/*/delta.yaml"
+      - "${workspace}/xforge/changes/*/work-packages.yaml"
+      - "${workspace}/xforge/changes/*/ledgers/**"
+    message: xforge data changes only through the xflow, xspec and xforge commands (RunExt)
+  - effect: allow
+    tools: [RunExt]
+    commands: ["xflow *", "xspec *", "xforge *"]
