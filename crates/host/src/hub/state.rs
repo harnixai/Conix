@@ -367,7 +367,11 @@ impl St {
                         .collect(),
                 })
             }
-            SessionEvent::TurnComplete { stop_reason, usage } => {
+            SessionEvent::TurnComplete {
+                stop_reason,
+                usage,
+                message,
+            } => {
                 let usage = map_usage(&usage);
                 s.running = false;
                 s.usage.add(&usage);
@@ -375,7 +379,7 @@ impl St {
                 let text = s.turn_text.clone();
                 out.events.push(Event::TurnEnded {
                     session: session(),
-                    stop: stop_reason_of(&stop_reason),
+                    stop: stop_reason_of(&stop_reason, message.as_deref()),
                     usage,
                 });
                 self.upsert(sid, out);
@@ -530,8 +534,11 @@ pub fn map_usage(u: &wire::frames::Usage) -> Usage {
     }
 }
 
-fn stop_reason_of(s: &str) -> StopReason {
+fn stop_reason_of(s: &str, message: Option<&str>) -> StopReason {
     match s {
+        "budget_exceeded" => StopReason::Budget(message.unwrap_or_default().to_string()),
+        // 0.3 的文档叫 max_turns_reached，0.4 叫 max_turns，两个都认。
+        "max_turns" | "max_turns_reached" => StopReason::MaxTurns,
         "end_turn" | "stop_sequence" => StopReason::EndTurn,
         "max_tokens" => StopReason::MaxTokens,
         "refusal" => StopReason::Refusal,
@@ -704,4 +711,30 @@ pub fn permission_name(m: port::PermissionMode) -> String {
         .ok()
         .and_then(|v| v.as_str().map(str::to_string))
         .unwrap_or_else(|| "default".into())
+}
+
+#[cfg(test)]
+mod stop_reason_tests {
+    use super::*;
+
+    #[test]
+    fn the_two_new_stop_reasons_are_recognised() {
+        assert_eq!(
+            stop_reason_of("budget_exceeded", Some("this turn's budget")),
+            StopReason::Budget("this turn's budget".into())
+        );
+        assert_eq!(
+            stop_reason_of("budget_exceeded", None),
+            StopReason::Budget(String::new())
+        );
+        assert_eq!(stop_reason_of("max_turns", None), StopReason::MaxTurns);
+        assert_eq!(
+            stop_reason_of("max_turns_reached", None),
+            StopReason::MaxTurns
+        );
+        assert_eq!(
+            stop_reason_of("weird", None),
+            StopReason::Other("weird".into())
+        );
+    }
 }

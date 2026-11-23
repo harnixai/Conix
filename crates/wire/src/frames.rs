@@ -116,6 +116,9 @@ pub enum SessionEvent {
         stop_reason: String,
         #[serde(default)]
         usage: Usage,
+        /// `budget_exceeded` 时说明是谁的预算（这一轮、会话还是目标）。
+        #[serde(default)]
+        message: Option<String>,
     },
     Error {
         #[serde(default)]

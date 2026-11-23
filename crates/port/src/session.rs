@@ -119,6 +119,10 @@ pub enum StopReason {
     MaxTokens,
     Refusal,
     Cancelled,
+    /// 一轮里模型调用次数到顶。
+    MaxTurns,
+    /// token 预算用完；内容是引擎说明的是谁的预算。
+    Budget(String),
     #[serde(untagged)]
     Other(String),
 }

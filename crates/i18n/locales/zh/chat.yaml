@@ -1,6 +1,8 @@
 chat:
   model_retry: "模型调用失败，正在重试（第 {attempt} 次）：{reason}"
   interrupted: "已中断 · 你想让它怎么做？"
+  budget_exceeded: "这一轮停了：token 预算用完（{message}）"
+  max_turns: "这一轮停了：达到一轮的模型调用上限"
   withdrawn_timed_out: "超时"
   withdrawn_cancelled: "这一轮已结束"
   withdrawn_policy: "流程按策略代答"

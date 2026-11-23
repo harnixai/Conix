@@ -1,6 +1,8 @@
 chat:
   model_retry: "Model call failed, retrying (attempt {attempt}): {reason}"
   interrupted: "Interrupted · What should Claude do instead?"
+  budget_exceeded: "turn stopped: token budget used up ({message})"
+  max_turns: "turn stopped: the turn's model-call limit was reached"
   withdrawn_timed_out: "timed out"
   withdrawn_cancelled: "this turn has ended"
   withdrawn_policy: "answered by the flow's policy"

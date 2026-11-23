@@ -347,9 +347,17 @@ impl Conversation {
             }
             Event::TurnEnded { stop, .. } => {
                 self.running = false;
-                if stop == StopReason::Cancelled {
+                let text = match stop {
+                    StopReason::Cancelled => Some(i18n::t!("chat.interrupted")),
+                    StopReason::Budget(message) => {
+                        Some(i18n::t!("chat.budget_exceeded", message = message))
+                    }
+                    StopReason::MaxTurns => Some(i18n::t!("chat.max_turns")),
+                    _ => None,
+                };
+                if let Some(text) = text {
                     self.push(BlockKind::Notice {
-                        text: i18n::t!("chat.interrupted"),
+                        text,
                         tone: Tone::Warn,
                     });
                 }
@@ -748,5 +756,59 @@ fn render(
             &Line::toned("  ⎿  ", Tone::Dim),
             &Line::plain("     "),
         ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn conversation() -> Conversation {
+        let w: Watched = serde_json::from_value(serde_json::json!({
+            "session": {
+                "id": "s1", "title": "t", "state": "idle",
+                "provenance": {
+                    "instance": "lv", "host": "h", "scene": "x", "model": "m",
+                },
+            },
+        }))
+        .unwrap();
+        Conversation::from_watched(w, 0)
+    }
+
+    fn last_notice(c: &Conversation) -> Option<(String, Tone)> {
+        match c.blocks.last().map(|b| &b.kind) {
+            Some(BlockKind::Notice { text, tone }) => Some((text.clone(), *tone)),
+            _ => None,
+        }
+    }
+
+    fn end(c: &mut Conversation, stop: StopReason) {
+        c.apply(
+            Event::TurnEnded {
+                session: port::SessionId("s1".into()),
+                stop,
+                usage: Default::default(),
+            },
+            0,
+        );
+    }
+
+    #[test]
+    fn a_budget_stop_says_whose_budget_it_was() {
+        let mut c = conversation();
+        end(&mut c, StopReason::Budget("x".into()));
+        let (text, tone) = last_notice(&c).expect("有提示");
+        assert!(text.contains('x'), "{text}");
+        assert_eq!(tone, Tone::Warn);
+    }
+
+    #[test]
+    fn hitting_the_call_limit_is_said_and_a_normal_end_is_not() {
+        let mut c = conversation();
+        end(&mut c, StopReason::EndTurn);
+        assert!(last_notice(&c).is_none());
+        end(&mut c, StopReason::MaxTurns);
+        assert_eq!(last_notice(&c).expect("有提示").1, Tone::Warn);
     }
 }
