@@ -170,6 +170,7 @@ pub fn busy() -> Seed {
                 title: "需求到上线".into(),
                 origin: FlowOrigin::Builtin,
                 active_runs: 20,
+                source: None,
             },
             stations: vec![],
             yaml: String::new(),

@@ -163,6 +163,10 @@ pub enum Event {
     RunUpserted(RunSummary),
     RunDetail(Box<RunView>),
 
+    // 插件
+    /// 装、卸、启停之后：`/plugin` 浮层开着就重新列一次。
+    PluginsChanged,
+
     // 作业
     JobUpserted(Job),
     JobRemoved {

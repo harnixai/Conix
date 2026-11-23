@@ -208,6 +208,24 @@ pub enum Command {
     TestNotify,
     /// 自检：引擎的 `daemon.doctor` 加上实例自己的几项。
     Doctor,
+    /// `/plugin`：可装的包与装好的插件。
+    ListPlugins,
+    /// 装一个包（名字或 zip 路径）。装完是停用的：回两份披露，人确认后 `SetPluginEnabled`，
+    /// 不确认就 `UninstallPlugin`（plugins.md §3）。
+    InstallPlugin {
+        source: String,
+    },
+    SetPluginEnabled {
+        name: String,
+        enabled: bool,
+    },
+    UninstallPlugin {
+        name: String,
+    },
+    /// 再看一次一个装好的插件的披露。
+    PluginDisclosure {
+        name: String,
+    },
     /// 停下正在跑的那一次（`fired_ms` 省略 = 正在跑的那次）。
     StopFiring {
         job: JobId,
@@ -267,6 +285,11 @@ impl Command {
             Command::StopFiring { .. } => "stop_firing",
             Command::TestNotify => "test_notify",
             Command::Doctor => "doctor",
+            Command::ListPlugins => "list_plugins",
+            Command::InstallPlugin { .. } => "install_plugin",
+            Command::SetPluginEnabled { .. } => "set_plugin_enabled",
+            Command::UninstallPlugin { .. } => "uninstall_plugin",
+            Command::PluginDisclosure { .. } => "plugin_disclosure",
         }
     }
 }
@@ -377,6 +400,12 @@ pub enum Reply {
     JobCheck(JobCheck),
     Notified(Vec<crate::SinkResult>),
     Doctor(Vec<crate::HealthCheck>),
+    Plugins(crate::Plugins),
+    /// 装好（或再看一次）的插件与它的披露。
+    Plugin {
+        plugin: crate::PluginInfo,
+        disclosure: crate::PluginDisclosure,
+    },
     Models(Vec<ModelInfo>),
     Files(Vec<String>),
     Checkpoints(Vec<Checkpoint>),

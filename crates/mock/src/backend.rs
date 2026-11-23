@@ -604,6 +604,11 @@ impl ScriptedBackend {
                 }
                 Ok(Reply::Ok)
             }
+            ListPlugins
+            | InstallPlugin { .. }
+            | SetPluginEnabled { .. }
+            | UninstallPlugin { .. }
+            | PluginDisclosure { .. } => Err(PortError::Failed("plugins: not scripted yet".into())),
             ValidateJob { job } => Ok(Reply::JobCheck(port::JobCheck {
                 next_fire_ms: job.next_fire_ms.into_iter().collect(),
                 guard: job.guard.clone(),

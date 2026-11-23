@@ -36,6 +36,7 @@ pub(crate) fn flow_summary(d: &DefRow, active_runs: u32) -> port::FlowSummary {
         },
         origin: origin(d.origin),
         active_runs,
+        source: d.source.clone(),
     }
 }
 

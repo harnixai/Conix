@@ -6,6 +6,7 @@ mod dispatch;
 mod guard;
 mod history;
 mod jobs;
+mod plugins;
 mod registry;
 mod session_opts;
 mod sessions;

@@ -9,6 +9,9 @@ pub struct FlowSummary {
     pub origin: FlowOrigin,
     #[serde(default)]
     pub active_runs: u32,
+    /// 插件带来的（或覆盖了插件那份的）：插件名。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
 }
 
 /// 流程从哪来。会话、流程、作业都是项目级的：项目里建的流程只在这个项目可见，

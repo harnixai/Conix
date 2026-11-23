@@ -14,6 +14,7 @@ mod instance;
 mod job;
 pub mod link;
 pub mod order;
+mod plugin;
 mod session;
 mod task;
 
@@ -37,6 +38,7 @@ pub use job::{
     AutoDisabled, FiringAudit, Job, JobCheck, JobEntry, JobGuard, JobKind, JobOutcome, JobTarget,
     Network, OutcomeKind, Overlap, SkipCause, StopCause,
 };
+pub use plugin::{PluginDisclosure, PluginInfo, PluginPackage, Plugins, VisibleText};
 pub use session::{
     Answer, FileChange, FileChangeKind, Goal, GoalPhase, HistoryItem, Origin, Prompt, PromptKind,
     PromptSource, Provenance, Resolution, SessionState, SessionSummary, StopReason, Todo,

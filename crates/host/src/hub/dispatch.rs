@@ -538,6 +538,11 @@ impl Hub {
             }
             C::TestNotify => Ok(Reply::Notified(self.test_notify().await)),
             C::Doctor => Ok(Reply::Doctor(self.doctor().await)),
+            cmd @ (C::ListPlugins
+            | C::InstallPlugin { .. }
+            | C::SetPluginEnabled { .. }
+            | C::UninstallPlugin { .. }
+            | C::PluginDisclosure { .. }) => self.plugin_command(cmd).await,
             C::ValidateJob { job } => Ok(Reply::JobCheck(self.check_job(&job).await)),
             C::StopFiring { job, fired_ms } => {
                 self.stop_firing(&job.0, fired_ms, port::StopCause::Manual)
