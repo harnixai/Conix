@@ -138,12 +138,14 @@ TUI 照常收到事件。
 插件函数（`[[function]]`，Agix `runext.md` §12）不进模型的工具表，只给宿主按调用名 `<包名>.<函数名>` 调。
 
 - **门禁**（`PluginGates`，实现 harnix-flow 的 `Gates`）：门禁名按 `[x-codix.gates]` 找到函数；
-  `plugin.call { function, input, cwd: 运行的工作目录, writes: false, timeout_ms }`，**不带会话**——结果只取决于项目里的
+  `plugin.call { function, input, cwd: 运行的工作目录, writes: true, timeout_ms }`，**不带会话**——结果只取决于项目里的
   数据，与站的会话还在不在无关。`input` 是 `{ gate, run, flow, station, inputs, outputs: { <站>: <输出> }, workspace,
   project_root }`（`gate` 让一个函数管几道门禁）；函数回 `{ pass, detail }`，原样成为 `GateResult`。`ok: false`
   （插件出错、`refused`、`timeout`……）算不过，`detail` 写 `code` 与 `message`，同时记进事件日志。
-- **要跑命令的门禁**（单测）：同样是 host 门禁；不带会话的调用"要问人的一律失败"，所以 `plugin.call` 带上这一站
-  解析好的权限（`permission_rules`，§4.6 的对象形状），命令照这些规则判。
+- **门禁的"只读"靠函数声明，不靠 `writes:false`**：`writes:false` 时引擎把会改东西的命令（`cargo test` 之类）一律拒掉、
+  规则也放不开，跑测试的门禁就做不成。所以门禁也以 `writes: true` 调；经文件工具能写的仍只是函数声明的 `writes`
+  （门禁函数声明为空，安装时披露里写着），命令按项目设置的规则判，不带会话时要问人的一律失败——要跑命令的门禁，
+  规则写在项目的 `.codix/settings.json` 里，门禁没过时 `detail` 写明要哪条。
 - **步骤**（`PluginPrograms`，实现 `Programs`）：步骤名按 `[x-codix.steps]` 找到函数，`writes: true`（只写得了函数声明的
   `writes`），`input` 同上把 `gate` 换成 `step`，再加 `item`；返回值交给 `Engine::submit`，错误交给 `Engine::fail`。
 - 时限：`plugin.call` 至多 120 秒，门禁与步骤都用它；每次带一个 `run_id`（`<运行>/<站>/<门禁或步骤>`），实例停时
