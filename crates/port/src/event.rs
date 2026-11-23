@@ -45,6 +45,14 @@ pub enum Event {
         delay_ms: Millis,
         reason: String,
     },
+    /// 引擎这次模型调用换了 provider；`task` 不是 `main` 时说明是哪种调用（压缩、标题……）。
+    ProviderSwitched {
+        session: SessionId,
+        from: Option<String>,
+        to: String,
+        reason: String,
+        task: String,
+    },
     TextDelta {
         session: SessionId,
         text: String,
@@ -180,6 +188,7 @@ impl Event {
             TurnStarted { session }
             | StepRestarted { session, .. }
             | ModelRetry { session, .. }
+            | ProviderSwitched { session, .. }
             | TextDelta { session, .. }
             | ThinkingDelta { session, .. }
             | ToolStarted { session, .. }

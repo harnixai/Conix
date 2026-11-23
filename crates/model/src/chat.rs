@@ -248,6 +248,18 @@ impl Conversation {
                     tone: Tone::Warn,
                 });
             }
+            Event::ProviderSwitched {
+                to, reason, task, ..
+            } => {
+                let mut text = i18n::t!("chat.provider_switched", to = to, reason = reason);
+                if !task.is_empty() && task != "main" {
+                    text = format!("{text} ({task})");
+                }
+                self.push(BlockKind::Notice {
+                    text,
+                    tone: Tone::Warn,
+                });
+            }
             Event::TextDelta { text, .. } => {
                 self.phase = Phase::Answering;
                 self.out_chars += text.chars().count();
@@ -792,6 +804,25 @@ mod tests {
             },
             0,
         );
+    }
+
+    #[test]
+    fn a_provider_switch_is_written_into_the_conversation() {
+        let mut c = conversation();
+        c.apply(
+            Event::ProviderSwitched {
+                session: port::SessionId("s1".into()),
+                from: Some("a".into()),
+                to: "b".into(),
+                reason: "a: quota".into(),
+                task: "compact".into(),
+            },
+            0,
+        );
+        let (text, tone) = last_notice(&c).expect("有提示");
+        assert!(text.contains('b') && text.contains("a: quota"), "{text}");
+        assert!(text.contains("compact"), "{text}");
+        assert_eq!(tone, Tone::Warn);
     }
 
     #[test]

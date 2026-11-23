@@ -1,5 +1,6 @@
 chat:
   model_retry: "Model call failed, retrying (attempt {attempt}): {reason}"
+  provider_switched: "switched to provider {to}: {reason}"
   interrupted: "Interrupted · What should Claude do instead?"
   budget_exceeded: "turn stopped: token budget used up ({message})"
   max_turns: "turn stopped: the turn's model-call limit was reached"

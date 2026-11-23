@@ -104,6 +104,17 @@ pub enum SessionEvent {
         #[serde(default)]
         tokens_after: u64,
     },
+    /// 这次模型调用去了与会话上一次调用不同的 provider（`model.order` 的回退或回切）。
+    ProviderSwitched {
+        #[serde(default)]
+        from: Option<String>,
+        #[serde(default)]
+        to: String,
+        #[serde(default)]
+        reason: String,
+        #[serde(default)]
+        task: String,
+    },
     UserMessageDelivered {
         message_id: String,
     },
@@ -375,6 +386,29 @@ mod tests {
         assert_eq!(
             DaemonEvent::parse(&json!({"kind":"mcp_connected","server":"x"})),
             DaemonEvent::Unknown
+        );
+    }
+
+    #[test]
+    fn provider_switched_tolerates_a_null_from_and_missing_fields() {
+        assert_eq!(
+            SessionEvent::parse(&json!({"kind":"provider_switched","from":null,"to":"b",
+                "reason":"a: 配额用完","task":"main"})),
+            SessionEvent::ProviderSwitched {
+                from: None,
+                to: "b".into(),
+                reason: "a: 配额用完".into(),
+                task: "main".into()
+            }
+        );
+        assert_eq!(
+            SessionEvent::parse(&json!({"kind":"provider_switched","from":"a","to":"b"})),
+            SessionEvent::ProviderSwitched {
+                from: Some("a".into()),
+                to: "b".into(),
+                reason: String::new(),
+                task: String::new()
+            }
         );
     }
 

@@ -233,6 +233,18 @@ impl St {
                 delay_ms,
                 reason,
             }),
+            SessionEvent::ProviderSwitched {
+                from,
+                to,
+                reason,
+                task,
+            } => out.events.push(Event::ProviderSwitched {
+                session: session(),
+                from,
+                to,
+                reason,
+                task,
+            }),
             SessionEvent::TextDelta { text } => {
                 s.turn_text.push_str(&text);
                 out.events.push(Event::TextDelta {
@@ -742,5 +754,33 @@ mod stop_reason_tests {
             stop_reason_of("weird", None),
             StopReason::Other("weird".into())
         );
+    }
+}
+
+#[cfg(test)]
+mod frame_tests {
+    use super::*;
+
+    #[test]
+    fn provider_switched_becomes_a_domain_event() {
+        let mut st = St::default();
+        st.sessions.insert("s1".into(), Sess::default());
+        let mut out = Out::default();
+        st.on_event(
+            "s1",
+            "s1",
+            SessionEvent::ProviderSwitched {
+                from: None,
+                to: "b".into(),
+                reason: "a: quota".into(),
+                task: "main".into(),
+            },
+            0,
+            &mut out,
+        );
+        assert!(matches!(
+            out.events.as_slice(),
+            [Event::ProviderSwitched { to, .. }] if to == "b"
+        ));
     }
 }
