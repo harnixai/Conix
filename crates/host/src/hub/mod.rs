@@ -252,6 +252,9 @@ impl Hub {
             sent: Mutex::default(),
             on_attach: Mutex::default(),
         }));
+        // 先认引擎：协议不对时后面的每个调用都会以 INVALID_PARAMS 之类的面目失败，不如在这里一句说清。
+        let ping = hub.call("daemon.ping", json!({})).await?;
+        crate::engine::check_engine(&ping)?;
         hub.call("daemon.subscribeEvents", json!({})).await?;
         hub.register_tools().await;
         let effective = hub

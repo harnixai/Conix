@@ -32,6 +32,8 @@ const PROJECT: &str = "/work/app";
 
 fn default_handler(method: &str, p: &Value) -> Result<Value, RpcError> {
     Ok(match method {
+        "daemon.ping" => json!({"version": "0.4.0", "protocol_version": 5,
+            "capabilities": ["session_settings", "config_explain"]}),
         "session.list" => json!({"sessions": [
             {"session_id":"s1","name":"修登录","status":"active","session_kind":"primary",
              "scene":"code","project_root":PROJECT,"last_active":"2026-11-16T10:00:00Z","created_at":""},

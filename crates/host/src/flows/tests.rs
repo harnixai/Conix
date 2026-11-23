@@ -36,6 +36,8 @@ const PROJECT: &str = "/work/app";
 fn handler(created: Arc<Mutex<Vec<String>>>) -> Handler {
     Box::new(move |method, p| {
         Ok(match method {
+            "daemon.ping" => json!({"version": "0.4.0", "protocol_version": 5,
+                "capabilities": ["session_settings", "config_explain"]}),
             "session.list" => json!({"sessions": []}),
             "session.create" => {
                 let id = p["session_id"].as_str().unwrap().to_string();
