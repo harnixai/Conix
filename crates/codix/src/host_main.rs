@@ -75,52 +75,18 @@ pub async fn run(name: String, project: PathBuf) -> Result<()> {
     let _ = host_lib.set(Arc::new(move |call| {
         Box::pin(host::plugins::hostlib::handle(lib_hub.clone(), call))
     }));
-    let j = &cfg.jobs;
-    let text = |a: &Option<app::config::Amount>| a.as_ref().map(app::config::Amount::text);
-    let (guard, problems) = host::jobs::guard::GuardConfig::parse(&host::jobs::guard::GuardText {
-        timeout: text(&j.defaults.timeout),
-        max_tokens: text(&j.defaults.max_tokens),
-        overlap: j.defaults.overlap.clone(),
-        disable_after: j.defaults.disable_after,
-        network: j.defaults.network.clone(),
-        limit_timeout: text(&j.limits.timeout),
-        limit_max_tokens: text(&j.limits.max_tokens),
-        daily_tokens: text(&j.daily_tokens),
-        max_concurrent: j.max_concurrent,
-    });
-    for p in problems {
-        tracing::warn!("codix.yaml: {p}");
-        hub.config_problem(p);
-    }
-    hub.set_guard_config(guard);
-    if !cfg.notify.is_null() {
-        match serde_yaml::from_value::<host::notify::NotifyConfig>(cfg.notify.clone()) {
-            Ok(n) => {
-                let mut n = host::notify::Notifier::new(
-                    n,
-                    host::notify::Origin {
-                        instance: name.clone(),
-                        host: hostname.clone(),
-                        project: project_str.clone(),
-                    },
-                    Some(state.dir().join("notify.jsonl")),
-                );
-                // 只给 LIVE 测试用：合并窗口缩短，免得每条用例干等一分钟。不进 codix.yaml。
-                if let Some(ms) = std::env::var("CODIX_TEST_NOTIFY_WINDOW_MS")
-                    .ok()
-                    .and_then(|v| v.parse::<u64>().ok())
-                {
-                    n.window_ms = ms;
-                }
-                hub.set_notifier(n);
-            }
-            Err(e) => {
-                let p = format!("notify is not understood, nothing is sent: {e}");
-                tracing::warn!("codix.yaml: {p}");
-                hub.config_problem(p);
-            }
-        }
-    }
+    let notify = crate::instance_config::NotifyOrigin {
+        origin: host::notify::Origin {
+            instance: name.clone(),
+            host: hostname.clone(),
+            project: project_str.clone(),
+        },
+        log: state.dir().join("notify.jsonl"),
+    };
+    crate::instance_config::apply(&hub, &cfg, &notify);
+    // 会话里配置自己（architecture §8.11）：codix.yaml 经同一套解析改，切换 provider 前的备份放在家目录下。
+    hub.set_codix_config(crate::instance_config::store(layout.home(), notify));
+    hub.set_config_home(layout.home().to_path_buf());
     if let Some(q) = project_claim.quarantined() {
         tracing::warn!(to = %q.display(), "project state not written on this machine; quarantined");
         let text = format!(

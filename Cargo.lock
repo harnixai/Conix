@@ -610,6 +610,7 @@ version = "0.1.3-2026112302"
 dependencies = [
  "anyhow",
  "app",
+ "async-trait",
  "chrono",
  "clap",
  "client",

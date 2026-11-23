@@ -14,6 +14,7 @@ use model::{InstOp, Mouse, MouseButton, MouseKind, Msg};
 use port::Instances;
 
 mod host_main;
+mod instance_config;
 mod supervise;
 
 /// 跑在终端里的 agent 工作台

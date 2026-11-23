@@ -22,9 +22,26 @@ pub const JOB_RUN: &str = "job_run";
 pub const JOB_VALIDATE: &str = "job_validate";
 pub const JOB_HISTORY: &str = "job_history";
 pub const JOB_STOP: &str = "job_stop";
+pub const CONFIG_SHOW: &str = "config_show";
+pub const CONFIG_PROVIDER_ADD: &str = "config_provider_add";
+pub const CONFIG_PROVIDER_TEST: &str = "config_provider_test";
+pub const CONFIG_SWITCH: &str = "config_switch";
+pub const CONFIG_ROLLBACK: &str = "config_rollback";
+pub const CODIX_CONFIG_SET: &str = "codix_config_set";
+
+/// 配置自己的那几个（architecture §8.11）：只给人开的会话。
+pub const CONFIG_TOOLS: [&str; 6] = [
+    CONFIG_SHOW,
+    CONFIG_PROVIDER_ADD,
+    CONFIG_PROVIDER_TEST,
+    CONFIG_SWITCH,
+    CONFIG_ROLLBACK,
+    CODIX_CONFIG_SET,
+];
 
 /// 只读的几个：建会话时给它们 allow 规则，查看不用每次问人。
-pub const READ_ONLY: [&str; 6] = [
+pub const READ_ONLY: [&str; 7] = [
+    CONFIG_SHOW,
     SESSION_LIST,
     SESSION_SHOW,
     JOB_LIST,
@@ -74,7 +91,7 @@ fn tool(name: &str, description: &str, properties: Value, required: &[&str]) -> 
             "additionalProperties": false
         },
         "read_only": read_only,
-        "destructive": matches!(name, SESSION_CLOSE | SESSION_DELETE | JOB_DELETE | JOB_STOP),
+        "destructive": matches!(name, SESSION_CLOSE | SESSION_DELETE | JOB_DELETE | JOB_STOP | CONFIG_SWITCH),
         "subagents": true
     })
 }
@@ -199,6 +216,53 @@ pub fn declarations() -> Value {
                 "prompt_append": {"type": "string", "description": "simple jobs: appended to the prompt for this firing only."}
             }),
             &["target"]
+        ),
+        tool(
+            CONFIG_SHOW,
+            "Show how this Codix instance is configured: the default model, the routing (model.order), every provider (endpoint, which env var holds its key and whether that key is present, tiers, where it is defined) and codix.yaml. Read this before changing anything.",
+            json!({}),
+            &[]
+        ),
+        tool(
+            CONFIG_PROVIDER_ADD,
+            "Add or change a model provider definition in the Agix settings WITHOUT switching to it: the routing (model.order) stays as it is, so this session keeps working on the current model. Checked first (nothing is written when it does not check out). Next: config_provider_test, then config_switch. Keys are never written into settings: give api_key_env, the name of the environment variable that holds the key.",
+            json!({
+                "provider_id": {"type": "string", "description": "Lower-case letters, digits, - and _."},
+                "config": {"type": "object", "description": "The provider's fields, merged into its definition: vendor (anthropic|openai|deepseek|qwen|vllm|sglang|generic), api (anthropic|openai_chat|openai_responses), base_url, api_key_env, models, tiers {strong, balanced, fast}, quota. Not order."},
+                "tier": {"type": "string", "enum": ["global", "project"], "default": "global", "description": "global: ~/.codix/settings.json, for every project; project: this project's .codix/settings.json."}
+            }),
+            &["provider_id", "config"]
+        ),
+        tool(
+            CONFIG_PROVIDER_TEST,
+            "Test a provider without switching to it: ask its endpoint for its models, then make one real call through it in a throw-away session (a one-word reply, a small token budget, no tools) and report whether it answered and how fast. Use this before config_switch.",
+            json!({
+                "provider_id": {"type": "string"},
+                "model": {"type": "string", "description": "A model of that provider; default its strong tier."}
+            }),
+            &["provider_id"]
+        ),
+        tool(
+            CONFIG_SWITCH,
+            "Switch the default routing to a provider: it is tested first and not switched to if it fails; the current model.order is backed up; after switching, one real call is made on the new default, and if that fails the switch is rolled back automatically. Confirm with the user before switching.",
+            json!({"provider_id": {"type": "string"}}),
+            &["provider_id"]
+        ),
+        tool(
+            CONFIG_ROLLBACK,
+            "Undo the last config_switch: put model.order back as it was before it, then make one real call on the restored default.",
+            json!({}),
+            &[]
+        ),
+        tool(
+            CODIX_CONFIG_SET,
+            "Change one value in ~/.codix/codix.yaml (Codix's own settings: ui, instance, jobs, notify, engine), e.g. path jobs.defaults.network, value \"allowlist\". Checked with the same parser the instance uses at start; the old file is backed up. jobs and notify take effect at once; ui, instance and engine at the next start. With dry_run only checks. Comments in the file are not kept (the backup has them).",
+            json!({
+                "path": {"type": "string", "description": "Dot-separated, e.g. jobs.limits.max_tokens"},
+                "value": {"description": "The new value (null removes the key)."},
+                "dry_run": {"type": "boolean", "default": false}
+            }),
+            &["path", "value"]
         ),
     ])
 }
@@ -422,7 +486,7 @@ mod tests {
         let mut uniq = names.clone();
         uniq.sort();
         uniq.dedup();
-        assert_eq!(names.len(), 14);
+        assert_eq!(names.len(), 20);
         assert_eq!(uniq.len(), names.len());
         assert!(d.as_array().unwrap().iter().all(|t| t["subagents"] == true));
         for r in READ_ONLY {

@@ -43,6 +43,11 @@ impl Hub {
         *self.0.notifier.locked() = Some(Arc::new(n));
     }
 
+    /// `notify` 从配置里拿掉了：不再送出去，等人接入时看"离开期间"。
+    pub fn clear_notifier(&self) {
+        *self.0.notifier.locked() = None;
+    }
+
     /// 推出去的事件里认出等人处理的事。
     pub(super) fn observe(&self, events: &[Event]) {
         for e in events {

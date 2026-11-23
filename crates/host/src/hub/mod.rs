@@ -2,6 +2,7 @@
 //! 触发。实例是引擎唯一的客户端：它订阅内存里的每个会话，所以状态不依赖 TUI 在不在。
 
 mod attention;
+mod config_tools;
 mod dispatch;
 mod guard;
 mod history;
@@ -31,6 +32,7 @@ use serde_json::{Value, json};
 use tokio::sync::mpsc;
 use wire::frames::{DaemonEvent, HistoryMessage, SessionEvent, SessionInfo};
 
+pub use config_tools::CodixConfigStore;
 pub use registry::{Record, Registry};
 pub use session_opts::cli_settings;
 pub(crate) use session_opts::{SessionSettings, rule_strings};
@@ -168,6 +170,12 @@ struct Inner {
     default_model: Mutex<String>,
     /// 可装的插件包在哪些目录（`plugins::package_dirs`）。
     plugin_dirs: Mutex<Vec<PathBuf>>,
+    /// `codix.yaml` 的读写（`codix` crate 给），会话里的 `codix_config_set` 用。
+    codix_config: OnceLock<Arc<dyn CodixConfigStore>>,
+    /// `~/.codix`：切换 provider 前的备份放在它下面的 `config-backups/`。
+    config_home: Mutex<Option<PathBuf>>,
+    /// 测通 provider 用的临时会话：不收进会话列表。
+    probes: Mutex<HashSet<String>>,
     flows: OnceLock<Arc<dyn FlowPort>>,
     /// 流程派工器看着的会话：每帧分一份给它们。
     taps: Mutex<HashMap<String, Vec<mpsc::UnboundedSender<Tapped>>>>,
@@ -260,6 +268,9 @@ impl Hub {
             side: Mutex::default(),
             default_model: Mutex::default(),
             plugin_dirs: Mutex::default(),
+            codix_config: OnceLock::new(),
+            config_home: Mutex::default(),
+            probes: Mutex::default(),
             flows: OnceLock::new(),
             taps: Mutex::default(),
             sent: Mutex::default(),
@@ -426,6 +437,11 @@ impl Hub {
 
     pub fn config_problem(&self, p: String) {
         self.0.config_problems.locked().push(p);
+    }
+
+    /// 重读配置之后：读不懂的项换成这一次的。
+    pub fn set_config_problems(&self, ps: Vec<String>) {
+        *self.0.config_problems.locked() = ps;
     }
 
     /// 下一个接入的 TUI 在 `Hello` 时收到这句提示，只说一次。

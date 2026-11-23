@@ -5,6 +5,16 @@ use super::*;
 impl Hub {
     /// 宿主工具（tools.rs）：先按发起调用的会话定作用域，再经和端口命令同一条路执行，
     /// 事件照常推给 TUI。
+    /// 宿主工具的同一个入口，给不经引擎帧的调用方用（测试；以后的界面）。
+    pub async fn run_tool(
+        &self,
+        session: &str,
+        name: &str,
+        input: &Value,
+    ) -> Result<String, String> {
+        self.host_tool(session, name, input).await
+    }
+
     pub(super) async fn host_tool(
         &self,
         rpc: &str,
@@ -24,6 +34,13 @@ impl Hub {
             return r;
         }
         let port_err = |e: PortError| e.to_string();
+        if tools::CONFIG_TOOLS.contains(&name) {
+            // 改的是这台机器上整个 Codix 的配置：作业与流程里的会话不给。
+            if scope != tools::Scope::Full {
+                return Err("configuring Codix is only for a person's own sessions".into());
+            }
+            return self.config_tool(name, input).await;
+        }
         match name {
             tools::SESSION_LIST => {
                 let all = input.get("all").and_then(Value::as_bool).unwrap_or(false);

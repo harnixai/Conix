@@ -76,7 +76,10 @@ impl Hub {
                     project_root,
                 } => {
                     let known = self.0.st.locked().sessions.contains_key(&session_id);
-                    if known || project_root.as_deref() == Some(self.0.project.as_str()) {
+                    // 测通 provider 的临时会话不进列表（`config_tools::probe` 自己订阅、自己删）。
+                    let probe = self.0.probes.locked().contains(&session_id);
+                    if !probe && (known || project_root.as_deref() == Some(self.0.project.as_str()))
+                    {
                         if !known {
                             self.adopt(&session_id).await;
                         }
