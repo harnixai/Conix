@@ -60,3 +60,8 @@ jobs:
 #       command: ["sh", "-c", "curl -s -d @- https://ntfy.sh/$CODIX_NTFY_TOPIC"]
 #       stdin: json       # the whole notification as JSON on stdin
 #       min_level: error
+
+# Model of the engine's built-in anthropic provider (like agixd --model). Used only when
+# settings.json defines no providers; the CODIX_MODEL environment variable wins. Unset = Agix's default.
+# engine:
+#   model: claude-sonnet-4-6

@@ -31,6 +31,15 @@ pub struct Config {
     pub jobs: JobsConfig,
     /// 通知出口（architecture §8.10），原样交给实例去解析（`host::notify::NotifyConfig`）。
     pub notify: serde_yaml::Value,
+    pub engine: EngineSection,
+}
+
+/// 引擎的进程参数（architecture §8.11）：不是 Agix 的设置键，所以放在 `codix.yaml` 而不是 settings.json。
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+pub struct EngineSection {
+    /// 引擎自带 `anthropic` 的模型（相当于 `agixd --model`），只在设置里没定义 `providers` 时用到。
+    pub model: Option<String>,
 }
 
 /// 作业的护栏（architecture §8.5）：缺省与这台机器的天花板。按原样交给实例去解析（`host::jobs::guard`），
@@ -140,6 +149,17 @@ impl UiConfig {
 }
 
 impl Config {
+    /// 引擎自带 `anthropic` 的模型：`CODIX_MODEL` 优先，其次 `engine.model`；空串当没写。
+    pub fn engine_model(&self) -> Option<String> {
+        self.engine_model_with(std::env::var("CODIX_MODEL").ok())
+    }
+
+    /// 环境变量的值由调用方给，测试才不用去改进程环境。
+    fn engine_model_with(&self, env: Option<String>) -> Option<String> {
+        env.filter(|m| !m.is_empty())
+            .or_else(|| self.engine.model.clone().filter(|m| !m.is_empty()))
+    }
+
     /// 换成 model 的设置。读不懂的颜色、主题、时长都退回缺省，并把原因放进返回的列表。
     pub fn settings(&self) -> (model::Settings, Vec<String>) {
         let mut problems = vec![];
@@ -291,5 +311,22 @@ mod tests {
         assert_eq!(s.theme.accent, ratatui::style::Color::Rgb(1, 2, 3));
         assert_eq!(problems.len(), 3, "{problems:?}");
         assert_eq!(parse_duration_ms("2h"), Some(7_200_000));
+    }
+
+    #[test]
+    fn engine_model_env_beats_file() {
+        let c: Config = serde_yaml::from_str("engine:\n  model: from-file\n").unwrap();
+        assert_eq!(
+            c.engine_model_with(Some("from-env".into())).as_deref(),
+            Some("from-env")
+        );
+        assert_eq!(c.engine_model_with(None).as_deref(), Some("from-file"));
+        assert_eq!(
+            c.engine_model_with(Some(String::new())).as_deref(),
+            Some("from-file")
+        );
+        assert_eq!(Config::default().engine_model_with(None), None);
+        let empty: Config = serde_yaml::from_str("engine:\n  model: ''\n").unwrap();
+        assert_eq!(empty.engine_model_with(None), None);
     }
 }

@@ -57,3 +57,8 @@ jobs:
 #       command: ["sh", "-c", "curl -s -d @- https://ntfy.sh/$CODIX_NTFY_TOPIC"]
 #       stdin: json       # 整条通知以 JSON 写进 stdin
 #       min_level: error
+
+# 引擎自带 anthropic 的模型（相当于 agixd --model）。只在 settings.json 没定义 providers 时用；
+# CODIX_MODEL 环境变量优先。不写就用 Agix 的缺省。
+# engine:
+#   model: claude-sonnet-4-6

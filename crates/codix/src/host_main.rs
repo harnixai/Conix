@@ -47,9 +47,8 @@ pub async fn run(name: String, project: PathBuf) -> Result<()> {
         project: project.clone(),
         groups_file: layout.groups(&name),
         settings: host::hub::cli_settings(),
-        // 引擎自带 `anthropic` 的模型（相当于 `agixd --model`）：只在设置里没定义 `providers` 时用到。
-        // 它是进程参数、不是设置键，所以给一个环境变量；要按项目、按档位选模型的，在 settings.json 里定义 providers。
-        model: std::env::var("CODIX_MODEL").ok().filter(|m| !m.is_empty()),
+        // 引擎自带 `anthropic` 的模型，只在设置里没定义 `providers` 时用：codix.yaml 的 engine.model，CODIX_MODEL 覆盖。
+        model: cfg.engine_model(),
         host_lib: host_lib.clone(),
     })
     .await?;
