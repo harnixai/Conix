@@ -106,6 +106,7 @@ async fn rig_full(handler: Handler, clock: host::hub::Clock) -> Rig {
             registry: Registry::open(dir.path().join("sessions.json")),
             jobs: Some(store),
             clock,
+            engine_model: "test-model".into(),
         },
     )
     .await

@@ -45,7 +45,9 @@ pub async fn run(name: String, project: PathBuf) -> Result<()> {
         project: project.clone(),
         groups_file: layout.groups(&name),
         settings: host::hub::cli_settings(),
-        model: None,
+        // 引擎自带 `anthropic` 的模型（相当于 `agixd --model`）：只在设置里没定义 `providers` 时用到。
+        // 它是进程参数、不是设置键，所以给一个环境变量；要按项目、按档位选模型的，在 settings.json 里定义 providers。
+        model: std::env::var("CODIX_MODEL").ok().filter(|m| !m.is_empty()),
     })
     .await?;
     let clock: host::hub::Clock = Arc::new(host::instance::now_ms);
@@ -61,6 +63,7 @@ pub async fn run(name: String, project: PathBuf) -> Result<()> {
             registry: host::hub::Registry::open(state.sessions()),
             jobs: Some(host::jobs::JobStore::open_in(&state)),
             clock,
+            engine_model: embedded.model().to_string(),
         },
     )
     .await

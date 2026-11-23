@@ -490,6 +490,7 @@ async fn conformance_inside() {
             registry: host::hub::Registry::in_memory(),
             jobs: None,
             clock: std::sync::Arc::new(live::now_ms),
+            engine_model: embedded.model().to_string(),
         },
     )
     .await

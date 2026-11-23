@@ -123,6 +123,8 @@ pub struct HubConfig {
     pub registry: Registry,
     pub jobs: Option<JobStore>,
     pub clock: Clock,
+    /// 引擎自带 provider 的模型（`engine::Embedded::model`）：设置里没定义 `providers` 时的缺省模型。
+    pub engine_model: String,
 }
 
 #[derive(Clone)]
@@ -271,13 +273,9 @@ impl Hub {
         }
         if let Ok(effective) = effective {
             tracing::debug!(settings = %effective["settings"], "effective settings");
-            let m = &effective["settings"]["model"];
-            let name = m["model_name"]
-                .as_str()
-                .or_else(|| m.as_str())
-                .unwrap_or("");
-            tracing::info!(model = name, "default model");
-            *hub.0.default_model.locked() = name.to_string();
+            let name = default_model(&effective["settings"]).unwrap_or(cfg.engine_model);
+            tracing::info!(model = %name, "default model");
+            *hub.0.default_model.locked() = name;
         }
         hub.load_sessions().await?;
         // 通知在自己的任务里按到达顺序处理：同一会话的帧不能乱序。
@@ -630,5 +628,48 @@ impl Fire for Firer {
         if let Some(inner) = self.0.upgrade() {
             Hub(inner).fire_job(job, fired_ms, scheduled).await;
         }
+    }
+}
+
+/// 设置里的缺省模型：`model.order` 第一个 provider（没写 order 就是第一个定义的）的 `balanced` 档，
+/// 没写就是 `strong` 档（Agix 的规矩：balanced 缺省取 strong）。没定义 `providers` 时引擎用自带的
+/// `anthropic`，模型是进程参数，设置里没有，回 `None`。
+fn default_model(settings: &Value) -> Option<String> {
+    let providers = settings["providers"].as_array()?;
+    let id = settings["model"]["order"]
+        .as_array()
+        .and_then(|o| o.first())
+        .and_then(Value::as_str)
+        .or_else(|| providers.first()?["id"].as_str())?;
+    let p = providers.iter().find(|p| p["id"] == id)?;
+    let tiers = &p["tiers"];
+    tiers["balanced"]
+        .as_str()
+        .or_else(|| tiers["strong"].as_str())
+        .map(str::to_string)
+}
+
+#[cfg(test)]
+mod default_model_tests {
+    use super::*;
+
+    #[test]
+    fn the_first_provider_in_order_gives_its_balanced_tier() {
+        let s = json!({"providers": [
+            {"id": "a", "tiers": {"strong": "a-big"}},
+            {"id": "b", "tiers": {"strong": "b-big", "balanced": "b-mid"}}],
+            "model": {"order": ["b", "a"]}});
+        assert_eq!(default_model(&s).as_deref(), Some("b-mid"));
+        let s = json!({"providers": [{"id": "a", "tiers": {"strong": "a-big"}}]});
+        assert_eq!(
+            default_model(&s).as_deref(),
+            Some("a-big"),
+            "没 order 取第一个，没 balanced 取 strong"
+        );
+        assert_eq!(
+            default_model(&json!({})),
+            None,
+            "没定义 providers：引擎自带的，设置里没有"
+        );
     }
 }

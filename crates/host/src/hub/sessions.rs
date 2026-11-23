@@ -556,10 +556,16 @@ impl Hub {
         let Ok(cfg) = self.call("config.get", loc).await else {
             return vec![];
         };
-        let providers: Vec<String> = cfg["settings"]["providers"]
-            .as_object()
-            .map(|m| m.keys().cloned().collect())
-            .unwrap_or_default();
+        // 0.4 起 `providers` 是列表；一个都没定义时引擎用自带的 `anthropic`。
+        let mut providers: Vec<String> = cfg["settings"]["providers"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|p| p["id"].as_str().map(str::to_string))
+            .collect();
+        if providers.is_empty() {
+            providers.push("anthropic".into());
+        }
         let mut out = vec![];
         for p in providers {
             let Ok(v) = self

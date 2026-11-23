@@ -29,6 +29,7 @@ pub struct EngineConfig {
 
 pub struct Embedded {
     engine: agix::embed::Embedded,
+    model: String,
 }
 
 impl Embedded {
@@ -61,6 +62,7 @@ impl Embedded {
         if let Some(m) = cfg.model {
             c.model = m;
         }
+        let model = c.model.clone();
         let engine = agix::embed::Embedded::start(c)
             .await
             .context("start the Agix engine")?;
@@ -68,7 +70,13 @@ impl Embedded {
         engine.serve_stream(theirs);
         let (read, write) = tokio::io::split(ours);
         let (client, notes) = wire::Client::spawn(read, write);
-        Ok((Embedded { engine }, client, notes))
+        Ok((Embedded { engine, model }, client, notes))
+    }
+
+    /// 引擎自带的 `anthropic` 用的模型（设置里没定义 `providers` 时会话缺省就是它）。设置里读不到：
+    /// 它是进程参数（`agixd --model`），不是设置键。
+    pub fn model(&self) -> &str {
+        &self.model
     }
 
     /// 停掉所有会话（Agix 至多等 10 秒）、放掉进程组登记。

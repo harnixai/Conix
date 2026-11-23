@@ -86,6 +86,7 @@ async fn rig() -> Rig {
             registry: Registry::in_memory(),
             jobs: None,
             clock: Arc::new(|| 1_000_000),
+            engine_model: "test-model".into(),
         },
     )
     .await
