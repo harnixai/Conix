@@ -1,0 +1,39 @@
+# 测试用的小插件（crates/engine/tests/plugins.rs）：一道 host 门禁、一个程序步骤、一个调宿主库的函数，
+# 和用到它们的一个流程。
+uses = ["codix"]
+
+[plugin]
+name = "demo"
+version = "0.1.0"
+api_version = "0.1"
+description = "Codix test plugin"
+
+[[function]]
+name = "check"
+entry = "fns.js:check"
+description = "demo gate"
+
+[[function]]
+name = "open"
+entry = "fns.js:open"
+description = "demo step: writes demo/opened.txt"
+writes = ["demo/**"]
+
+[[function]]
+name = "defs"
+entry = "fns.js:defs"
+description = "lists flows through the host library"
+
+[[function]]
+name = "start"
+entry = "fns.js:start"
+description = "tries to start a run through the host library"
+
+[x-codix]
+flows = "flows"
+
+[x-codix.gates]
+demo-check = "demo.check"
+
+[x-codix.steps]
+demo-open = "demo.open"

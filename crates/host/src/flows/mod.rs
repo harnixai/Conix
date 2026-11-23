@@ -6,6 +6,7 @@ mod frames;
 mod map;
 pub(crate) mod policy;
 pub(crate) mod session_host;
+mod swap;
 #[cfg(test)]
 mod tests;
 pub(crate) mod tools;
@@ -106,6 +107,33 @@ pub struct Flows {
     /// 已结束的运行的摘要：第一次要时把运行记录扫一遍，之后跟着派工器的变化更新，
     /// 免得「已结束」每取一页都把所有运行记录读一遍。
     ended: std::sync::Mutex<Option<Vec<port::RunSummary>>>,
+    /// 流程包：插件启停时整体换（[`swap::SwapPacks`]）。
+    swap: Arc<swap::SwapPacks>,
+    flows_dir: PathBuf,
+    /// 启用着的插件带来的门禁与步骤（`PluginGates` / `PluginPrograms` 按它找插件函数）。
+    plugin_map: Arc<std::sync::RwLock<crate::plugins::PluginMap>>,
+    /// 插件之间同名、没提供出来的流程与件。
+    shadowed: std::sync::Mutex<Vec<harnix_flow::Shadowing>>,
+}
+
+/// 全局流程包：可写层 `~/.codix/flows/` > 插件（按名字）> 库自带的示例包。插件带来的门禁与步骤名进目录，
+/// 流程只能用目录里有的名字。
+fn build_packs(
+    flows_dir: &Path,
+    mounted: &[crate::plugins::Mounted],
+    map: &crate::plugins::PluginMap,
+) -> DirPacks {
+    let mut dir = DirPacks::writable(flows_dir).with_builtin(MemPacks::examples());
+    for m in mounted {
+        if let Some(d) = m.flows_dir() {
+            dir = dir.with_plugin(m.name.clone(), d);
+        }
+    }
+    dir.with_catalog(harnix_flow::Catalog {
+        gates: map.gates.keys().cloned().collect(),
+        steps: map.steps.keys().cloned().collect(),
+        ..Default::default()
+    })
 }
 
 /// 派工器看到的会话宿主，单独拿出来给一致性套件查（`live_flows.rs`）。
@@ -123,13 +151,25 @@ pub async fn start(hub: &Hub, cfg: FlowsConfig) -> anyhow::Result<Arc<Flows>> {
         hook_headers: "X-Codix".into(),
         ..RunnerConfig::default()
     };
+    let mounted = hub.mounted_plugins().await;
+    let map = crate::plugins::PluginMap::build(&mounted);
+    let dir = build_packs(&cfg.flows_dir, &mounted, &map);
+    let shadowed = dir.shadowed();
+    let swap = Arc::new(swap::SwapPacks::new(Arc::new(dir)));
+    let plugin_map = Arc::new(std::sync::RwLock::new(map));
+    let calls = crate::plugins::gates::PluginCalls::new(hub.downgrade(), plugin_map.clone());
+    let rcfg = RunnerConfig {
+        gates: Some(Arc::new(crate::plugins::gates::PluginGates(calls.clone()))),
+        programs: Some(Arc::new(crate::plugins::gates::PluginPrograms(
+            calls.clone(),
+        ))),
+        ..rcfg
+    };
     prepare_worktrees_dir(&cfg.worktrees_dir);
     let layout = ProjectLayout::new(".codix", cfg.worktrees_dir, BRANCH_PREFIX)
         .with_agent_dirs(AGENT_DIRS)
         .with_runs_dir(RUNS_DIR);
-    // 随 Codix 发布的流程包：库自带的示例包。
-    let dir = DirPacks::writable(cfg.flows_dir).with_builtin(MemPacks::examples());
-    let packs = Arc::new(CatalogPacks::over(&rcfg, vec![], Arc::new(dir)));
+    let packs = Arc::new(CatalogPacks::over(&rcfg, vec![], swap.clone()));
     packs.set_layout(layout.clone());
     let packs: Arc<dyn Packs> = packs;
     let engine = Arc::new(
@@ -152,6 +192,7 @@ pub async fn start(hub: &Hub, cfg: FlowsConfig) -> anyhow::Result<Arc<Flows>> {
     });
     let host = CodixSessionHost::new(hub.downgrade(), policies);
     let _ = host.engine.set(engine.clone());
+    let _ = calls.engine.set(engine.clone());
     let sandbox = Arc::new(Sandbox::new(
         engine.packs().clone(),
         SandboxConfig {
@@ -170,6 +211,10 @@ pub async fn start(hub: &Hub, cfg: FlowsConfig) -> anyhow::Result<Arc<Flows>> {
         published: Default::default(),
         ended: Default::default(),
         author_host: Arc::new(tools::CodixAuthorHost::new(me.clone())),
+        swap,
+        flows_dir: cfg.flows_dir.clone(),
+        plugin_map,
+        shadowed: std::sync::Mutex::new(shadowed),
     });
     let _ = flows.author.set(AuthorTools::new(
         &runner,
@@ -387,6 +432,34 @@ impl Flows {
         hub.emit_events(events);
     }
 
+    /// 启用着的插件变了：重建流程包、换上新的门禁与步骤，列表跟着刷新。在跑的运行不受影响。
+    pub(crate) async fn set_plugins(&self, mounted: &[crate::plugins::Mounted]) {
+        let map = crate::plugins::PluginMap::build(mounted);
+        let dir = build_packs(&self.flows_dir, mounted, &map);
+        *self.shadowed.locked() = dir.shadowed();
+        self.swap.set(Arc::new(dir));
+        *self.plugin_map.write().unwrap_or_else(|e| e.into_inner()) = map;
+        self.flows_changed().await;
+    }
+
+    /// 插件之间同名、被遮住的：插件名 → 一条一句（流程与件来自 harnix-flow，门禁与步骤来自 [`PluginMap`]）。
+    pub(crate) fn plugin_conflicts(&self) -> std::collections::BTreeMap<String, Vec<String>> {
+        let mut out = self
+            .plugin_map
+            .read()
+            .map(|m| m.conflicts.clone())
+            .unwrap_or_default();
+        for s in self.shadowed.locked().iter() {
+            let kind = s
+                .kind
+                .map_or("flow".to_string(), |k| format!("{k:?}").to_lowercase());
+            out.entry(s.plugin.clone())
+                .or_default()
+                .push(format!("{kind} `{}` is taken by plugin `{}`", s.name, s.by));
+        }
+        out
+    }
+
     /// 定义变了（存、删）：列表与设计卡跟着刷新。
     pub(crate) async fn flow_changed(&self, name: &str) {
         let Some(hub) = self.hub.upgrade() else {
@@ -575,5 +648,13 @@ impl FlowPort for Flows {
         // hear 问的是引擎此刻的答案，并记进派工器与流程包共用的信任表。
         self.runner.hear(&self.project).await;
         self.flows_changed().await;
+    }
+
+    async fn plugins_changed(&self, mounted: Vec<crate::plugins::Mounted>) {
+        self.set_plugins(&mounted).await;
+    }
+
+    fn plugin_conflicts(&self) -> std::collections::BTreeMap<String, Vec<String>> {
+        Flows::plugin_conflicts(self)
     }
 }

@@ -28,6 +28,7 @@ async fn rig() -> Rig {
         groups_file: home.path().join("groups.json"),
         settings: host::hub::cli_settings(),
         model: None,
+        host_lib: Default::default(),
     })
     .await
     .unwrap();

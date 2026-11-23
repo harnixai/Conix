@@ -71,6 +71,10 @@ pub(crate) trait FlowPort: Send + Sync {
     fn tool_declarations(&self) -> Vec<Value>;
     /// 实例项目的信任变了：重新问引擎，项目自己的流程跟着出现或消失。
     async fn trust_changed(&self);
+    /// 启用着的插件变了：重建流程包（plugins.md §4）。
+    async fn plugins_changed(&self, mounted: Vec<crate::plugins::Mounted>);
+    /// 插件之间同名、被遮住的：插件名 → 一条一句。
+    fn plugin_conflicts(&self) -> std::collections::BTreeMap<String, Vec<String>>;
 }
 
 /// 作业起的一次还没结束的运行。
@@ -162,6 +166,8 @@ struct Inner {
     /// 侧问分叉出的会话：那一轮结束时把回答作为提示推出去。
     side: Mutex<HashSet<String>>,
     default_model: Mutex<String>,
+    /// 可装的插件包在哪些目录（`plugins::package_dirs`）。
+    plugin_dirs: Mutex<Vec<PathBuf>>,
     flows: OnceLock<Arc<dyn FlowPort>>,
     /// 流程派工器看着的会话：每帧分一份给它们。
     taps: Mutex<HashMap<String, Vec<mpsc::UnboundedSender<Tapped>>>>,
@@ -253,6 +259,7 @@ impl Hub {
             notifier: Mutex::default(),
             side: Mutex::default(),
             default_model: Mutex::default(),
+            plugin_dirs: Mutex::default(),
             flows: OnceLock::new(),
             taps: Mutex::default(),
             sent: Mutex::default(),
@@ -364,6 +371,16 @@ impl Hub {
         self.0.flows.get().cloned()
     }
 
+    /// 流程的端口命令（宿主库 `codix.flow.*` 走这里，与界面同一条路）。
+    pub(crate) async fn flow_command(&self, cmd: Command) -> Result<Reply, PortError> {
+        match self.flows() {
+            Some(f) => f.command(cmd).await,
+            None => Err(PortError::Failed(
+                "flows are not available in this instance".into(),
+            )),
+        }
+    }
+
     pub(crate) fn downgrade(&self) -> WeakHub {
         WeakHub(Arc::downgrade(&self.0))
     }
@@ -433,7 +450,7 @@ impl Hub {
         (self.0.clock)()
     }
 
-    async fn call(&self, method: &str, params: Value) -> Result<Value, RpcError> {
+    pub(crate) async fn call(&self, method: &str, params: Value) -> Result<Value, RpcError> {
         self.0.engine.call(method, params).await
     }
 

@@ -2,6 +2,9 @@
 //! 交给 `host` 当 [`host::Engine`] 用。这是整个 Codix 里唯一依赖 Agix 的地方。
 
 use std::path::PathBuf;
+use std::sync::{Arc, OnceLock};
+
+use wire::hostlib::{FUNCTIONS, HostLibCall, HostLibHandler};
 
 use anyhow::Context as _;
 use tokio::sync::mpsc;
@@ -25,6 +28,49 @@ pub struct EngineConfig {
     pub settings: serde_json::Value,
     /// 引擎自带的 `anthropic` 用哪个模型（只在设置里没定义任何 `providers` 时有用）；`None` 用 Agix 的缺省。
     pub model: Option<String>,
+    /// 给插件代码的宿主库 `codix.*` 的处理者：引擎启动时就要函数表，处理者在实例的 Hub 起来后才有，
+    /// 所以先登记、后接上；没接上时调用以 `unavailable` 失败。
+    pub host_lib: Arc<OnceLock<HostLibHandler>>,
+}
+
+/// `codix.*`：每个函数把调用上下文换成 [`HostLibCall`]，交给接上的处理者。
+fn codix_lib(handler: Arc<OnceLock<HostLibHandler>>) -> agix::embed::HostJsLib {
+    let mut lib =
+        agix::embed::HostJsLib::new("codix").description("Codix flows: list, inspect, start runs");
+    for path in FUNCTIONS {
+        let handler = handler.clone();
+        lib = lib.function(path, move |cx: agix::embed::HostCallContext, input| {
+            let handler = handler.get().cloned();
+            async move {
+                let Some(h) = handler else {
+                    return Err(agix::embed::HostJsError::new(
+                        "unavailable",
+                        "the Codix instance is still starting",
+                    ));
+                };
+                let cancel = cx.cancel.clone();
+                let call = HostLibCall {
+                    path: path.to_string(),
+                    input,
+                    plugin: cx.plugin,
+                    host_package: cx.source == agix::embed::PackageSource::Host,
+                    entry: cx.entry,
+                    session_id: cx.session_id,
+                    project_root: cx.project_root,
+                    via: cx.via,
+                };
+                // 插件代码被停时不再等处理者：引擎那边已经以 `stopped` 拒了这次调用。
+                tokio::select! {
+                    r = h(call) => r.map_err(|e| agix::embed::HostJsError::new(e.code, e.message)),
+                    () = cancel.cancelled() => Err(agix::embed::HostJsError::new(
+                        "stopped",
+                        "the plugin code was stopped",
+                    )),
+                }
+            }
+        });
+    }
+    lib
 }
 
 pub struct Embedded {
@@ -63,6 +109,7 @@ impl Embedded {
             c.model = m;
         }
         let model = c.model.clone();
+        c.js_libs.push(codix_lib(cfg.host_lib));
         let engine = agix::embed::Embedded::start(c)
             .await
             .context("start the Agix engine")?;

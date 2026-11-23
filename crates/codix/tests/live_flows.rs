@@ -475,6 +475,7 @@ async fn conformance_inside() {
         groups_file: lv.home.path().join("groups.json"),
         settings: host::hub::cli_settings(),
         model: Some(live::model()),
+        host_lib: Default::default(),
     })
     .await
     .expect("嵌入引擎");

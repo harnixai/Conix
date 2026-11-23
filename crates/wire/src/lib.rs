@@ -3,6 +3,7 @@
 //! 那几种帧载荷。载荷一律宽松地读：不认识的 `kind`、多出来的字段都跳过，协议只会往下长。
 
 pub mod frames;
+pub mod hostlib;
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};

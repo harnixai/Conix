@@ -1,0 +1,362 @@
+//! 插件（docs/design/plugins.md）：Agix 管装、卸、启停与包里的命令、函数、脚本；Codix 读包里 `[x-codix]`
+//! 这一段（Agix 不读 `x-` 段）——流程包在哪、门禁与程序步骤各由哪个插件函数做——并把流程包挂进流程库。
+
+pub mod gates;
+pub mod hostlib;
+
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+
+use serde::Deserialize;
+use serde_json::Value;
+
+/// 包里 `plugin.toml` 的 `[x-codix]`。
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+pub struct CodixSection {
+    /// 流程包目录（相对包根），布局同 harnix-flow 的 `DirPacks`。
+    #[serde(default)]
+    pub flows: Option<String>,
+    /// host 门禁名 → 插件函数的调用名（`<包名>.<函数名>`）。
+    #[serde(default)]
+    pub gates: BTreeMap<String, String>,
+    /// program 步骤名 → 插件函数的调用名。
+    #[serde(default)]
+    pub steps: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct Manifest {
+    #[serde(default, rename = "x-codix")]
+    x_codix: Option<CodixSection>,
+}
+
+/// 读包根上 `plugin.toml` 的 `[x-codix]`；没有这一段、读不了的回 `None`（包照样是个 Agix 插件）。
+pub fn codix_section(root: &Path) -> Option<CodixSection> {
+    let text = std::fs::read_to_string(root.join("plugin.toml")).ok()?;
+    match toml::from_str::<Manifest>(&text) {
+        Ok(m) => m.x_codix,
+        Err(e) => {
+            tracing::warn!(root = %root.display(), "plugin.toml: {e}");
+            None
+        }
+    }
+}
+
+/// 一个启用着、带 `[x-codix]` 的插件。
+#[derive(Debug, Clone, PartialEq)]
+pub struct Mounted {
+    pub name: String,
+    pub root: PathBuf,
+    pub section: CodixSection,
+}
+
+impl Mounted {
+    /// 流程包的目录；不在包里（`..`、绝对路径、出包的链接）的不挂——包是别人写的。
+    pub fn flows_dir(&self) -> Option<PathBuf> {
+        let rel = self.section.flows.as_deref()?;
+        let p = Path::new(rel);
+        if p.is_absolute()
+            || p.components()
+                .any(|c| matches!(c, std::path::Component::ParentDir))
+        {
+            return None;
+        }
+        let dir = self.root.join(p).canonicalize().ok()?;
+        let root = self.root.canonicalize().ok()?;
+        (dir.starts_with(&root) && dir.is_dir()).then_some(dir)
+    }
+
+    /// 流程包里的流程名（`flows/*.yaml` 的文件名）。
+    pub fn flow_names(&self) -> Vec<String> {
+        let Some(dir) = self.flows_dir() else {
+            return vec![];
+        };
+        let mut names: Vec<String> = std::fs::read_dir(dir.join("flows"))
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter_map(|e| {
+                let p = e.path();
+                matches!(p.extension().and_then(|x| x.to_str()), Some("yaml" | "yml"))
+                    .then(|| p.file_stem()?.to_str().map(str::to_string))
+                    .flatten()
+            })
+            .collect();
+        names.sort();
+        names
+    }
+}
+
+/// 所有启用着的插件的门禁与步骤：名字 → (插件, 调用名)。同名的按插件名先到的胜出，后到的记成冲突。
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct PluginMap {
+    pub gates: BTreeMap<String, (String, String)>,
+    pub steps: BTreeMap<String, (String, String)>,
+    /// 插件名 → 被遮住的东西，一条一句。
+    pub conflicts: BTreeMap<String, Vec<String>>,
+}
+
+impl PluginMap {
+    pub fn build(mounted: &[Mounted]) -> PluginMap {
+        let mut sorted: Vec<&Mounted> = mounted.iter().collect();
+        sorted.sort_by(|a, b| a.name.cmp(&b.name));
+        let mut m = PluginMap::default();
+        for p in sorted {
+            for (kind, src, dst) in [
+                ("gate", &p.section.gates, &mut m.gates),
+                ("step", &p.section.steps, &mut m.steps),
+            ] {
+                for (name, function) in src {
+                    match dst.get(name) {
+                        Some((by, _)) => m
+                            .conflicts
+                            .entry(p.name.clone())
+                            .or_default()
+                            .push(format!("{kind} `{name}` is taken by plugin `{by}`")),
+                        None => {
+                            dst.insert(name.clone(), (p.name.clone(), function.clone()));
+                        }
+                    }
+                }
+            }
+        }
+        m
+    }
+}
+
+/// 可装的包：目录里的 `<名>-<版本>.zip`，只按文件名认，不解包（内容以 Agix 装时读出的为准）。
+pub fn packages(dirs: &[PathBuf]) -> Vec<port::PluginPackage> {
+    let mut out: Vec<port::PluginPackage> = vec![];
+    for d in dirs {
+        for e in std::fs::read_dir(d).into_iter().flatten().flatten() {
+            let path = e.path();
+            let Some(file) = path.file_name().and_then(|f| f.to_str()) else {
+                continue;
+            };
+            let Some((name, version)) = split_package_name(file) else {
+                continue;
+            };
+            // 同名同版本在前面的目录里已经有了：先到的为准（自带目录排在用户的前面）。
+            if out.iter().any(|p| p.name == name && p.version == version) {
+                continue;
+            }
+            out.push(port::PluginPackage {
+                name,
+                version,
+                path: path.to_string_lossy().into_owned(),
+                installed: false,
+            });
+        }
+    }
+    out.sort_by(|a, b| (&a.name, &a.version).cmp(&(&b.name, &b.version)));
+    out
+}
+
+/// `xforge-0.1.0.zip` → (`xforge`, `0.1.0`)：版本是最后一个后面跟数字的 `-` 之后的部分。
+pub fn split_package_name(file: &str) -> Option<(String, String)> {
+    let stem = file.strip_suffix(".zip")?;
+    let i = stem
+        .char_indices()
+        .filter(|(_, c)| *c == '-')
+        .map(|(i, _)| i)
+        .rfind(|i| stem[i + 1..].starts_with(|c: char| c.is_ascii_digit()))?;
+    let (name, version) = (&stem[..i], &stem[i + 1..]);
+    (!name.is_empty() && !version.is_empty()).then(|| (name.to_string(), version.to_string()))
+}
+
+/// zip 的 SHA-256（`plugin.install` 的 `checksum`）。
+pub fn sha256_file(path: &Path) -> std::io::Result<String> {
+    use sha2::{Digest, Sha256};
+    let bytes = std::fs::read(path)?;
+    Ok(Sha256::digest(&bytes)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect())
+}
+
+/// 自带插件目录：`CODIX_PLUGIN_DIRS`（`:` 分隔，开发与测试用）替换 `<exe 所在目录>/../share/codix/plugins/`；
+/// 用户自己放包的 `<家目录>/plugin-store/` 总在后面。
+pub fn package_dirs(home: &Path) -> Vec<PathBuf> {
+    let mut dirs: Vec<PathBuf> = match std::env::var_os("CODIX_PLUGIN_DIRS") {
+        Some(v) => std::env::split_paths(&v).collect(),
+        None => std::env::current_exe()
+            .ok()
+            .and_then(|e| Some(e.parent()?.join("../share/codix/plugins")))
+            .into_iter()
+            .collect(),
+    };
+    dirs.push(home.join("plugin-store"));
+    dirs
+}
+
+/// Agix `plugin.install` 回的 `disclosure` 加上 Codix 自己的那份（`[x-codix]` 带来的，Agix 不读）。
+pub fn disclosure(agix: &Value, mounted: Option<&Mounted>) -> port::PluginDisclosure {
+    let strings = |v: &Value| -> Vec<String> {
+        v.as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|x| x.as_str().map(str::to_string))
+            .collect()
+    };
+    let mut d = port::PluginDisclosure {
+        capabilities: strings(&agix["capabilities"]),
+        mcp_servers: strings(&agix["mcp_servers"]),
+        model_visible: agix["model_visible"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|x| port::VisibleText {
+                origin: x["origin"].as_str().unwrap_or_default().to_string(),
+                text: x["text"].as_str().unwrap_or_default().to_string(),
+            })
+            .collect(),
+        ..Default::default()
+    };
+    if let Some(m) = mounted {
+        codix_disclosure(m, &mut d);
+    }
+    d
+}
+
+fn codix_disclosure(m: &Mounted, d: &mut port::PluginDisclosure) {
+    for name in m.flow_names() {
+        d.codix.push(format!("flow `{name}`"));
+    }
+    for (gate, f) in &m.section.gates {
+        d.codix.push(format!(
+            "host gate `{gate}` → plugin function `{f}` (read-only call)"
+        ));
+    }
+    for (step, f) in &m.section.steps {
+        d.codix.push(format!(
+            "program step `{step}` → plugin function `{f}` (may write)"
+        ));
+    }
+    if m.section.flows.is_some() && m.flows_dir().is_none() {
+        d.codix
+            .push("its flows directory is missing or outside the package: not mounted".into());
+    }
+    // 流程包里的 skill 与规则在派活时进站的消息，一字不差到达模型。
+    if let Some(dir) = m.flows_dir() {
+        for (kind, sub) in [("skill", "skills"), ("rule", "rules")] {
+            for e in std::fs::read_dir(dir.join(sub))
+                .into_iter()
+                .flatten()
+                .flatten()
+            {
+                let p = e.path();
+                let (name, file) = if p.is_dir() {
+                    (
+                        p.file_name().and_then(|f| f.to_str()).map(str::to_string),
+                        p.join("SKILL.md"),
+                    )
+                } else {
+                    (
+                        p.file_stem().and_then(|f| f.to_str()).map(str::to_string),
+                        p,
+                    )
+                };
+                let (Some(name), Ok(text)) = (name, std::fs::read_to_string(&file)) else {
+                    continue;
+                };
+                d.codix_model_visible.push(port::VisibleText {
+                    origin: format!("flow pack {kind} `{name}`"),
+                    text,
+                });
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn package_names_split_at_the_version() {
+        assert_eq!(
+            split_package_name("xforge-0.1.0.zip"),
+            Some(("xforge".into(), "0.1.0".into()))
+        );
+        assert_eq!(
+            split_package_name("code-review-helper-1.2.0-rc1.zip"),
+            Some(("code-review-helper".into(), "1.2.0-rc1".into()))
+        );
+        assert_eq!(split_package_name("notes.zip"), None);
+        assert_eq!(split_package_name("x-1.0.tar"), None);
+    }
+
+    #[test]
+    fn the_codix_section_is_read_and_flows_stay_in_the_package() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("plugin.toml"),
+            r#"uses = ["codix"]
+[plugin]
+name = "xf"
+version = "0.1.0"
+api_version = "0.1"
+
+[x-codix]
+flows = "flows"
+[x-codix.gates]
+xf-structure = "xf.check"
+[x-codix.steps]
+xf-open = "xf.open"
+"#,
+        )
+        .unwrap();
+        std::fs::create_dir_all(dir.path().join("flows/flows")).unwrap();
+        std::fs::write(
+            dir.path().join("flows/flows/xf-quick.yaml"),
+            "name: xf-quick\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(dir.path().join("flows/skills/xf-propose")).unwrap();
+        std::fs::write(
+            dir.path().join("flows/skills/xf-propose/SKILL.md"),
+            "propose it",
+        )
+        .unwrap();
+        let section = codix_section(dir.path()).unwrap();
+        assert_eq!(section.gates["xf-structure"], "xf.check");
+        let m = Mounted {
+            name: "xf".into(),
+            root: dir.path().to_path_buf(),
+            section,
+        };
+        assert_eq!(m.flow_names(), ["xf-quick"]);
+        let d = disclosure(&serde_json::json!({"capabilities": ["x"]}), Some(&m));
+        assert_eq!(d.capabilities, ["x"]);
+        assert!(
+            d.codix
+                .iter()
+                .any(|l| l.contains("xf-open") && l.contains("xf.open"))
+        );
+        assert_eq!(d.codix_model_visible[0].text, "propose it");
+
+        let out = Mounted {
+            section: CodixSection {
+                flows: Some("../elsewhere".into()),
+                ..Default::default()
+            },
+            ..m.clone()
+        };
+        assert_eq!(out.flows_dir(), None, "包外的不挂");
+    }
+
+    #[test]
+    fn the_first_plugin_by_name_keeps_a_gate_name() {
+        let p = |name: &str| Mounted {
+            name: name.into(),
+            root: PathBuf::new(),
+            section: CodixSection {
+                gates: BTreeMap::from([("g".to_string(), format!("{name}.check"))]),
+                ..Default::default()
+            },
+        };
+        let m = PluginMap::build(&[p("zeta"), p("alpha")]);
+        assert_eq!(m.gates["g"], ("alpha".into(), "alpha.check".into()));
+        assert_eq!(m.conflicts["zeta"].len(), 1);
+    }
+}

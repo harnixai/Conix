@@ -40,6 +40,8 @@ pub async fn run(name: String, project: PathBuf) -> Result<()> {
     let hostname = host::instance::hostname();
     let version = env!("CARGO_PKG_VERSION").to_string();
 
+    let host_lib: Arc<std::sync::OnceLock<host::plugins::hostlib::HostLibHandler>> =
+        Default::default();
     let (embedded, client, notes) = engine::Embedded::start(engine::EngineConfig {
         data_root: layout.home().to_path_buf(),
         project: project.clone(),
@@ -48,6 +50,7 @@ pub async fn run(name: String, project: PathBuf) -> Result<()> {
         // 引擎自带 `anthropic` 的模型（相当于 `agixd --model`）：只在设置里没定义 `providers` 时用到。
         // 它是进程参数、不是设置键，所以给一个环境变量；要按项目、按档位选模型的，在 settings.json 里定义 providers。
         model: std::env::var("CODIX_MODEL").ok().filter(|m| !m.is_empty()),
+        host_lib: host_lib.clone(),
     })
     .await?;
     let clock: host::hub::Clock = Arc::new(host::instance::now_ms);
@@ -68,6 +71,11 @@ pub async fn run(name: String, project: PathBuf) -> Result<()> {
     )
     .await
     .context("connect to the engine")?;
+    hub.set_plugin_dirs(host::plugins::package_dirs(layout.home()));
+    let lib_hub = hub.clone();
+    let _ = host_lib.set(Arc::new(move |call| {
+        Box::pin(host::plugins::hostlib::handle(lib_hub.clone(), call))
+    }));
     let j = &cfg.jobs;
     let text = |a: &Option<app::config::Amount>| a.as_ref().map(app::config::Amount::text);
     let (guard, problems) = host::jobs::guard::GuardConfig::parse(&host::jobs::guard::GuardText {

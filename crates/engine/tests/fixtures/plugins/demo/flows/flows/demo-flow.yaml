@@ -1,0 +1,11 @@
+name: demo-flow
+title: Demo flow
+stations:
+  - id: open
+    title: Open
+    executor: {kind: program, step: demo-open}
+    output: {type: object}
+    exit: [{kind: output}]
+  - id: check
+    title: Check
+    exit: [{kind: gate, gate: demo-check}]

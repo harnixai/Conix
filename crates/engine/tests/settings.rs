@@ -14,6 +14,7 @@ async fn the_cli_layer_lets_a_session_loosen_its_mode() {
         groups_file: home.path().join("groups.json"),
         settings: host::hub::cli_settings(),
         model: None,
+        host_lib: Default::default(),
     })
     .await
     .unwrap();
