@@ -13,6 +13,7 @@ marks:
     global: 全局
     project: 项目
     override: 项目 · 覆盖全局
+    plugin: 全局 · 插件
   error:
     occupied: "实例已被 {holder} 接入"
     no_instance: "没有实例 {name}"

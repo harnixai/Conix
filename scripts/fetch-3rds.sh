@@ -4,7 +4,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 HARNIX_DIR="${HARNIX_DIR:-../Harnix}"
-HARNIX_TAG="Harnix-v0.4.6-2026111701"
+HARNIX_TAG="Harnix-v0.4.7-2026111901"
 
 if ! git -C "$HARNIX_DIR" rev-parse -q --verify "refs/tags/$HARNIX_TAG" >/dev/null; then
   git -C "$HARNIX_DIR" fetch -q origin tag "$HARNIX_TAG" || {

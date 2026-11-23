@@ -36,6 +36,10 @@ const BRANCH_PREFIX: &str = "codix/flow";
 /// （Agix#93），其余归应用。
 const AGENT_DIRS: [&str; 2] = ["state/scratchpad", "state/memory"];
 
+/// 运行的过程目录（相对 `.codix`）：放进 Codix 的 `state/codix/`，跟着 `state/` 不进 git，也跟着认领
+/// 一起进 quarantine；不用库缺省的 `runs/`——那要往随仓库提交的 `.codix/.gitignore` 里加一行（Harnix#69）。
+const RUNS_DIR: &str = "state/codix/runs";
+
 /// 定义里写的场景就是 Agix 的场景名；Codix 只开 `code`。
 const SCENE: &str = "code";
 
@@ -117,8 +121,9 @@ pub async fn start(hub: &Hub, cfg: FlowsConfig) -> anyhow::Result<Arc<Flows>> {
         ..RunnerConfig::default()
     };
     prepare_worktrees_dir(&cfg.worktrees_dir);
-    let layout =
-        ProjectLayout::new(".codix", cfg.worktrees_dir, BRANCH_PREFIX).with_agent_dirs(AGENT_DIRS);
+    let layout = ProjectLayout::new(".codix", cfg.worktrees_dir, BRANCH_PREFIX)
+        .with_agent_dirs(AGENT_DIRS)
+        .with_runs_dir(RUNS_DIR);
     // 随 Codix 发布的流程包：库自带的示例包。
     let dir = DirPacks::writable(cfg.flows_dir).with_builtin(MemPacks::examples());
     let packs = Arc::new(CatalogPacks::over(&rcfg, vec![], Arc::new(dir)));

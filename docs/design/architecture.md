@@ -275,14 +275,13 @@ loop {
 ├── .wkts/<运行>/                 `workspace: worktree` 的运行的 worktree，分支 `codix/flow/<运行>`；
 │                                 和引擎自己的 worktree 同一个目录（在仓库根），`.wkts/.gitignore` 是 `*`
 └── .codix/                       项目层目录（Agix 的 project_dir）
-    ├── .gitignore                Agix 维护 state/、settings.local.json、mcp.local.json；harnix 维护 runs/
+    ├── .gitignore                Agix 维护 state/、settings.local.json、mcp.local.json
     ├── settings.json  mcp.json   ┐
     ├── agents/  skills/  rules/  │ 进 git：项目的引擎配置，布局归 Agix
     ├── hooks/  commands/ …       ┘
     ├── settings.local.json …     个人配置，不进 git
     ├── flows/                    进 git：项目自己的流程包（项目受信才读、才写，§8.6）
     ├── jobs.json                 进 git：作业定义（项目受信才读、才写，§8.5）
-    ├── runs/<运行>/              harnix 的过程目录，不进 git（Harnix#69 落地后挪到 state/codix/runs/）
     └── state/                    不进 git：本机数据与过程数据
         ├── history/<id>/         Agix：受信项目的会话（转录、memory、checkpoints）
         ├── memory/  scratchpad/  Agix：模型不问就能写的只有这两个
@@ -293,6 +292,7 @@ loop {
             ├── jobs-state.json   作业在这台机器上的启用状态与调度基线
             ├── jobs/<作业 id>.jsonl  触发记录，一次一行
             ├── flow-runs/        流程运行的记录（harnix-flow 的 FileStore）
+            ├── runs/<运行>/      运行的过程目录（`ProjectLayout::with_runs_dir`，Harnix#69）：交付、门禁日志
             ├── workspaces/<运行>/ 没有项目的运行的工作目录（流程库要它；Codix 的运行都有项目）
             └── quarantine/<时刻>/ 认不出来的状态挪到这里，不读（§8.9）
 ```

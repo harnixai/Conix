@@ -20,6 +20,9 @@ pub(crate) fn origin(o: harnix_flow::Origin) -> port::FlowOrigin {
         harnix_flow::Origin::Override => port::FlowOrigin::Override,
         harnix_flow::Origin::User => port::FlowOrigin::Global,
         harnix_flow::Origin::Project => port::FlowOrigin::Project,
+        harnix_flow::Origin::Plugin => port::FlowOrigin::Plugin,
+        // `Origin` 是 non_exhaustive：库以后加的来源先按只读的全局层显示，不让编译挡住重新拷贝。
+        _ => port::FlowOrigin::Plugin,
     }
 }
 

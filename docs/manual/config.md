@@ -18,10 +18,11 @@
     settings.local.json …       个人配置（不进 git）
     state/                      本机数据与过程数据（不进 git）
       history/                  受信项目的会话
-      codix/                    会话归属、作业状态与触发记录、流程运行记录、每日用量、通知记录
+      codix/                    会话归属、作业状态与触发记录、流程运行记录与过程目录、每日用量、通知记录
 ```
 
-`.codix/.gitignore` 由 Agix 与 Codix 维护（`state/`、`settings.local.json`、`mcp.local.json`、`runs/`）。
+`.codix/.gitignore` 由 Agix 维护（`state/`、`settings.local.json`、`mcp.local.json`）。流程运行的过程目录在
+`state/codix/runs/` 下，跟着 `state/` 不进 git；以前版本留在 `.codix/runs/` 的不再读，可以删掉。
 `state/codix/` 只认这台机器自己写的：从仓库里带来的会被挪进 `state/codix/quarantine/`，不读。
 
 ## codix.yaml

@@ -25,11 +25,16 @@ pub enum FlowOrigin {
     Project,
     /// 项目里覆盖了同名全局流程的。
     Override,
+    /// 插件带来的（只读，全局）。
+    Plugin,
 }
 
 impl FlowOrigin {
     pub fn is_global(self) -> bool {
-        matches!(self, FlowOrigin::Builtin | FlowOrigin::Global)
+        matches!(
+            self,
+            FlowOrigin::Builtin | FlowOrigin::Global | FlowOrigin::Plugin
+        )
     }
 }
 
