@@ -138,6 +138,19 @@ pub enum Overlay {
         models: Vec<port::ModelInfo>,
         selected: usize,
     },
+    /// `/plugin`：装好的在前、可装的包在后。`armed` 是按过一次 d、等再按一次才卸的那个插件。
+    Plugins {
+        plugins: port::Plugins,
+        selected: usize,
+        armed: Option<String>,
+    },
+    /// 插件的两份披露：装完等人确认（`installing`），或随时再看（只读）。
+    PluginDisclosure {
+        plugin: Box<port::PluginInfo>,
+        disclosure: Box<port::PluginDisclosure>,
+        scroll: usize,
+        installing: bool,
+    },
     /// 接入时：离开期间攒下的等人处理的事（交互 §5.5）。
     Away {
         since_ms: u64,

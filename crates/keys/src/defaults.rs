@@ -112,6 +112,11 @@ pub(crate) fn bindings() -> Vec<Binding> {
         b(C::Overlay, "PageDown", A::PageDown),
         b(C::Overlay, "q", A::Back),
         b(C::Overlay, "Enter", A::Confirm),
+        // `/plugin` 浮层：启停、卸载、确认披露。
+        b(C::Overlay, "Space", A::ToggleEnabled),
+        b(C::Overlay, "d", A::Delete),
+        b(C::Overlay, "y", A::Yes),
+        b(C::Overlay, "n", A::No),
         b(C::Overlay, "1", A::Choose1),
         b(C::Overlay, "2", A::Choose2),
         b(C::Overlay, "3", A::Choose3),

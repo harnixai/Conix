@@ -114,6 +114,16 @@ pub(crate) enum Pending {
     Doctor,
     /// `/model` 不带参数：列出可选的模型。
     Models,
+    /// `/plugin`：列表。
+    Plugins,
+    /// 事件触发的重列：只刷新还开着的列表浮层，不能把这之间弹出的披露盖掉。
+    PluginsRefresh,
+    /// 装完回来的披露：等人确认。
+    PluginInstalled,
+    /// `/plugin info`：再看一次披露。
+    PluginInfo,
+    PluginSet(String, bool),
+    PluginRemoved(String),
     /// `@` 提及：项目里的文件。
     Files,
     /// 回滚菜单。
@@ -721,6 +731,12 @@ fn action(s: &mut State, a: Action) -> Vec<Effect> {
             },
         )];
     }
+    if matches!(s.ui.overlay, Some(Overlay::Plugins { .. })) {
+        return crate::plugins::list_action(s, a);
+    }
+    if matches!(s.ui.overlay, Some(Overlay::PluginDisclosure { .. })) {
+        return crate::plugins::disclosure_action(s, a);
+    }
     if let Some(Overlay::Models { models, selected }) = &mut s.ui.overlay {
         match a {
             Action::Up => *selected = selected.saturating_sub(1),
@@ -1252,6 +1268,10 @@ fn event(s: &mut State, e: Event) -> Vec<Effect> {
     }
     let mut out = crate::chat_update::chat_event(s, &e);
     match &e {
+        // 装、卸、启停之后：列表浮层开着就重列，选中的位置保留。
+        Event::PluginsChanged if matches!(s.ui.overlay, Some(Overlay::Plugins { .. })) => {
+            out.push(s.call(Pending::PluginsRefresh, Command::ListPlugins));
+        }
         Event::TaskUpserted(t) => {
             for c in s.domain.convs.values_mut() {
                 let mine = c.summary.id == t.owner

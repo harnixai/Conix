@@ -13,6 +13,7 @@ mod jobs;
 mod marks;
 mod mouse;
 mod panel;
+mod plugins;
 mod sessions;
 mod settings;
 mod state;

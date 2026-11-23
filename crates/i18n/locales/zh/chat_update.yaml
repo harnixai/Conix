@@ -8,6 +8,7 @@ chat_update:
   cmd_btw: "侧问"
   cmd_trust: "信任这个项目（/trust off 取消）：读它自己的设置与流程，可以往里存流程"
   cmd_doctor: "诊断"
+  cmd_plugin: "插件：装、看披露、启用与停用、卸载"
   cmd_quit: "脱离（实例继续运行）"
   cmd_exit: "脱离（实例继续运行）"
   cmd_stop: "停止实例"

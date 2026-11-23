@@ -261,7 +261,10 @@ pub(crate) fn upper_lines(s: &State, width: usize) -> Vec<Line> {
                 } else {
                     "▸"
                 };
-                let origin = crate::marks::origin_label(f.origin);
+                let mut origin = crate::marks::origin_label(f.origin);
+                if let Some(src) = &f.source {
+                    origin = format!("{origin} {src}");
+                }
                 // 全局流程在名字前标 ◎（各项目共用）；项目级的不标，只留出对齐的位置。
                 let scope = if f.origin.is_global() { "◎ " } else { "  " };
                 let running = if f.active_runs > 0 {

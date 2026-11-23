@@ -8,6 +8,7 @@ chat_update:
   cmd_btw: "Side question"
   cmd_trust: "Trust this project (/trust off to undo): its own settings and flows are read, and flows can be saved in it"
   cmd_doctor: "Diagnose"
+  cmd_plugin: "Plugins: install, review disclosures, enable/disable, uninstall"
   cmd_quit: "Detach (instance keeps running)"
   cmd_exit: "Detach (instance keeps running)"
   cmd_stop: "Stop instance"

@@ -16,8 +16,8 @@ const DETACH_ARM_MS: u64 = 800;
 
 /// 本地命令（交互 §4.5）：不联系后端，或只换个后端命令。
 const LOCAL: &[&str] = &[
-    "help", "new", "rename", "sessions", "model", "goal", "btw", "trust", "doctor", "quit", "exit",
-    "stop", "mouse", "events", "notify", "copy",
+    "help", "new", "rename", "sessions", "model", "goal", "btw", "trust", "doctor", "plugin",
+    "quit", "exit", "stop", "mouse", "events", "notify", "copy",
 ];
 
 /// 补全候选的来源：项目里的文件（`@` 提及）。
@@ -754,6 +754,7 @@ fn local_command(s: &mut State, name: &str, arg: String) -> Option<Vec<Effect>> 
         "notify" => vec![s.call(Pending::Notified, Command::TestNotify)],
         "copy" => copy_block(s),
         "doctor" => vec![s.call(Pending::Doctor, Command::Doctor)],
+        "plugin" => crate::plugins::command(s, &arg),
         _ => return None,
     })
 }
@@ -882,6 +883,37 @@ pub(crate) fn chat_reply(s: &mut State, what: Pending, reply: Reply) -> Vec<Effe
                 let selected = models.iter().position(|m| m.id == cur).unwrap_or(0);
                 s.ui.overlay = Some(Overlay::Models { models, selected });
             }
+            vec![]
+        }
+        (Pending::Plugins, Reply::Plugins(p)) => {
+            crate::plugins::listed(s, p);
+            vec![]
+        }
+        (Pending::PluginsRefresh, Reply::Plugins(p)) => {
+            if matches!(s.ui.overlay, Some(Overlay::Plugins { .. })) {
+                crate::plugins::listed(s, p);
+            }
+            vec![]
+        }
+        (Pending::PluginInstalled, Reply::Plugin { plugin, disclosure }) => {
+            crate::plugins::disclosed(s, plugin, disclosure, true);
+            vec![]
+        }
+        (Pending::PluginInfo, Reply::Plugin { plugin, disclosure }) => {
+            crate::plugins::disclosed(s, plugin, disclosure, false);
+            vec![]
+        }
+        (Pending::PluginSet(name, enabled), Reply::Ok) => {
+            let text = if enabled {
+                i18n::t!("plugins.enabled", name = name)
+            } else {
+                i18n::t!("plugins.disabled", name = name)
+            };
+            s.notice(text, false);
+            vec![]
+        }
+        (Pending::PluginRemoved(name), Reply::Ok) => {
+            s.notice(i18n::t!("plugins.removed", name = name), false);
             vec![]
         }
         (Pending::Doctor, Reply::Doctor(checks)) => {

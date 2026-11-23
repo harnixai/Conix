@@ -749,6 +749,17 @@ fn overlay(s: &State, o: &Overlay) -> tui::Overlay {
                 width: (s.ui.size.cols.saturating_sub(10)).min(100),
             }
         }
+        Overlay::Plugins {
+            plugins,
+            selected,
+            armed,
+        } => crate::plugins::list_view(s, plugins, *selected, armed),
+        Overlay::PluginDisclosure {
+            plugin,
+            disclosure,
+            scroll,
+            installing,
+        } => crate::plugins::disclosure_view(s, plugin, disclosure, *scroll, *installing),
         Overlay::Models { models, selected } => {
             let mut lines: Vec<Line> = models
                 .iter()
