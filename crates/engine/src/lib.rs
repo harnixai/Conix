@@ -20,6 +20,11 @@ pub struct EngineConfig {
     pub data_root: PathBuf,
     pub project: PathBuf,
     pub groups_file: PathBuf,
+    /// cli 层的设置（`EmbedConfig.settings`）：叠在每个项目、场景的设置之上，不受项目信任限制。
+    /// 由 `host::hub::cli_settings` 给；`app.history` 在这里补上。写错的键让启动失败。
+    pub settings: serde_json::Value,
+    /// 引擎自带的 `anthropic` 用哪个模型（只在设置里没定义任何 `providers` 时有用）；`None` 用 Agix 的缺省。
+    pub model: Option<String>,
 }
 
 pub struct Embedded {
@@ -43,8 +48,19 @@ impl Embedded {
         c.groups_file = Some(cfg.groups_file);
         c.project_dir = Some(PROJECT_DIR.into());
         c.product = PRODUCT_NAME.into();
-        // 会话是项目的（architecture §8.4）：受信项目的会话放进 `.codix/state/history/`，全局只留索引；0.4 起经 cli 层设置 `app.history` 给。
-        c.settings = Some(serde_json::json!({"app": {"history": "project"}}));
+        // 会话是项目的（architecture §8.4）：受信项目的会话放进 `.codix/state/history/`，全局只留索引。
+        // 0.4 起经 cli 层设置 `app.history` 给。
+        let mut settings = cfg.settings;
+        if let Some(o) = settings.as_object_mut() {
+            o.entry("app")
+                .or_insert_with(|| serde_json::json!({}))
+                .as_object_mut()
+                .map(|a| a.insert("history".into(), "project".into()));
+        }
+        c.settings = Some(settings);
+        if let Some(m) = cfg.model {
+            c.model = m;
+        }
         let engine = agix::embed::Embedded::start(c)
             .await
             .context("start the Agix engine")?;

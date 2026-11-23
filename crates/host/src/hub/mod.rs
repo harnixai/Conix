@@ -7,6 +7,7 @@ mod guard;
 mod history;
 mod jobs;
 mod registry;
+mod session_opts;
 mod sessions;
 mod state;
 mod tool_calls;
@@ -30,6 +31,8 @@ use tokio::sync::mpsc;
 use wire::frames::{DaemonEvent, HistoryMessage, SessionEvent, SessionInfo};
 
 pub use registry::{Record, Registry};
+pub use session_opts::cli_settings;
+pub(crate) use session_opts::{SessionSettings, rule_strings};
 use state::{Out, Sess, St, Todo2};
 
 use crate::engine::{Engine, Notification, RpcError};

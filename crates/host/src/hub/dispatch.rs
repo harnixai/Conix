@@ -38,12 +38,12 @@ impl Hub {
                 permission,
                 ..
             } => {
-                let extra = match permission {
-                    Some(m) => json!({"permission_mode": state::permission_name(m)}),
-                    None => json!({}),
+                let settings = SessionSettings {
+                    mode: permission.map(state::permission_name),
+                    ..SessionSettings::default()
                 };
                 let id = self
-                    .create_session(Origin::User, None, scene, model, extra)
+                    .create_session(Origin::User, None, scene, model, json!({}), settings)
                     .await?;
                 self.summary(&id).map(Reply::Session)
             }

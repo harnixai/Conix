@@ -22,14 +22,17 @@ impl Hub {
                 model,
                 ..
             } => {
-                let mut extra = json!({"attended": false, "auto_name": false});
-                if !skills.is_empty() {
-                    extra["prompt"] = json!({"append": format!(
-                        "This is the scheduled job \"{}\". Use these skills: {}.",
-                        job.name,
-                        skills.join(", ")
-                    )});
-                }
+                let extra = json!({"attended": false, "auto_name": false});
+                let settings = SessionSettings {
+                    prompt_append: (!skills.is_empty()).then(|| {
+                        format!(
+                            "This is the scheduled job \"{}\". Use these skills: {}.",
+                            job.name,
+                            skills.join(", ")
+                        )
+                    }),
+                    ..SessionSettings::default()
+                };
                 let origin = Origin::Job {
                     job: job.id.clone(),
                     name: job.name.clone(),
@@ -42,6 +45,7 @@ impl Hub {
                         scene.clone(),
                         model.clone(),
                         extra,
+                        settings,
                     )
                     .await
                 {

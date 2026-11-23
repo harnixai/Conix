@@ -44,7 +44,6 @@ pub fn check_engine(ping: &Value) -> Result<(), RpcError> {
     Ok(())
 }
 
-
 #[async_trait]
 pub trait Engine: Send + Sync + 'static {
     async fn call(&self, method: &str, params: Value) -> Result<Value, RpcError>;

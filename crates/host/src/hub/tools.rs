@@ -202,18 +202,6 @@ pub fn declarations() -> Value {
     ])
 }
 
-/// 建会话时带上的 allow 规则：只读工具不用每次问人。
-pub fn read_only_rules() -> Value {
-    Value::Array(
-        READ_ONLY
-            .iter()
-            .map(|t| t.to_string())
-            .chain(crate::flows::tools::read_only_names())
-            .map(|t| json!({"source": "session", "behavior": "allow", "tool_name": t}))
-            .collect(),
-    )
-}
-
 pub fn str_of(input: &Value, k: &str) -> Option<String> {
     input.get(k).and_then(Value::as_str).map(str::to_string)
 }

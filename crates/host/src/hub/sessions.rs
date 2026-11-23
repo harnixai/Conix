@@ -50,6 +50,9 @@ impl Hub {
         }
         let r = self.call("session.create", params).await?;
         let id = str_field(&r, "session_id");
+        for (field, requested, applied) in session_opts::clamped(&r) {
+            tracing::warn!(session = %id, %field, %requested, %applied, "flow session option clamped by settings");
+        }
         let existed = r["existing"].as_bool().unwrap_or(false);
         let now = self.now();
         let known = self.0.st.locked().sessions.contains_key(&id);
@@ -287,14 +290,14 @@ impl Hub {
         scene: Option<String>,
         model: Option<String>,
         extra: Value,
+        settings: SessionSettings,
     ) -> Result<String, PortError> {
-        let mut options = json!({
-            "prompt_types": ["permission", "question"],
-            "permission_rules": tools::read_only_rules(),
-        });
+        // 只读工具不问写在 cli 层（`session_opts::cli_settings`）：会话层的 allow 规则 0.4 起要放宽开关才算。
+        let mut options = json!({"prompt_types": ["permission", "question"]});
         if let (Some(o), Some(e)) = (options.as_object_mut(), extra.as_object()) {
             o.extend(e.clone());
         }
+        settings.apply(&mut options);
         if let Some(m) = &model {
             options["model"] = json!(m);
         }
@@ -304,6 +307,10 @@ impl Hub {
         }
         let r = self.call("session.create", params).await.map_err(rpc_err)?;
         let id = str_field(&r, "session_id");
+        // 被设置夹住的只记日志：权限模式订阅后由 `refresh_permission` 按实际值写进摘要，其余的界面不显示。
+        for (field, requested, applied) in session_opts::clamped(&r) {
+            tracing::warn!(session = %id, %field, %requested, %applied, "session option clamped by settings");
+        }
         let now = self.now();
         self.0.reg.locked().update(&id, |rec| {
             rec.origin = origin.clone();

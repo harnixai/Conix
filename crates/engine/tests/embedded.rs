@@ -26,6 +26,8 @@ async fn rig() -> Rig {
         data_root: home.path().to_path_buf(),
         project: project_path.clone(),
         groups_file: home.path().join("groups.json"),
+        settings: host::hub::cli_settings(),
+        model: None,
     })
     .await
     .unwrap();

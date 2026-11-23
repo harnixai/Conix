@@ -473,6 +473,8 @@ async fn conformance_inside() {
         data_root: lv.home.path().to_path_buf(),
         project: project.clone(),
         groups_file: lv.home.path().join("groups.json"),
+        settings: host::hub::cli_settings(),
+        model: None,
     })
     .await
     .expect("嵌入引擎");

@@ -44,6 +44,8 @@ pub async fn run(name: String, project: PathBuf) -> Result<()> {
         data_root: layout.home().to_path_buf(),
         project: project.clone(),
         groups_file: layout.groups(&name),
+        settings: host::hub::cli_settings(),
+        model: None,
     })
     .await?;
     let clock: host::hub::Clock = Arc::new(host::instance::now_ms);

@@ -16,7 +16,7 @@ use serde_json::{Value, json};
 
 use super::frames::Translator;
 use crate::engine::RpcError;
-use crate::hub::{WeakHub, tools};
+use crate::hub::{SessionSettings, WeakHub, rule_strings};
 
 /// 任务会话的权限模式：最宽、但仍按会话的规则走的那一档。`bypassPermissions` 不看会话的规则，
 /// 派工器对问句的回答就落空了。
@@ -139,33 +139,26 @@ fn base58(bytes: &[u8]) -> String {
 
 /// 建会话的 `options`：只由 spec 定，同一个 spec 再建总是同一份（引擎按它判断"是同一个会话"）。
 pub(crate) fn options_of(spec: &OpenSpec) -> Value {
-    let mut rules = ask_rules(&spec.asks);
-    if let (Some(r), Value::Array(allow)) = (rules.as_array_mut(), tools::read_only_rules()) {
-        r.extend(allow);
-        // 流程自己的工具（flow_state / flow_submit / flow_propose）只动这次运行的记录。Harnix 把它们
-        // 做成引擎内建的工具；这里是 Agix 的宿主工具，缺省每次都问人——一站交付就得有人批，
-        // 无人看着的运行就卡住。
-        r.extend(
-            spec.tools
-                .iter()
-                .map(|t| json!({"source": "session", "behavior": "allow", "tool_name": t.name})),
-        );
-    }
+    // 只读工具与流程自己的工具（flow_state / flow_submit / flow_propose）不问，写在 cli 层
+    // （`hub::cli_settings`）；`acceptEdits` 比项目缺省宽，靠 cli 层开的 `client_may_loosen` 才生效。
+    // 流程库的 `ask_rules` 还是 0.3 的规则形状，这里换成规则串。
+    let settings = SessionSettings {
+        mode: Some(TASK_PERMISSION_MODE.into()),
+        ask: rule_strings(&ask_rules(&spec.asks), "ask"),
+        effort: spec.placement.effort.clone(),
+        ..SessionSettings::default()
+    };
     let mut o = json!({
         "prompt_types": ["permission", "question"],
-        "permission_mode": TASK_PERMISSION_MODE,
-        "permission_rules": rules,
         "attended": true,
         "auto_name": false,
     });
+    settings.apply(&mut o);
     if let Some(m) = &spec.placement.model {
         o["model"] = json!(m);
     }
     if let Some(p) = &spec.placement.provider {
         o["provider"] = json!(p);
-    }
-    if let Some(e) = &spec.placement.effort {
-        o["effort"] = json!(e);
     }
     if let Some(s) = &spec.output_schema {
         o["output_schema"] = s.clone();
@@ -356,26 +349,19 @@ mod tests {
         spec.asks = vec!["Write".into(), "Bash(git:*)".into()];
         let o = options_of(&spec);
         assert_eq!(o, options_of(&spec.clone()));
-        assert_eq!(o["permission_mode"], TASK_PERMISSION_MODE);
-        let rules = o["permission_rules"].as_array().unwrap();
-        assert!(
-            rules
-                .iter()
-                .any(|r| r["behavior"] == "ask" && r["tool_name"] == "Write")
-        );
-        assert!(rules.iter().any(|r| r["behavior"] == "allow"));
+        let p = &o["settings"]["permissions"];
+        assert_eq!(p["mode"], TASK_PERMISSION_MODE);
+        assert_eq!(p["ask"], json!(["Write", "Bash(git:*)"]));
+        assert!(p.get("allow").is_none(), "放行的写在 cli 层，会话层只收紧");
+        for old in ["permission_mode", "permission_rules", "effort"] {
+            assert!(o.get(old).is_none(), "0.4 不认 options.{old}");
+        }
         assert!(o.get("host_tools").is_none());
 
+        spec.placement.effort = Some("high".into());
         spec.tools = harnix_flow::runner::tool_specs();
         let o = options_of(&spec);
-        let rules = o["permission_rules"].as_array().unwrap();
-        for t in ["flow_state", "flow_submit", "flow_propose"] {
-            assert!(
-                rules
-                    .iter()
-                    .any(|r| r["behavior"] == "allow" && r["tool_name"] == t),
-                "流程自己的工具不问人：{t}"
-            );
-        }
+        assert_eq!(o["settings"]["model"]["effort"], "high");
+        assert_eq!(o["host_tools"].as_array().unwrap().len(), 3);
     }
 }

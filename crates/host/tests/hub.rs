@@ -381,12 +381,9 @@ async fn host_tools_hang_on_the_connection_and_a_user_session_saves_jobs() {
         .unwrap();
     let create = &r.calls("session.create")[0];
     assert!(
-        create["options"]["permission_rules"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|x| x["tool_name"] == "job_list" && x["behavior"] == "allow"),
-        "查看类工具不用每次问"
+        create["options"].get("permission_rules").is_none()
+            && create["options"]["settings"]["permissions"]["allow"].is_null(),
+        "查看类工具不用每次问，写在 cli 层（host::hub::cli_settings），不随会话下发"
     );
     assert!(
         create["options"]["host_tools"].is_null(),
@@ -609,7 +606,10 @@ async fn permission_modes_are_set_on_the_session_and_its_frames_keep_them() {
         .await
         .unwrap();
     let create = r.calls("session.create").last().cloned().unwrap();
-    assert_eq!(create["options"]["permission_mode"], "acceptEdits");
+    assert_eq!(
+        create["options"]["settings"]["permissions"]["mode"],
+        "acceptEdits"
+    );
 }
 
 #[tokio::test]

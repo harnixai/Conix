@@ -136,7 +136,10 @@ async fn a_key_opens_the_same_session_and_another_spec_for_it_is_refused() {
     let create = &r.calls("session.create")[0];
     assert_eq!(create["session_id"], a.id);
     assert_eq!(create["project_root"], PROJECT);
-    assert_eq!(create["options"]["permission_mode"], "acceptEdits");
+    assert_eq!(
+        create["options"]["settings"]["permissions"]["mode"],
+        "acceptEdits"
+    );
     let mut other = spec("flow:r1@main");
     other.profile = "plan".into();
     assert!(host.open(other).await.is_err(), "同一个键换了 spec");
