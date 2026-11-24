@@ -713,6 +713,9 @@ impl Client {
                 Event::ToolStarted { session, name, .. } if *session == id => {
                     out.tools.push(name.clone())
                 }
+                Event::ToolInput {
+                    session, summary, ..
+                } if *session == id => out.inputs.push(summary.clone()),
                 Event::ToolFinished {
                     session,
                     content,
@@ -788,6 +791,8 @@ fn auto_answer(p: &Prompt, how: Answering) -> Answer {
 pub struct TurnOutcome {
     pub text: String,
     pub tools: Vec<String>,
+    /// 每个工具调用的参数摘要（`ToolInput`），按到达的先后；Bash 是命令行。
+    pub inputs: Vec<String>,
     /// 每个工具的结果与是否出错，按完成的先后。
     pub results: Vec<(String, bool)>,
     pub prompts: Vec<Prompt>,

@@ -61,10 +61,11 @@ async fn allow_for_the_session_is_asked_once() {
     )
     .await;
     let p = c.wait_prompt(&s).await;
-    let first = match &p.kind {
-        PromptKind::Permission { summary, .. } => summary.clone(),
-        k => panic!("{k:?}"),
-    };
+    assert!(
+        matches!(p.kind, PromptKind::Permission { .. }),
+        "{:?}",
+        p.kind
+    );
     c.ok(Command::Answer {
         session: s.clone(),
         prompt: p.id,
@@ -82,16 +83,19 @@ async fn allow_for_the_session_is_asked_once() {
         )
         .await;
     t.ended();
-    // 只看同一条命令：模型第二次偶尔把命令写得不一样（多个 `cd … &&`），那是另一条命令，问是对的。
-    let again: Vec<_> = t
-        .prompts
-        .iter()
-        .filter(|p| matches!(&p.kind, PromptKind::Permission { summary, .. } if *summary == first))
-        .collect();
-    assert!(
-        again.is_empty(),
-        "本会话总是允许之后同一条命令不再问：{again:?}"
-    );
+    // 提问的摘要对 Bash 一律是泛泛的一句，看不出是哪条命令，所以按这一轮实际跑的命令判：模型第二次偶尔
+    // 把命令写得不一样（多个 `cd … &&`），那是另一条命令，问是对的，这时这条用例判不了。
+    let same_command = t.inputs.iter().all(|i| i.trim() == "touch first.txt");
+    if same_command {
+        assert!(
+            t.prompts.is_empty(),
+            "本会话总是允许之后同一条命令不再问：{:?}，命令 {:?}",
+            t.prompts,
+            t.inputs
+        );
+    } else {
+        eprintln!("模型换了命令，问是对的，不判：{:?}", t.inputs);
+    }
     if t.prompts.is_empty() {
         assert!(t.results.iter().all(|(_, err)| !err), "{:?}", t.results);
     }
