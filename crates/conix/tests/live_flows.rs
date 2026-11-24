@@ -244,13 +244,21 @@ async fn a_run_goes_from_start_to_finish() {
         })
         .await;
     assert_eq!(done.stations[0].status, StationStatus::Passed);
-    // 主会话是这次运行的会话，归属是流程。
+    // 主会话是这次运行的会话，归属是流程。运行一结束它就关了，结束后再查列表可能已经没有，
+    // 所以看运行期间推过来的会话。
     let main = done.main_session.clone();
-    let all = c.sessions().await;
-    let sum = all.iter().find(|s| s.id == main).unwrap_or_else(|| {
+    let seen: Vec<_> = c
+        .events()
+        .into_iter()
+        .filter_map(|e| match e {
+            Event::SessionUpserted(s) => Some(s),
+            _ => None,
+        })
+        .collect();
+    let sum = seen.iter().rev().find(|s| s.id == main).unwrap_or_else(|| {
         panic!(
-            "主会话 {main:?} 不在列表里：{:?}",
-            all.iter()
+            "主会话 {main:?} 没推过：{:?}",
+            seen.iter()
                 .map(|s| (&s.id, &s.provenance.origin))
                 .collect::<Vec<_>>()
         )
