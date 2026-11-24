@@ -58,14 +58,27 @@ pub fn credentials() -> &'static BTreeMap<String, String> {
                 )
             })
             .collect();
-        // .env 按厂商写（DEEPSEEK_*、CLAUDE_*）；引擎自带的 anthropic provider 读 ANTHROPIC_*，由 DeepSeek 那组
-        // 补出来。老写法（直接写 ANTHROPIC_*）照旧认。
-        for (to, from) in [
-            ("ANTHROPIC_AUTH_TOKEN", "DEEPSEEK_API_KEY"),
-            ("ANTHROPIC_BASE_URL", "DEEPSEEK_BASE_URL"),
-            ("ANTHROPIC_MODEL", "DEEPSEEK_MODEL"),
-            ("ANTHROPIC_SMALL_FAST_MODEL", "DEEPSEEK_FAST_MODEL"),
-        ] {
+        // .env 按厂商写（DEEPSEEK_*、CLAUDE_*）；引擎自带的 anthropic provider 读 ANTHROPIC_*，由 `LIVE_DEFAULT`
+        // 点的那一家（`deepseek` 缺省，或 `claude`）补出来：哪家的额度多就让单模型的用例走哪家。官方端点认
+        // x-api-key（ANTHROPIC_API_KEY），DeepSeek 的兼容端点认 Bearer（ANTHROPIC_AUTH_TOKEN）。
+        // 老写法（直接写 ANTHROPIC_*）照旧认。
+        let from_claude = vars.get("LIVE_DEFAULT").is_some_and(|v| v == "claude");
+        let map: [(&str, &str); 4] = if from_claude {
+            [
+                ("ANTHROPIC_API_KEY", "CLAUDE_API_KEY"),
+                ("ANTHROPIC_BASE_URL", "CLAUDE_BASE_URL"),
+                ("ANTHROPIC_MODEL", "CLAUDE_MODEL"),
+                ("ANTHROPIC_SMALL_FAST_MODEL", "CLAUDE_FAST_MODEL"),
+            ]
+        } else {
+            [
+                ("ANTHROPIC_AUTH_TOKEN", "DEEPSEEK_API_KEY"),
+                ("ANTHROPIC_BASE_URL", "DEEPSEEK_BASE_URL"),
+                ("ANTHROPIC_MODEL", "DEEPSEEK_MODEL"),
+                ("ANTHROPIC_SMALL_FAST_MODEL", "DEEPSEEK_FAST_MODEL"),
+            ]
+        };
+        for (to, from) in map {
             if !vars.contains_key(to)
                 && let Some(v) = vars.get(from).cloned()
             {
@@ -109,6 +122,14 @@ pub struct Endpoint {
 /// DeepSeek：LIVE 缺省的那个，一定有。
 pub fn deepseek() -> Endpoint {
     let c = credentials();
+    // 按厂商的那组读：`LIVE_DEFAULT=claude` 时 ANTHROPIC_* 是 Claude 的。老写法只有 ANTHROPIC_*，那就是它。
+    if let Some(model) = c.get("DEEPSEEK_MODEL").filter(|m| !m.is_empty()) {
+        return Endpoint {
+            base_url: c.get("DEEPSEEK_BASE_URL").cloned().unwrap_or_default(),
+            key_env: "DEEPSEEK_API_KEY".into(),
+            model: model.clone(),
+        };
+    }
     Endpoint {
         base_url: c.get("ANTHROPIC_BASE_URL").cloned().unwrap_or_default(),
         key_env: if c.contains_key("ANTHROPIC_AUTH_TOKEN") {
