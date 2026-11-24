@@ -493,6 +493,8 @@ impl St {
             kind,
             from,
             asked_ms: now,
+            permit_always: p.permit_always(),
+            via: p.via(),
         };
         self.prompts.insert(id.clone(), meta);
         let Some(s) = self.sessions.get_mut(sid) else {

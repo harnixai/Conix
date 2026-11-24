@@ -154,6 +154,44 @@ async fn m04_permission_question_and_withdrawn() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn m04_a_prompt_without_always_offers_yes_and_no_and_names_the_plugin_command() {
+    let mut h = chat("default").await;
+    let session = h.core.state.ui.chat.clone().unwrap();
+    h.core
+        .handle(model::Msg::Event(Box::new(Event::PromptPending {
+            session,
+            prompt: Prompt {
+                id: "px".into(),
+                kind: PromptKind::Permission {
+                    tool: "Write".into(),
+                    summary: "xforge/changes/a.md".into(),
+                    paths: vec![],
+                },
+                from: None,
+                asked_ms: 0,
+                permit_always: false,
+                via: Some("/xforge spec new a".into()),
+            },
+        })));
+    h.settle().await;
+    let text = h.text();
+    assert!(!text.contains("不再询问"), "{text}");
+    assert!(text.contains("经插件命令 /xforge spec new a"), "{text}");
+    h.keys("2").await;
+    h.advance(300).await;
+    assert!(
+        h.calls("dev").iter().any(|c| matches!(
+            c,
+            Command::Answer {
+                answer: Answer::Deny { .. },
+                ..
+            }
+        )),
+        "只有两项时第 2 项是否"
+    );
+}
+
+#[tokio::test(start_paused = true)]
 async fn m04_ask_does_not_steal_focus_while_typing() {
     let mut h = chat("default").await;
     h.type_str("正在打").await;
@@ -170,6 +208,8 @@ async fn m04_ask_does_not_steal_focus_while_typing() {
                 },
                 from: None,
                 asked_ms: 0,
+                permit_always: true,
+                via: None,
             },
         })));
     h.type_str("y").await;

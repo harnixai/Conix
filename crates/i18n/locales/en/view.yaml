@@ -54,6 +54,7 @@ view:
     proceed: "Do you want to proceed?"
     model_question: "Model question"
     from: "  From {label}"
+    via: "via plugin command {command}"
     keys_active: "Esc to deny · ↑↓ / number to select · Enter to confirm"
     keys_idle: "^R or click here to answer"
   load_failed: "✗ Failed to load: {error} · r to retry"

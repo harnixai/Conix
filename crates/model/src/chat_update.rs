@@ -476,8 +476,13 @@ fn interrupt(s: &mut State) -> Vec<Effect> {
 }
 
 /// 提问框的选项（交互 §4.6，照 Claude Code）。
-pub(crate) fn ask_options(kind: &PromptKind) -> Vec<String> {
-    match kind {
+/// Agix 不给"总是允许"的提问（`permit_always: false`）只有"是 / 否"两项。
+pub(crate) fn ask_options(p: &port::Prompt) -> Vec<String> {
+    match &p.kind {
+        PromptKind::Permission { .. } if !p.permit_always => vec![
+            i18n::t!("chat_update.ask_yes"),
+            i18n::t!("chat_update.ask_no"),
+        ],
         PromptKind::Permission { summary, .. } => vec![
             i18n::t!("chat_update.ask_yes"),
             i18n::t!("chat_update.ask_yes_always", summary = summary),
@@ -494,11 +499,11 @@ pub(crate) fn ask_options(kind: &PromptKind) -> Vec<String> {
 pub(crate) fn dialog_action(s: &mut State, a: Action) -> Option<Vec<Effect>> {
     let session = s.ui.chat.clone()?;
     let prompt = s.conv()?.prompts.first()?.clone();
-    let options = ask_options(&prompt.kind);
+    let options = ask_options(&prompt);
     let pick = |s: &mut State, i: usize| -> Vec<Effect> {
         let answer = match (&prompt.kind, i) {
             (PromptKind::Permission { .. }, 0) => Answer::Permit,
-            (PromptKind::Permission { .. }, 1) => Answer::PermitSession,
+            (PromptKind::Permission { .. }, 1) if prompt.permit_always => Answer::PermitSession,
             (PromptKind::Permission { .. }, _) => Answer::Deny { reason: None },
             (PromptKind::Question { options, .. }, i) if i < options.len() => {
                 Answer::Choice { index: i }

@@ -54,6 +54,7 @@ view:
     proceed: "要执行吗？"
     model_question: "模型提问"
     from: "  来自 {label}"
+    via: "经插件命令 {command}"
     keys_active: "Esc 拒绝 · ↑↓ / 数字选择 · Enter 确认"
     keys_idle: "^R 或点这里作答"
   load_failed: "✗ 加载失败：{error} · r 重试"

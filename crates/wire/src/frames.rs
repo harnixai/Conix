@@ -200,6 +200,11 @@ pub enum PromptPayload {
         message: String,
         #[serde(default)]
         paths: Vec<String>,
+        /// Agix 0.4.1 起才有；没有这个键的旧引擎照旧都给"总是允许"。
+        #[serde(default = "yes")]
+        permit_always: bool,
+        #[serde(default)]
+        origin: Option<PromptOrigin>,
     },
     Question {
         prompt_id: String,
@@ -219,7 +224,45 @@ pub enum PromptPayload {
     },
 }
 
+/// 插件命令的子调用问的（协议 §4.7）：`via` 是 `RunExt:<命令>`，`command` 是规整后的命令行。
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct PromptOrigin {
+    #[serde(default)]
+    pub via: String,
+    #[serde(default)]
+    pub tool_use_id: Option<String>,
+    #[serde(default)]
+    pub command: Option<String>,
+}
+
+fn yes() -> bool {
+    true
+}
+
 impl PromptPayload {
+    /// 给不给"本会话总是允许"（问题与 MCP 的询问没有这一项，按给算，由界面按种类决定）。
+    pub fn permit_always(&self) -> bool {
+        match self {
+            PromptPayload::Permission { permit_always, .. } => *permit_always,
+            _ => true,
+        }
+    }
+
+    /// 插件命令子调用的命令行。
+    pub fn via(&self) -> Option<String> {
+        match self {
+            PromptPayload::Permission {
+                origin: Some(o), ..
+            } => o.command.clone().or_else(|| {
+                o.via
+                    .strip_prefix("RunExt:")
+                    .map(str::to_string)
+                    .filter(|c| !c.is_empty())
+            }),
+            _ => None,
+        }
+    }
+
     pub fn id(&self) -> &str {
         match self {
             PromptPayload::Permission { prompt_id, .. }

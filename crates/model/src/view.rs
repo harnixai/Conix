@@ -458,13 +458,27 @@ fn ask_lines(s: &State, width: usize) -> Option<(Vec<Line>, Option<usize>)> {
         Line::toned(fit(title), Tone::Strong)
             .push(format!("{}{count}", " ".repeat(pad)), Tone::Dim),
         Line::toned(fit(format!("  {summary}")), Tone::Normal),
-        match &p.from {
-            Some(f) => Line::toned(fit(i18n::t!("view.ask.from", label = f.label)), Tone::Dim),
-            None => Line::default(),
+        match (&p.from, &p.via) {
+            (Some(f), Some(c)) => Line::toned(
+                fit(format!(
+                    "{}  {}",
+                    i18n::t!("view.ask.from", label = f.label),
+                    i18n::t!("view.ask.via", command = c)
+                )),
+                Tone::Dim,
+            ),
+            (Some(f), None) => {
+                Line::toned(fit(i18n::t!("view.ask.from", label = f.label)), Tone::Dim)
+            }
+            (None, Some(c)) => Line::toned(
+                fit(format!("  {}", i18n::t!("view.ask.via", command = c))),
+                Tone::Dim,
+            ),
+            (None, None) => Line::default(),
         },
         Line::toned(fit(question), Tone::Normal),
     ];
-    let options = crate::chat_update::ask_options(&p.kind);
+    let options = crate::chat_update::ask_options(p);
     let sel = s.ui.ask_selected.min(options.len() - 1);
     for (i, o) in options.iter().enumerate() {
         let mark = if i == sel && s.ui.ask_active {

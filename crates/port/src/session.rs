@@ -153,6 +153,17 @@ pub struct Prompt {
     pub from: Option<PromptSource>,
     #[serde(default)]
     pub asked_ms: Millis,
+    /// 给不给"本会话总是允许"。Agix 对 ask 规则问出的、插件命令子调用问的都不给（`permit_always:
+    /// false`）：选了也只放行这一次，给了这一项就是在骗人。
+    #[serde(default = "yes")]
+    pub permit_always: bool,
+    /// 插件命令的子调用问的：那条命令行（Agix 的 `origin.command`）。人按命令判，不按模型判。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub via: Option<String>,
+}
+
+fn yes() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
