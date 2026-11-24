@@ -442,6 +442,29 @@ impl Hub {
                 .map_err(rpc_err)?;
                 Ok(Reply::Ok)
             }
+            C::SessionTasks { session } => {
+                let st = self.0.st.locked();
+                let mut out = vec![];
+                let mut owners = vec![session.0.clone()];
+                // 子 Agent 的任务挂在它的侧链会话上：顺着 agent_session 往下收，环与过深的不跟。
+                while let Some(o) = owners.pop() {
+                    if out.len() > 2000 {
+                        break;
+                    }
+                    let Some(s) = st.sessions.get(&o) else {
+                        continue;
+                    };
+                    for t in s.tasks.values() {
+                        if let Some(child) = &t.agent_session
+                            && child.0 != o
+                        {
+                            owners.push(child.0.clone());
+                        }
+                        out.push(t.clone());
+                    }
+                }
+                Ok(Reply::Tasks(out))
+            }
             C::TaskOutput { task, from_byte } => {
                 let owner = self.task_owner(&task)?;
                 let v = self

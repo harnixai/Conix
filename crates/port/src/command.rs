@@ -130,6 +130,10 @@ pub enum Command {
         task: TaskId,
         from_byte: u64,
     },
+    /// 一个会话与它的子 Agent 的整棵任务树（流程、作业页画运行与触发的树时，要没被 Watch 的会话的任务）。
+    SessionTasks {
+        session: SessionId,
+    },
 
     /// 在 Conix 里关掉的会话（转录还在），关掉的时刻新的在前（交互 §5.2「已关闭」）。
     ListClosedSessions,
@@ -265,6 +269,7 @@ impl Command {
             Command::StopTask { .. } => "stop_task",
             Command::MessageTask { .. } => "message_task",
             Command::TaskOutput { .. } => "task_output",
+            Command::SessionTasks { .. } => "session_tasks",
             Command::ListFlows => "list_flows",
             Command::GetFlow { .. } => "get_flow",
             Command::ListRuns { .. } => "list_runs",
@@ -384,6 +389,7 @@ pub enum Reply {
         message: MessageId,
     },
     Commands(Vec<SlashCommand>),
+    Tasks(Vec<Task>),
     TaskOutput {
         text: String,
         next_byte: u64,

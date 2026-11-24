@@ -617,6 +617,35 @@ async fn permission_modes_are_set_on_the_session_and_its_frames_keep_them() {
     );
 }
 
+/// 流程、作业页画树要没被 Watch 的会话的任务：子 Agent 的任务挂在它的侧链上，一起收上来。
+#[tokio::test]
+async fn session_tasks_gather_the_whole_tree_down_the_sub_agents() {
+    let mut r = rig().await;
+    r.frame(
+        "s1",
+        json!({"kind":"task_started","task":{"task_id":"t1","kind":"agent","status":"running",
+            "started_ms":0,"detail":{"description":"审代码","agent_type":"reviewer","agent_session_id":"c1"}}}),
+    );
+    r.frame(
+        "c1",
+        json!({"kind":"task_started","task":{"task_id":"t2","kind":"shell","status":"running",
+            "started_ms":0,"detail":{"command":"cargo test"}}}),
+    );
+    r.events().await;
+    let Reply::Tasks(v) = r
+        .hub
+        .handle(Command::SessionTasks {
+            session: SessionId("s1".into()),
+        })
+        .await
+        .unwrap()
+    else {
+        panic!()
+    };
+    let ids: Vec<&str> = v.iter().map(|t| t.id.0.as_str()).collect();
+    assert!(ids.contains(&"t1") && ids.contains(&"t2"), "{ids:?}");
+}
+
 #[tokio::test]
 async fn late_frames_do_not_resurrect_a_closed_session() {
     let mut r = rig().await;

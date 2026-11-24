@@ -480,6 +480,7 @@ impl ScriptedBackend {
                 Ok(Reply::Ok)
             }
             MessageTask { .. } => Ok(Reply::Ok),
+            SessionTasks { session } => Ok(Reply::Tasks(st().tasks_under(session))),
             TaskOutput { task, from_byte } => {
                 let st = st();
                 let all = st.task_output.get(task).cloned().unwrap_or_default();
