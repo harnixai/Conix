@@ -92,7 +92,7 @@ pub trait Backend: Send + Sync + 'static {
 | 会话 | `ListSessions{filter}`、`CreateSession{project, scene, model}`、`OpenSession{id}`（需要时先恢复）、`Watch{id}` / `Unwatch{id}`（已关闭的只读：读转录拼快照，不订阅）、`History{id, before}`、`Rename`、`Close`、`ListClosedSessions` / `ReopenSession{id}` / `DeleteSession{id}`（交互 §5.2「已关闭」；删除连同侧链，删了就没了） |
 | 对话 | `Submit{session, text, mode: Turn \| Steer \| Queue}`、`Interrupt`、`Answer{session, prompt, answer}`、`SetModel`、`Commands{session}`、`SideQuestion{session, text}` |
 | goal | `SetGoal`、`UpdateGoal{action: Pause \| Resume \| Edit \| Clear}` |
-| 任务 | `StopTask`、`MessageTask`、`TaskOutput{task, from_byte}` |
+| 任务 | `StopTask`、`MessageTask`、`TaskOutput{task, from_byte}`、`SessionTasks{session}`（这个会话与它的子 Agent 的整棵任务树；流程、作业页画树时要没被 Watch 的会话的任务） |
 | 流程 | `ListFlows`、`GetFlow{name}`、`ListRuns{flow}`、`ListEndedRuns{limit, before_ms}`（不分流程，结束新的在前）、`GetRun{id}`（带钉住的定义的摘要与它现在怎样了：`def_digest`、`def_state`）、`StartRun{flow, subject, inputs}`、`RunOp{run, op}` |
 | 作业 | `ListJobs`、`SaveJob`、`DeleteJob`、`SetJobEnabled`、`RunJobNow`、`JobHistory{job}` |
 
@@ -261,7 +261,6 @@ loop {
 ├── scenes/  daemon/  plugins/ …  ┘ 对项目里的会话只有索引（§8.4）。模型、provider、权限都沿用 settings.json
 ├── conix.yaml                    Conix 自己的配置（YAML）：界面、实例（空闲超时）；不存在时写一份带注释的缺省配置
 ├── keybindings.json              快捷键覆盖
-├── flows/                        全局流程包（可写层），所有实例共用：flows/、skills/、rules/、policies/…
 ├── known-projects.json           认领过的项目：凭证 → 项目路径（§8.9）
 └── instances/<名字>/             目录 0700；只放这台机器上这个进程的东西
     ├── instance.json             发现文件：名字、pid、项目、启动时刻、版本、当前接入者；实例退出时删掉
@@ -293,7 +292,9 @@ loop {
             ├── jobs/<作业 id>.jsonl  触发记录，一次一行
             ├── flow-runs/        流程运行的记录（harnix-flow 的 FileStore）
             ├── run-policies.json 流程作业起的运行：按运行记下发起它的作业与开站会话用的网络（§8.5），续跑时沿用
-            ├── runs/<运行>/      运行的过程目录（`ProjectLayout::with_runs_dir`，Harnix#69）：交付、门禁日志
+            ├── runs/<运行>/      运行的过程目录（`ProjectLayout::with_runs_dir`，Harnix#69）：交付、门禁日志；
+            │                     Conix 在这里写 `conix-report.json`（§8.12）
+            ├── job-runs/<作业>/<触发时刻>/  一次触发的运行时目录：`report.json`（§8.12）
             ├── workspaces/<运行>/ 没有项目的运行的工作目录（流程库要它；Conix 的运行都有项目）
             └── quarantine/<时刻>/ 认不出来的状态挪到这里，不读（§8.9）
 ```
@@ -309,6 +310,14 @@ loop {
 - **作业属于项目**：一个项目同时只有一个实例（`state/conix/host.lock`），不会重复触发同一个作业。
   `conix start <名字>` 重启实例时作业接着排。
 - 以前放在 `instances/<名字>/` 下的会话归属、作业、流程运行与 worktree 不迁移。
+- **流程与作业只在项目里**：没有全局流程包。以前的 `~/.conix/flows/` 不再读，要用的流程搬进某个项目的
+  `.conix/flows/`（比如个人项目）。
+- **个人项目**：家目录不能当项目——`~/.conix` 既是全局目录又是 Agix 的 `data_root`，项目层目录再落在这里，
+  设置分层撞在一起，引擎还把 `~/.<engine>` 当别的实例的状态目录守着。所以在家目录、它的上级（含根目录）或全局目录
+  里运行 `conix`，进的是个人项目：`conix.yaml` 的 `instance.personal_project`，缺省 `<文档目录>/Conix`（macOS
+  `~/Documents`；Linux 取 `XDG_DOCUMENTS_DIR`（环境变量或 `user-dirs.dirs`），没有就 `~/Documents`；Windows
+  `%USERPROFILE%\Documents`），没有就建。`conix new --project` 指到这些位置直接拒。个人项目和别的项目一样，要
+  `/trust` 之后才读写它的流程与作业。
 
 ### 8.2 crate 与进程
 
@@ -470,7 +479,8 @@ jobs:
   取在第一次开站而不是启动运行时，免得与派工器开第一个会话抢先后。
 
 **宿主工具**（`hub/tools.rs`）：`session_list`、`session_show`、`session_rename`、`session_close`、`session_delete`、
-`job_list`、`job_show`、`job_save`、`job_validate`、`job_history`、`job_stop`、`job_delete`、`job_enable`、`job_run`
+`job_list`、`job_show`、`job_save`、`job_validate`、`job_history`、`job_stop`、`job_delete`、`job_enable`、`job_run`、
+`work_list`、`work_show`、`work_cleanup`、`flow_rerun`、`conix_doctor`、`notify_test`（§8.12）
 （作业一套对齐流程：`job_save` 收 `kind: simple | flow`，流程作业的 `flow` 收 `#n` 或名字、存前校验流程在、`inputs` 合它的
 schema；`job_validate` 不落盘，回下 5 次触发时刻与护栏的实际生效值；`job_history` 翻页、按结局筛；`job_stop` 停下正在跑的那次；
 `job_run` 可以这一次换主题或补一句）；流程的 22 个 `flow_*` 是流程库的编写与
@@ -481,10 +491,18 @@ schema；`job_validate` 不落盘，回下 5 次触发时刻与护栏的实际�
 
 - 经 `daemon.setHostTools` 挂在实例与引擎的连接上，**每个会话都有**，子 Agent 也有。只对此后建起来的
   引擎生效：老会话在下一次恢复或重建时拿到。
-- **能动什么由发起调用的会话决定**，`Hub` 执行前查（子 Agent 的调用以根会话回答，算根会话的）：
-  用户会话（新建、分叉）什么都能动；作业触发出来的会话只能动触发它的那个作业和它自己；流程运行里的
-  会话只能看流程、只能操作它自己所在的运行（不能改定义、不能启新运行），会话只动它自己；作业触发出来的
-  会话对流程只能看；不是本实例的会话什么都不给。提示词只说明，不当约束。
+- **能动什么由发起调用的会话决定**，`Hub` 执行前查（子 Agent 的调用以根会话回答，算根会话的），提示词只说明，
+  不当约束。原则是**外面只管生命周期，里面在 TUI 里自己处理**：
+
+  | 发起调用的会话 | 流程定义 | 流程运行 | 作业 | 会话 |
+  |---|---|---|---|---|
+  | 用户会话（新建、分叉） | 全部 | 启动、暂停、恢复、取消、重跑；确认、放行、强制放行、返工、重试 | 全部 | 只动用户会话；运行、触发里的会话只能看 |
+  | 作业触发出来的 | 只看 | 只看 | 只看 | 只动它自己 |
+  | 流程运行里的 | 只看 | 只看（交付走派工器的 `flow_state` / `flow_submit` / `flow_propose`） | 只看 | 只动它自己 |
+  | 不是本实例的 | — | — | — | — |
+
+  运行与触发里的会话（主会话、站会话、子 Agent）只在 TUI 里处理：切过去插话、答提问、批权限。外面的会话改名、
+  关掉、删掉它们，运行或作业就对不上自己的会话了；里面的会话操作自己所在的运行，就是一站自己给自己放行。
 - **有运行不许改**：`flow_update` / `flow_delete` 在这个流程还有没结束（`Active`）的运行时拒绝，回答里列出
   那些运行的 ID，要先取消或等它们跑完。运行启动时库会把定义钉住，改定义本不会弄坏在跑的运行；这是 Conix
   自己的规矩，免得"改了的流程"和"正在跑的流程"对不上。
@@ -500,8 +518,8 @@ schema；`job_validate` 不落盘，回下 5 次触发时刻与护栏的实际�
 
 - **装配**（`flows::start`，实例起来时一次）：
   - 运行记录：`FileStore`，`.conix/state/conix/flow-runs/`。
-  - 流程包三层：`~/.conix/flows/`（`DirPacks` 的可写层）；垫在下面的内置包（库的示例包，`MemPacks::examples()`）；
-    项目自己的 `<项目>/.conix/flows/`，**项目受信才读、才写**。会话都在实例的项目里，`flow_create` 存进项目自己的
+  - 流程包：项目自己的 `<项目>/.conix/flows/`，**项目受信才读、才写**；垫在下面的是只读的插件包与内置包（库的示例包，
+    `MemPacks::examples()`），没有全局可写层（§8.1）。会话都在实例的项目里，`flow_create` 存进项目自己的
     流程包，所以项目没受信时存不进去，工具照实说。信任取 Agix 的 `project.status`；人用 `/trust`（端口
     `TrustProject` → `project.trust`）信任或取消，之后派工器重新问一遍，项目的流程跟着出现或消失。
   - `ProjectLayout`：项目层目录 `.conix`（与 Agix 的同一个），worktree 在仓库根的 `.wkts/<运行>/`、分支
@@ -620,6 +638,40 @@ schema；`job_validate` 不落盘，回下 5 次触发时刻与护栏的实际�
 
 `conix.yaml` 的改动（`conix_config_set`）：按启动时同一个解析先校验，备份后写；`jobs`、`notify` 当场重读，`ui`、
 `instance`、`engine` 回"下次启动生效"。写配置的工具都不是只读的，照常问人；只有人开的会话有这些工具。
+
+### 8.12 运行与触发：根入口、运行时目录、清理
+
+**根入口 `work_list`**：一次列出本项目的流程运行（不分流程，`Engine::list` 不给 `flow`）与作业触发（在跑的，加上
+最近结束的），按种类、流程、作业、状态筛。流程库的 `flow_runs` 要给流程，库的东西不在本地改，所以另起一个宿主工具，
+连作业一起包进来。
+
+- 不是一份新的内存注册表，而是每次调用向两处存储取一份快照：运行问派工器的 `Engine`（它自己串行化每个运行的改动），
+  触发读 `state/conix/jobs/<作业>.jsonl`。不长时间持锁，Conix 的 `Mutex` 不跨 `await`。
+- 快照会过时：列出来是"等确认"，调操作时已经变了。操作由内核按当时的状态校验，不对就报错，不会写乱。
+- 已结束的运行沿用 `ListEndedRuns` 的缓存，不每次扫一遍运行记录。
+
+**运行时目录**：每次运行、每次触发一个目录，实例在里面记它的情况；会话用 `work_show` 查（目录在 `state/conix/` 下，
+模型的文件工具写不进去，也不该由模型写——记录要可信）。
+
+| | 目录 | 写什么、何时写 |
+|---|---|---|
+| 流程运行 | `state/conix/runs/<运行>/`（流程库的过程目录） | `conix-report.json`：运行的摘要、各站（状态、耗时、用量、会话与模型）、主会话与模型、钉住的定义摘要；运行结束时写 |
+| 作业触发 | `state/conix/job-runs/<作业>/<触发时刻>/` | `report.json`：触发记录（结局、耗时、用量、审计）、作业名与种类、会话与模型（流程作业是运行 id）、最后一轮回复的末尾（至多 4000 字）；起来时写一份 `running`，结束时重写 |
+
+`work_show` 回报告，运行还在跑时另附此刻的状态（`GetRun`），并写出目录在哪。
+
+**重跑 `flow_rerun`**：已结束的运行，按它记下的流程、主题、输入再起一次；触发方式记为手动，不沿用作业的护栏。
+
+**清理 `work_cleanup`**：缺省 `dry_run`，列出能清的：结束早于 `older_than`（缺省 30 天）的作业触发（触发记录里的行与
+它的运行时目录）；已结束的流程运行只计数——运行记录归流程库，归档与删除等它的接口（Harnix codix-05）。照实说哪些清了、
+哪些没清。改东西照常问人。
+
+**会话里的诊断**：`conix_doctor`（只读）与 `/doctor` 同一份；`notify_test` 经配置的出口发一条测试通知（会往外发，问人）。
+
+**流程、作业页的树**（F-03、J-02）：主会话 → 站 → 站的任务 → 子 Agent 与任务，递归。任务树来自 `TaskUpserted`
+（每个会话的都推）加上 `SessionTasks` 的快照（选中运行或触发时取一次没 Watch 的那些会话的）。模型取节点会话的
+`provenance.model`；子 Agent 的实际模型 Agix 还不报（`session.tasks` 的 agent 任务没有模型），先用 `agent_type`，
+等 Agix [Codix 12]。
 
 ## 9. 旧实现踩过的坑
 

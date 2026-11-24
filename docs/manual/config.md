@@ -24,7 +24,6 @@
   settings.local.json           同上，这台机器的个人部分
   conix.yaml                    Conix 自己的配置（下面）
   keybindings.json              键位覆盖（下面）
-  flows/                        全局流程包
   plugins/  plugin-store/       装好的插件（Agix 管）；自己放的插件包
   config-backups/               会话里改配置前的备份
   instances/<名字>/             实例的运行时文件：socket、锁、发现文件、日志

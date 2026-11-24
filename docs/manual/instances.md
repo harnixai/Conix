@@ -13,6 +13,14 @@ conix stop <名字>            # 停掉
 conix list [--all]          # 列出（--all 连停着的）
 ```
 
+## 个人项目
+
+家目录不能当项目（它的 `.conix` 就是全局目录 `~/.conix`）。在家目录、它的上级或 `~/.conix` 里运行 `conix`，
+进的是**个人项目**：缺省是文档目录下的 `Conix`（macOS `~/Documents/Conix`；Linux 按 `XDG_DOCUMENTS_DIR`，
+没有就 `~/Documents/Conix`；Windows `%USERPROFILE%\Documents\Conix`），没有就建。`conix.yaml` 的
+`instance.personal_project` 可以换。它和别的项目一样：流程、作业放在它的 `.conix/` 里，`/trust` 之后才读写。
+不在某个项目里、又想各处都能用的流程与作业，就放这里。`conix new --project ~` 会被拒绝。
+
 **一个实例同时只给一个 TUI 接入**；空闲（缺省 30 分钟，`conix.yaml` 的 `instance.idle_timeout`）自动脱离，
 让出实例。**一个项目同时只有一个实例**：在同一个项目上再起一个会被拒绝，并告诉你该接入哪个。
 

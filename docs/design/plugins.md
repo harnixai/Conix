@@ -100,8 +100,7 @@ xforge-structure = "xforge.check"
 xforge-open = "xforge.open"
 ```
 
-- **分层**：Conix 实现一层 `PluginPacks`，挂所有已启用插件的流程包。叠加顺序：项目 > `~/.conix/flows/`
-  可写层 > 插件 > 内置示例。来源记 `Origin::Plugin`（Harnix 0.4.7，不带名字；插件名从 `Packs::source(flow)` / `DefRow::source` 取）；可写层存同名的就是
+- **分层**：Conix 实现一层 `PluginPacks`，挂所有已启用插件的流程包。叠加顺序：项目 > 插件 > 内置示例（没有全局可写层，architecture §8.1）。来源记 `Origin::Plugin`（Harnix 0.4.7，不带名字；插件名从 `Packs::source(flow)` / `DefRow::source` 取）；项目里存同名的就是
   覆盖，删掉回到插件那份。两个插件同名的流程、件、门禁名、步骤名，按插件名排序先到的胜出，后到的报在
   `/plugin` 里：被盖掉的同名流程在库里是 `Withheld::Shadowed`，`DirPacks::shadowed()` 列出它们。
 - **目录**（`Catalog`）：所有已启用插件 `[x-conix.gates]` 与 `[x-conix.steps]` 的名字并进 `gates` / `steps`。
