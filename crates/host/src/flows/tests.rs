@@ -237,7 +237,6 @@ async fn a_flow_jobs_flow_is_resolved_and_its_inputs_checked() {
     let flows = super::start(
         &r.hub,
         super::FlowsConfig {
-            flows_dir: dir.path().join("flows"),
             runs_dir: dir.path().join("runs"),
             worktrees_dir: dir.path().join(".wkts"),
             workspaces_dir: dir.path().join("ws"),
@@ -280,7 +279,6 @@ async fn project_runs_span_flows_and_an_ended_run_is_run_again() {
     let flows = super::start(
         &r.hub,
         super::FlowsConfig {
-            flows_dir: dir.path().join("flows"),
             runs_dir: dir.path().join("runs"),
             worktrees_dir: dir.path().join(".wkts"),
             workspaces_dir: dir.path().join("ws"),

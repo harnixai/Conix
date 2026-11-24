@@ -105,7 +105,6 @@ pub async fn run(name: String, project: PathBuf) -> Result<()> {
     let flows = host::flows::start(
         &hub,
         host::flows::FlowsConfig {
-            flows_dir: layout.flows(),
             runs_dir: state.flow_runs(),
             worktrees_dir: host::flows::worktrees_root(&project),
             workspaces_dir: state.flow_workspaces(),

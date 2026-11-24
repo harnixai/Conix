@@ -169,7 +169,6 @@ async fn xforge_installs_offers_both_flows_and_carries_a_change_from_open_to_arc
     let flows = host::flows::start(
         &hub,
         host::flows::FlowsConfig {
-            flows_dir: home.path().join("flows"),
             runs_dir: home.path().join("runs"),
             worktrees_dir: project_path.join(".wkts"),
             workspaces_dir: home.path().join("ws"),

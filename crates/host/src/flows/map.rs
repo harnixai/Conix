@@ -17,9 +17,10 @@ pub(crate) fn usage(u: &harnix_flow::Usage) -> port::Usage {
 pub(crate) fn origin(o: harnix_flow::Origin) -> port::FlowOrigin {
     match o {
         harnix_flow::Origin::Builtin => port::FlowOrigin::Builtin,
-        harnix_flow::Origin::Override => port::FlowOrigin::Override,
-        harnix_flow::Origin::User => port::FlowOrigin::Global,
-        harnix_flow::Origin::Project => port::FlowOrigin::Project,
+        // 没有全局可写层，User / Override 不会出现；万一有，它就是存下来的那一份，不是只读的。
+        harnix_flow::Origin::Project
+        | harnix_flow::Origin::User
+        | harnix_flow::Origin::Override => port::FlowOrigin::Project,
         harnix_flow::Origin::Plugin => port::FlowOrigin::Plugin,
         // `Origin` 是 non_exhaustive：库以后加的来源先按只读的全局层显示，不让编译挡住重新拷贝。
         _ => port::FlowOrigin::Plugin,

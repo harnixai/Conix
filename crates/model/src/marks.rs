@@ -168,9 +168,7 @@ pub(crate) fn kind_label(k: &TaskKind) -> String {
 pub(crate) fn origin_label(o: port::FlowOrigin) -> String {
     match o {
         port::FlowOrigin::Builtin => i18n::t!("marks.origin.builtin"),
-        port::FlowOrigin::Global => i18n::t!("marks.origin.global"),
         port::FlowOrigin::Project => i18n::t!("marks.origin.project"),
-        port::FlowOrigin::Override => i18n::t!("marks.origin.override"),
         port::FlowOrigin::Plugin => i18n::t!("marks.origin.plugin"),
     }
 }

@@ -50,8 +50,6 @@ const SCENE: &str = "code";
 pub const WORKTREES_DIR: &str = ".wkts";
 
 pub struct FlowsConfig {
-    /// 全局流程包（可写层）：`~/.conix/flows/`。
-    pub flows_dir: PathBuf,
     /// 运行记录：`.conix/state/conix/flow-runs/`。
     pub runs_dir: PathBuf,
     /// 运行的 worktree：[`worktrees_root`]。
@@ -109,21 +107,16 @@ pub struct Flows {
     ended: std::sync::Mutex<Option<Vec<port::RunSummary>>>,
     /// 流程包：插件启停时整体换（[`swap::SwapPacks`]）。
     swap: Arc<swap::SwapPacks>,
-    flows_dir: PathBuf,
     /// 启用着的插件带来的门禁与步骤（`PluginGates` / `PluginPrograms` 按它找插件函数）。
     plugin_map: Arc<std::sync::RwLock<crate::plugins::PluginMap>>,
     /// 插件之间同名、没提供出来的流程与件。
     shadowed: std::sync::Mutex<Vec<harnix_flow::Shadowing>>,
 }
 
-/// 全局流程包：可写层 `~/.conix/flows/` > 插件（按名字）> 库自带的示例包。插件带来的门禁与步骤名进目录，
-/// 流程只能用目录里有的名字。
-fn build_packs(
-    flows_dir: &Path,
-    mounted: &[crate::plugins::Mounted],
-    map: &crate::plugins::PluginMap,
-) -> DirPacks {
-    let mut dir = DirPacks::writable(flows_dir).with_builtin(MemPacks::examples());
+/// 垫在项目下面的流程包：插件（按名字）> 库自带的示例包，都只读。没有全局可写层：流程与作业只在项目里，
+/// 存的都进项目自己的 `.conix/flows/`（architecture §8.1）。插件带来的门禁与步骤名进目录，流程只能用目录里有的名字。
+fn build_packs(mounted: &[crate::plugins::Mounted], map: &crate::plugins::PluginMap) -> DirPacks {
+    let mut dir = DirPacks::new(Vec::<PathBuf>::new()).with_builtin(MemPacks::examples());
     for m in mounted {
         if let Some(d) = m.flows_dir() {
             dir = dir.with_plugin(m.name.clone(), d);
@@ -153,7 +146,7 @@ pub async fn start(hub: &Hub, cfg: FlowsConfig) -> anyhow::Result<Arc<Flows>> {
     };
     let mounted = hub.mounted_plugins().await;
     let map = crate::plugins::PluginMap::build(&mounted);
-    let dir = build_packs(&cfg.flows_dir, &mounted, &map);
+    let dir = build_packs(&mounted, &map);
     let shadowed = dir.shadowed();
     let swap = Arc::new(swap::SwapPacks::new(Arc::new(dir)));
     let plugin_map = Arc::new(std::sync::RwLock::new(map));
@@ -212,7 +205,6 @@ pub async fn start(hub: &Hub, cfg: FlowsConfig) -> anyhow::Result<Arc<Flows>> {
         ended: Default::default(),
         author_host: Arc::new(tools::ConixAuthorHost::new(me.clone())),
         swap,
-        flows_dir: cfg.flows_dir.clone(),
         plugin_map,
         shadowed: std::sync::Mutex::new(shadowed),
     });
@@ -432,7 +424,7 @@ impl Flows {
     /// 启用着的插件变了：重建流程包、换上新的门禁与步骤，列表跟着刷新。在跑的运行不受影响。
     pub(crate) async fn set_plugins(&self, mounted: &[crate::plugins::Mounted]) {
         let map = crate::plugins::PluginMap::build(mounted);
-        let dir = build_packs(&self.flows_dir, mounted, &map);
+        let dir = build_packs(mounted, &map);
         *self.shadowed.locked() = dir.shadowed();
         self.swap.set(Arc::new(dir));
         *self.plugin_map.write().unwrap_or_else(|e| e.into_inner()) = map;

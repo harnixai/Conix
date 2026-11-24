@@ -85,9 +85,10 @@ stations:
 "#;
 
 /// 全局流程包里放好这些流程，以及它们用的 skill。
+/// 流程只在项目里（architecture §8.1）：放进项目自己的流程包 `<项目>/.conix/flows/`，项目受信才读。
 fn install(lv: &Live, flows: &[(&str, &str)]) {
-    let root = lv.home.path().join("flows");
-    std::fs::create_dir_all(root.join("flows")).unwrap();
+    let root = std::path::Path::new(&lv.project_path()).join(".conix/flows");
+    std::fs::create_dir_all(&root).unwrap();
     std::fs::create_dir_all(root.join("skills/say-word")).unwrap();
     std::fs::write(
         root.join("skills/say-word/SKILL.md"),
@@ -96,7 +97,7 @@ fn install(lv: &Live, flows: &[(&str, &str)]) {
     )
     .unwrap();
     for (name, yaml) in flows {
-        std::fs::write(root.join(format!("flows/{name}.yaml")), yaml).unwrap();
+        std::fs::write(root.join(format!("{name}.yaml")), yaml).unwrap();
     }
 }
 
@@ -228,7 +229,7 @@ async fn a_user_session_validates_and_creates_a_flow_once_the_project_is_trusted
 async fn a_run_goes_from_start_to_finish() {
     let lv = Live::new();
     install(&lv, &[("live-echo", ONE_STATION)]);
-    let mut c = lv.start().await;
+    let mut c = lv.start_trusted().await;
     c.answering(Answering::Auto);
     let run = start(&c, "live-echo", "say the word OK").await;
     let id = run.id.clone();
@@ -300,7 +301,7 @@ async fn a_run_goes_from_start_to_finish() {
 async fn a_worktree_run_works_under_the_repositorys_wkts() {
     let lv = Live::new();
     install(&lv, &[("live-wt", IN_WORKTREE)]);
-    let mut c = lv.start().await;
+    let mut c = lv.start_trusted().await;
     c.answering(Answering::Auto);
     let run = start(&c, "live-wt", "say the word OK").await;
     let id = run.id.clone();
@@ -352,7 +353,7 @@ async fn a_worktree_run_works_under_the_repositorys_wkts() {
 async fn a_flow_with_runs_not_finished_cannot_be_changed_until_they_are_cancelled() {
     let lv = Live::new();
     install(&lv, &[("live-wait", WAITS), ("live-echo", ONE_STATION)]);
-    let mut c = lv.start().await;
+    let mut c = lv.start_trusted().await;
     c.answering(Answering::Auto);
     c.ok(Command::TrustProject { trusted: true }).await;
     let run = start(&c, "live-wait", "say the word OK").await;
@@ -645,7 +646,7 @@ fn station(v: &port::RunView, id: &str) -> StationStatus {
 async fn run_ops_release_pause_resume_rework_force_and_confirm() {
     let lv = Live::new();
     install(&lv, &[("live-ops", OPS)]);
-    let mut c = lv.start().await;
+    let mut c = lv.start_trusted().await;
     c.answering(Answering::Auto);
     let gate = port::StationId("gate".into());
     let op = |run: &port::RunId, op: RunOp| Command::RunOp {
@@ -736,45 +737,46 @@ async fn run_ops_release_pause_resume_rework_force_and_confirm() {
     .await;
 }
 
-/// 全局流程（`~/.conix/flows/`）列出来来源是 Global；项目里放同名的，列出来的是项目的那份（不再是 Global）；
-/// 全局的流程与内置的同名，来源是 Override。
+/// 流程只在项目里：项目的标 Project；内置的标 Builtin、各项目都有；项目里放一份与内置同名的就取代它，
+/// 来源是 Project。以前的全局目录 `~/.conix/flows/` 不再读。
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "live"]
-async fn global_flows_are_marked_and_a_projects_same_named_flow_replaces_them() {
+async fn flows_live_in_the_project_and_a_projects_same_named_flow_replaces_a_builtin_one() {
     let lv = Live::new();
+    let old = lv.home.path().join("flows/flows");
+    std::fs::create_dir_all(&old).unwrap();
+    std::fs::write(
+        old.join("live-old.yaml"),
+        ONE_STATION.replace("name: live-echo", "name: live-old"),
+    )
+    .unwrap();
     install(
         &lv,
         &[
             ("live-echo", ONE_STATION),
             (
                 "example-review",
-                &ONE_STATION.replace("name: live-echo", "name: example-review"),
+                &ONE_STATION
+                    .replace("name: live-echo", "name: example-review")
+                    .replace("title: Live echo", "title: Project review"),
             ),
         ],
     );
     let c = lv.start_trusted().await;
-    let find = |all: Vec<port::FlowSummary>, name: &str| all.into_iter().find(|f| f.name == name);
-    let g = find(flows(&c).await, "live-echo").expect("全局的流程列得出");
-    assert_eq!(g.origin, FlowOrigin::Global, "{g:?}");
-
-    let dir = std::path::Path::new(&lv.project_path()).join(".conix/flows");
-    std::fs::create_dir_all(&dir).unwrap();
-    std::fs::write(
-        dir.join("live-echo.yaml"),
-        ONE_STATION.replace("title: Live echo", "title: Project echo"),
-    )
-    .unwrap();
-    // 流程库在实例启动时读：重启之后看到项目里的两份。
-    drop(c);
-    let c = lv.restart().await;
     let all = flows(&c).await;
-    let mine = find(all.clone(), "live-echo").unwrap();
-    assert_eq!(mine.title, "Project echo", "项目的那份取代全局的：{all:?}");
-    assert_ne!(mine.origin, FlowOrigin::Global, "{mine:?}");
-    let builtin = find(all.clone(), "example-review").unwrap();
+    let find = |name: &str| all.iter().find(|f| f.name == name).cloned();
+    let mine = find("live-echo").expect("项目的流程列得出");
+    assert_eq!(mine.origin, FlowOrigin::Project, "{mine:?}");
+    let replaced = find("example-review").unwrap();
     assert_eq!(
-        builtin.origin,
-        FlowOrigin::Override,
-        "全局的覆盖了内置的：{all:?}"
+        (replaced.origin, replaced.title.as_str()),
+        (FlowOrigin::Project, "Project review"),
+        "项目的那份取代内置的：{all:?}"
     );
+    assert!(
+        all.iter()
+            .any(|f| f.origin == FlowOrigin::Builtin && f.origin.is_shared()),
+        "内置的照样有：{all:?}"
+    );
+    assert!(find("live-old").is_none(), "全局目录不再读：{all:?}");
 }

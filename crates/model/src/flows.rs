@@ -266,7 +266,7 @@ pub(crate) fn upper_lines(s: &State, width: usize) -> Vec<Line> {
                     origin = format!("{origin} {src}");
                 }
                 // 全局流程在名字前标 ◎（各项目共用）；项目级的不标，只留出对齐的位置。
-                let scope = if f.origin.is_global() { "◎ " } else { "  " };
+                let scope = if f.origin.is_shared() { "◎ " } else { "  " };
                 let running = if f.active_runs > 0 {
                     i18n::t!("flows.running", n = f.active_runs)
                 } else {

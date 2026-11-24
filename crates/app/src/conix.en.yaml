@@ -27,6 +27,10 @@ ui:
 instance:
   # How long idle before auto-detaching and releasing the instance: 30m, 2h, 0 (never).
   idle_timeout: 30m
+  # The personal project: where `conix` goes when run in the home directory, the root or
+  # ~/.conix (the home directory itself cannot be a project). Default: Conix in the documents
+  # directory, e.g. ~/Documents/Conix. Flows and jobs meant for everywhere live here.
+  # personal_project: ~/Documents/Conix
 
 # Guardrails for scheduled jobs: stop unattended work that runs away, hangs or piles up
 # (the jobs tab shows the values in effect for each job).

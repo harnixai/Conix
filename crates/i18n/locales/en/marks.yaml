@@ -8,11 +8,9 @@ marks:
     mcp: MCP
     cron: scheduled
   origin:
-    builtin: global · built-in
-    global: global
+    builtin: built-in
     project: project
-    override: global · overrides built-in
-    plugin: global · plugin
+    plugin: plugin
   error:
     occupied: "instance is attached by {holder}"
     no_instance: "no instance {name}"

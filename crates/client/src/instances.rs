@@ -237,6 +237,17 @@ impl Instances for SocketInstances {
         let project = project
             .canonicalize()
             .map_err(|e| PortError::Failed(format!("{}: {e}", project.display())))?;
+        if crate::layout::unfit_project(
+            &project,
+            crate::layout::user_home().as_deref(),
+            self.layout.home(),
+        ) {
+            return Err(PortError::Failed(format!(
+                "{} cannot be a project (its .conix would be, or be inside, the global directory {}): run conix in a project, or in your home directory to use the personal project",
+                project.display(),
+                self.layout.home().display()
+            )));
+        }
         let name = match opts.name {
             Some(n) if !valid_name(n.as_str()) => {
                 return Err(PortError::Failed(format!("invalid instance name: {n}")));

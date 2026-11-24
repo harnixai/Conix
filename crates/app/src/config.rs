@@ -131,12 +131,16 @@ impl Default for ThemeConfig {
 #[serde(default)]
 pub struct InstanceConfig {
     pub idle_timeout: String,
+    /// 个人项目（architecture §8.1）：在家目录、它的上级或全局目录里运行 `conix` 时进的项目。
+    /// 不写就是 `<文档目录>/Conix`（`client::personal_project`）。`~` 开头按家目录展开。
+    pub personal_project: Option<String>,
 }
 
 impl Default for InstanceConfig {
     fn default() -> Self {
         InstanceConfig {
             idle_timeout: "30m".into(),
+            personal_project: None,
         }
     }
 }
@@ -242,7 +246,9 @@ pub fn home() -> PathBuf {
     if let Some(h) = std::env::var_os("CONIX_HOME") {
         return PathBuf::from(h);
     }
+    // 与 `client::user_home` 同一个口径：Windows 没有 HOME，用 USERPROFILE。
     std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
         .map(PathBuf::from)
         .unwrap_or_default()
         .join(".conix")

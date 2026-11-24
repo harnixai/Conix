@@ -86,11 +86,6 @@ pub struct InstanceMeta {
 }
 
 impl Layout {
-    /// 全局流程包（可写层），所有实例共用。
-    pub fn flows(&self) -> PathBuf {
-        self.home.join("flows")
-    }
-
     pub fn meta(&self, name: &str) -> PathBuf {
         self.instance(name).join("meta.json")
     }
@@ -198,6 +193,74 @@ impl ProjectState {
     }
 }
 
+/// 用户的家目录：unix 是 `HOME`，Windows 是 `USERPROFILE`。
+pub fn user_home() -> Option<PathBuf> {
+    std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .filter(|h| !h.is_empty())
+        .map(PathBuf::from)
+}
+
+/// 用户的"文档"目录：macOS、Windows 是家目录下的 `Documents`；Linux 按 XDG（环境变量
+/// `XDG_DOCUMENTS_DIR`，再看 `~/.config/user-dirs.dirs`），都没有就是 `~/Documents`。
+/// Windows 的文档目录可以被重定向（OneDrive），这里不读注册表，重定向了就在 `conix.yaml` 里写明。
+pub fn documents_dir() -> Option<PathBuf> {
+    let home = user_home()?;
+    if cfg!(target_os = "linux") {
+        let xdg = std::env::var("XDG_DOCUMENTS_DIR").ok().or_else(|| {
+            let cfg = std::env::var_os("XDG_CONFIG_HOME")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| home.join(".config"));
+            let text = std::fs::read_to_string(cfg.join("user-dirs.dirs")).ok()?;
+            text.lines().find_map(|l| {
+                let v = l.trim().strip_prefix("XDG_DOCUMENTS_DIR=")?;
+                Some(v.trim_matches('"').to_string())
+            })
+        });
+        if let Some(d) = xdg.filter(|d| !d.is_empty()) {
+            let d = match d.strip_prefix("$HOME") {
+                Some(rest) => home.join(rest.trim_start_matches('/')),
+                None => PathBuf::from(d),
+            };
+            // user-dirs.dirs 里写成 `$HOME/` 表示"没有单独的文档目录"：那就用缺省的。
+            if d != home {
+                return Some(d);
+            }
+        }
+    }
+    Some(home.join("Documents"))
+}
+
+/// 个人项目（architecture §8.1）：`configured`（`conix.yaml` 的 `instance.personal_project`，`~` 开头按家目录
+/// 展开），没写就是 `<文档目录>/Conix`。
+pub fn personal_project(configured: Option<&str>) -> PathBuf {
+    let home = user_home().unwrap_or_default();
+    match configured.map(str::trim).filter(|c| !c.is_empty()) {
+        Some("~") => home,
+        Some(c) => match c.strip_prefix("~/").or_else(|| c.strip_prefix("~\\")) {
+            Some(rest) => home.join(rest),
+            None => PathBuf::from(c),
+        },
+        None => documents_dir().unwrap_or(home).join("Conix"),
+    }
+}
+
+/// 这个目录能不能当项目。不能的：家目录与它的上级（含根目录）——项目层目录 `<项目>/.conix` 落在家目录就是
+/// 全局目录 `~/.conix`，设置分层撞在一起，引擎还把那里当别的实例的状态目录守着；全局目录本身与它下面。
+/// 两边都按已解析的真实路径比，免得一个符号链接绕过去。
+pub fn unfit_project(dir: &Path, home: Option<&Path>, conix_home: &Path) -> bool {
+    let real = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    let dir = real(dir);
+    let conix = real(conix_home);
+    if dir.starts_with(&conix) || dir.join(PROJECT_DIR) == conix {
+        return true;
+    }
+    match home {
+        Some(h) => real(h).starts_with(&dir),
+        None => dir.parent().is_none(),
+    }
+}
+
 /// `host.log` 至多多大就轮转（只追加不轮转的话常驻实例的日志会一直长）。
 pub const LOG_MAX_BYTES: u64 = 10 * 1024 * 1024;
 /// 轮转留几份旧的：`host.log.1` … `host.log.3`。
@@ -241,6 +304,41 @@ pub fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> Option<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_home_directory_its_parents_and_the_global_directory_are_no_projects() {
+        let d = tempfile::tempdir().unwrap();
+        let home = d.path().join("me");
+        let conix = home.join(".conix");
+        std::fs::create_dir_all(conix.join("instances")).unwrap();
+        std::fs::create_dir_all(home.join("code/app")).unwrap();
+        let unfit = |p: &Path| unfit_project(p, Some(&home), &conix);
+        assert!(unfit(&home), "家目录的 .conix 就是全局目录");
+        assert!(unfit(d.path()), "家目录的上级");
+        assert!(unfit(Path::new("/")));
+        assert!(unfit(&conix) && unfit(&conix.join("instances")));
+        assert!(!unfit(&home.join("code/app")));
+        // 全局目录换到别处（CONIX_HOME），它的上一级也不行：那里的 .conix 就是它。
+        let elsewhere = d.path().join("data/.conix");
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        assert!(unfit_project(
+            &d.path().join("data"),
+            Some(&home),
+            &elsewhere
+        ));
+    }
+
+    #[test]
+    fn the_personal_project_is_conix_in_the_documents_or_as_configured() {
+        let home = user_home().unwrap();
+        assert_eq!(
+            personal_project(None),
+            documents_dir().unwrap().join("Conix")
+        );
+        assert_eq!(personal_project(Some("~/notes")), home.join("notes"));
+        assert_eq!(personal_project(Some("/srv/p")), PathBuf::from("/srv/p"));
+        assert_eq!(personal_project(Some("  ")), personal_project(None));
+    }
 
     #[test]
     fn a_big_log_is_rotated_keeping_a_few() {

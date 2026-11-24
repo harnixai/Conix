@@ -19,26 +19,19 @@ pub struct FlowSummary {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FlowOrigin {
-    /// 随 Conix 发布的（全局）。
+    /// 随 Conix 发布的：只读，每个项目都有。
     Builtin,
-    /// 用户的全局流程（`~/.conix/flows/`）。
-    Global,
-    /// 这个项目的流程。
+    /// 这个项目的流程（与内置、插件的同名时取代它们）。没有全局的流程（architecture §8.1）。
     #[serde(alias = "user")]
     Project,
-    /// 全局可写层（`~/.conix/flows/`）里存了一份与内置或插件同名的：删掉就回到那一份（harnix-flow 的
-    /// `Origin::Override`）。项目自己的同名流程报 `Project`，不是这个。
-    Override,
-    /// 插件带来的（只读，全局）。
+    /// 插件带来的：只读，每个项目都有。
     Plugin,
 }
 
 impl FlowOrigin {
-    pub fn is_global(self) -> bool {
-        matches!(
-            self,
-            FlowOrigin::Builtin | FlowOrigin::Global | FlowOrigin::Plugin | FlowOrigin::Override
-        )
+    /// 不是这个项目的、各项目共用的那些（界面上标 `◎`）。
+    pub fn is_shared(self) -> bool {
+        matches!(self, FlowOrigin::Builtin | FlowOrigin::Plugin)
     }
 }
 

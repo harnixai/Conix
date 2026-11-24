@@ -9,11 +9,9 @@ marks:
     mcp: MCP
     cron: 定时
   origin:
-    builtin: 全局 · 内置
-    global: 全局
+    builtin: 内置
     project: 项目
-    override: 全局 · 覆盖内置
-    plugin: 全局 · 插件
+    plugin: 插件
   error:
     occupied: "实例已被 {holder} 接入"
     no_instance: "没有实例 {name}"

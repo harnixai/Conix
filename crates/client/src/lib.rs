@@ -8,5 +8,8 @@ pub mod local;
 
 pub use backend::SocketBackend;
 pub use instances::{SocketInstances, derive_name, for_project, valid_name};
-pub use layout::{InstanceFile, InstanceMeta, Layout, ProjectState};
+pub use layout::{
+    InstanceFile, InstanceMeta, Layout, ProjectState, documents_dir, personal_project,
+    unfit_project, user_home,
+};
 pub use local::{hostname, now_ms, pid_alive, this_client};

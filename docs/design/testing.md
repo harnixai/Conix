@@ -210,8 +210,8 @@ catch_up`（再按名字过滤）。凭据取仓库根的 `.env`（worktree 里�
 控制（缺省 4）；跑全部时流程的一致性套件不进并发，最后单独串行跑（它自己就要跑十几轮模型，挤在并发里会撞上单轮
 超时）。用例全标 `#[ignore = "live"]`，`./scripts/check.sh` 只编译不跑。
 
-`port::FlowOrigin::Override` 是全局可写层（`~/.conix/flows/`）覆盖了内置或插件的那份（标「全局 · 覆盖内置」）；项目里的
-同名流程列出来是 `Project`。`live_flows.rs` 照此断言。
+流程只在项目里：`live_flows.rs` 的 `install` 把流程放进项目的 `.conix/flows/`，用例起实例时信任项目。`port::FlowOrigin`
+只有 `Builtin` / `Project` / `Plugin`；项目里与内置同名的列出来是 `Project`。
 
 **harness**（`crates/conix/tests/live/mod.rs`）：
 
@@ -319,7 +319,7 @@ catch_up`（再按名字过滤）。凭据取仓库根的 `.env`（worktree 里�
 | F-06 | 启动一次运行（用户会话里说） | live_flows::a_run_goes_from_start_to_finish；live_flows::a_user_session_creates_and_runs_a_flow_job_with_the_job_tools | LIVE |
 | F-07 | 流程设计图；会话里设计、校验、保存；有运行时不许改 | live_flows::a_user_session_validates_and_creates_a_flow_once_the_project_is_trusted、a_flow_with_runs_not_finished_cannot_be_changed_until_they_are_cancelled；app/flows_jobs::m12_change_the_flow_by_talking_and_the_design_updates | LIVE |
 | F-08 | 看 YAML 与每站配置 | live_flows::the_builtin_example_flow_is_offered（`yaml`、站的 `needs`）；app/flows_jobs::a_station_of_a_definition_opens_its_config_in_an_overlay | LIVE + mock 场景 |
-| F-09a | 全局流程与项目流程区分（`◎`）；项目里的转全局 | 来源标记：app/flows_jobs::global_flows_are_marked_and_flow_jobs_jump_to_their_flow；live_flows::global_flows_are_marked_and_a_projects_same_named_flow_replaces_them（`~/.conix/flows/` 的为 Global，全局覆盖内置的为 Override，项目里同名的取代全局的；项目覆盖全局或内置时来源标的是 Project）；「项目里的转全局」没有用例（P1，未做） | LIVE |
+| F-09a | 项目的流程与内置、插件的区分（`◎`）；项目里同名的取代内置的；不读全局目录 | 来源标记：app/flows_jobs::global_flows_are_marked_and_flow_jobs_jump_to_their_flow；live_flows::flows_live_in_the_project_and_a_projects_same_named_flow_replaces_a_builtin_one（项目的为 Project，与内置同名的取代它，`~/.conix/flows/` 里的不列） | LIVE |
 | F-09b | 流程格式与 Harnix 兼容 | live_flows::our_session_host_passes_the_conformance_suite | LIVE |
 | J-01 | 列作业：触发规则、类型、启用、下次、上次结果 | live_jobs::jobs_are_saved_listed_toggled_and_deleted；app/flows_jobs::jobs_list_details_history_and_follow | LIVE |
 | J-02 | 触发历史，跳到那一次的会话 / 运行 | live_jobs::run_now_fires_a_job_session_and_records_the_outcome；app/flows_jobs::jobs_list_details_history_and_follow | LIVE |

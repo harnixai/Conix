@@ -185,6 +185,14 @@ async fn main() -> Result<()> {
         return Ok(());
     }
     let start = match cli.command {
+        // 没给项目、又在家目录这类地方：和直接运行 `conix` 一样进个人项目；给了就照给的，不合适由实例目录拒。
+        Some(Cmd::New {
+            name,
+            project: None,
+        }) if !mock_mode => Start::Op(InstOp::Create {
+            name,
+            project: Some(project_here(&cfg)?.to_string_lossy().into_owned()),
+        }),
         Some(Cmd::New { name, project }) => Start::Op(InstOp::Create { name, project }),
         Some(Cmd::Attach { name, force, .. }) => Start::Op(InstOp::Attach { name, force }),
         Some(Cmd::Start { name }) => Start::Op(InstOp::Start { name }),
@@ -201,7 +209,11 @@ async fn main() -> Result<()> {
                 .filter(|i| i.state == port::InstanceState::Running)
                 .cloned()
                 .collect();
-            let cwd = std::env::current_dir()?.canonicalize()?;
+            let cwd = if mock_mode {
+                std::env::current_dir()?.canonicalize()?
+            } else {
+                project_here(&cfg)?
+            };
             // 在项目目录里运行 conix 就接入这个项目的实例（需求 §1 项目级）；停着的就拉起来，
             // 不另建一个——会话归属、作业都记在原来那个实例的目录里。
             match (mock_mode, client::for_project(&all, &cwd)) {
@@ -224,6 +236,18 @@ async fn main() -> Result<()> {
     };
     let cfg_err = (!problems.is_empty()).then(|| problems.join(&i18n::t!("app.config.joiner")));
     run(instances, start, cfg, cfg_err, settings, mock_mode).await
+}
+
+/// 在这里运行 `conix` 是哪个项目：当前目录；家目录、它的上级、全局目录不能当项目，进个人项目
+/// （architecture §8.1），没有就建。
+fn project_here(cfg: &config::Config) -> Result<std::path::PathBuf> {
+    let cwd = std::env::current_dir()?.canonicalize()?;
+    if !client::unfit_project(&cwd, client::user_home().as_deref(), &config::home()) {
+        return Ok(cwd);
+    }
+    let personal = client::personal_project(cfg.instance.personal_project.as_deref());
+    std::fs::create_dir_all(&personal).with_context(|| format!("{}", personal.display()))?;
+    Ok(personal.canonicalize()?)
 }
 
 async fn run(

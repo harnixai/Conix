@@ -1110,7 +1110,7 @@ flows:
           title: 待确认
           needs: [summarize]
           exit: [{kind: confirm}]
-  - summary: {name: release-check, title: 发布检查, origin: global, active_runs: 0}
+  - summary: {name: release-check, title: 发布检查, origin: plugin, active_runs: 0}
     stations:
       - {"id": "lint", "title": "静态检查", "work": "program", "exit": ["gate: lint"], "status": "pending"}
       - {"id": "smoke", "title": "冒烟测试", "needs": ["lint"], "work": "agent", "skill": "smoke-test", "exit": ["output"], "status": "pending"}

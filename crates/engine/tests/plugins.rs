@@ -88,7 +88,6 @@ async fn a_plugin_is_installed_enabled_and_its_flow_runs_on_its_functions() {
     let flows = host::flows::start(
         &hub,
         host::flows::FlowsConfig {
-            flows_dir: home.path().join("flows"),
             runs_dir: home.path().join("runs"),
             worktrees_dir: project_path.join(".wkts"),
             workspaces_dir: home.path().join("ws"),
