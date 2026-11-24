@@ -60,7 +60,7 @@ async fn install_review_enable_then_disable_and_uninstall() {
     h.settle().await;
     let t = h.text();
     assert!(
-        t.contains("xforge-quick") && t.contains("全局 · 插件 xforge"),
+        t.contains("xforge-quick") && t.contains("插件 xforge"),
         "{t}"
     );
 

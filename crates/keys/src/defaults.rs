@@ -167,25 +167,14 @@ pub(crate) fn bindings() -> Vec<Binding> {
         b(C::Sessions, "s", A::Stop),
         b(C::Sessions, "o", A::Reopen),
         b(C::Sessions, "d", A::Delete),
+        // 流程、作业标签只放界面的键（交互 §5）：运行操作、启停、立即运行、删除都在对话里说，`m` 放话头。
+        // `r` 只在列表没取到时重取。
         b(C::Flows, "v", A::View),
-        b(C::Flows, "p", A::PauseResume),
-        b(C::Flows, "x", A::Close),
-        b(C::Flows, "c", A::Confirm),
-        b(C::Flows, "a", A::Release),
-        b(C::Flows, "f", A::Force),
-        b(C::Flows, "r", A::Rework),
-        b(C::Flows, "t", A::Retry),
-        b(C::Flows, "e", A::Edit),
-        b(C::Flows, "d", A::Delete),
-        b(C::Flows, "R", A::RunNow),
+        b(C::Flows, "m", A::Mention),
+        b(C::Flows, "r", A::Retry),
         b(C::Jobs, "v", A::View),
-        b(C::Jobs, "e", A::Edit),
-        b(C::Jobs, "Space", A::ToggleEnabled),
-        b(C::Jobs, "R", A::RunNow),
-        b(C::Jobs, "d", A::Delete),
+        b(C::Jobs, "m", A::Mention),
         b(C::Jobs, "r", A::Retry),
-        b(C::Jobs, "t", A::Retry),
-        b(C::Jobs, "s", A::Stop),
     ]);
     v
 }
@@ -200,8 +189,8 @@ pub(crate) fn footer(ctx: Context) -> &'static [Action] {
         }
         Context::Transcript => &[A::BlockPrev, A::Open, A::ToggleDetail, A::ReadTranscript],
         Context::Sessions => &[A::Open, A::New, A::Rename, A::Stop],
-        Context::Flows => &[A::New, A::Edit, A::RunNow, A::Confirm, A::View],
-        Context::Jobs => &[A::New, A::Edit, A::ToggleEnabled, A::RunNow, A::View],
+        Context::Flows => &[A::Open, A::New, A::Mention, A::View],
+        Context::Jobs => &[A::Open, A::New, A::Mention, A::View],
         Context::Dialog => &[A::Confirm, A::Yes, A::No, A::Back],
         Context::Picker => &[A::Complete, A::Submit, A::Back],
         Context::Instances => &[A::Open, A::New, A::Force, A::Stop, A::Quit],

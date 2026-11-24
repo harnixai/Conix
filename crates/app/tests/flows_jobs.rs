@@ -4,7 +4,7 @@ mod common;
 
 use common::Harness;
 use model::{FlowLower, FlowRow, JobLower};
-use port::{Command, Event, RunOp};
+use port::{Command, Event};
 use tui::Size;
 
 const SIZE: Size = Size::new(160, 45);
@@ -96,68 +96,45 @@ async fn selecting_a_run_follows_its_main_agent_and_shows_stations() {
     );
 }
 
+/// 运行与站的操作不放键：`m` 把选中的运行或站作为话头放进用户会话，操作在对话里说（交互 §5）。以前的
+/// 操作键都不再发运行操作。
 #[tokio::test(start_paused = true)]
-async fn station_ops_and_run_ops() {
+async fn run_and_station_ops_are_talked_about_not_keyed() {
     let mut h = flows("default").await;
     h.pick_upper(flow_index(&h, "feature-to-ship")).await;
     h.keys("Right").await;
     h.settle().await;
     h.pick_upper(run_index(&h, "r2")).await;
     h.settle().await;
-    let rows = h.core.state.flow_lower_rows();
-    let sign = rows
-        .iter()
-        .position(|r| matches!(r, FlowLower::Station(id) if id.as_str() == "sign"))
-        .unwrap();
+    let sign = station_row(&h, "sign");
     h.pick_lower(sign).await;
-    h.keys("a").await;
+    let before = h.calls("dev").len();
+    h.keys("a c f t p x R").await;
     h.settle().await;
-    assert!(h.calls("dev").iter().any(|c| matches!(
-        c,
-        Command::RunOp {
-            op: RunOp::Release { .. },
-            ..
-        }
-    )));
-    let docs = rows
-        .iter()
-        .position(|r| matches!(r, FlowLower::Station(id) if id.as_str() == "review-docs"))
-        .unwrap();
-    h.pick_lower(docs).await;
-    h.keys("r").await;
-    assert!(h.last_line().contains("退回到「文档评审」"));
-    h.keys("y").await;
-    assert!(h.calls("dev").iter().any(|c| matches!(
-        c,
-        Command::RunOp {
-            op: RunOp::Rework { .. },
-            ..
-        }
-    )));
-    h.keys("f y").await;
-    assert!(h.calls("dev").iter().any(|c| matches!(
-        c,
-        Command::RunOp {
-            op: RunOp::Force { .. },
-            ..
-        }
-    )));
-    h.keys("Tab p").await;
-    assert!(h.calls("dev").iter().any(|c| matches!(
-        c,
-        Command::RunOp {
-            op: RunOp::Pause,
-            ..
-        }
-    )));
-    h.keys("x y").await;
-    assert!(h.calls("dev").iter().any(|c| matches!(
-        c,
-        Command::RunOp {
-            op: RunOp::Cancel,
-            ..
-        }
-    )));
+    assert!(
+        !h.calls("dev")[before..]
+            .iter()
+            .any(|c| matches!(c, Command::RunOp { .. })),
+        "操作键都没了"
+    );
+    assert!(h.core.state.ui.confirm.is_none());
+    h.tab(model::Tab::Flows).await;
+    h.pick_lower(station_row(&h, "sign")).await;
+    h.keys("m").await;
+    let text = h.core.state.ui.composer.text.clone();
+    assert!(
+        text.contains("的站「评审汇总」") && text.contains("r2") && text.ends_with("："),
+        "话头写明运行与站：{text}"
+    );
+    assert!(h.core.state.chat_is_user_session(), "回到了用户会话");
+    h.tab(model::Tab::Flows).await;
+    h.pick_upper(run_index(&h, "r2")).await;
+    h.keys("m").await;
+    let text = h.core.state.ui.composer.text.clone();
+    assert!(
+        text.starts_with("运行「") && text.contains("（流程「需求到上线」，r2）："),
+        "{text}"
+    );
 }
 
 #[tokio::test(start_paused = true)]
@@ -202,13 +179,13 @@ async fn m12_change_the_flow_by_talking_and_the_design_updates() {
     assert!(t.contains("← 等 代码评审、文档评审、安全评审"));
     let talked = h.core.state.ui.chat.clone().expect("建出了会话");
     h.tab(model::Tab::Flows).await;
-    h.keys("R").await;
+    h.keys("m").await;
     assert_eq!(
-        h.core.state.ui.composer.text, "启动流程 #1「需求到上线」，主题：",
-        "R 在当前的用户会话里起个话头"
+        h.core.state.ui.composer.text, "流程 #1「需求到上线」：",
+        "m 在当前的用户会话里起个话头"
     );
     assert_eq!(h.core.state.ui.chat, Some(talked));
-    h.type_str("新功能演示").await;
+    h.type_str("启动一次运行，主题新功能演示").await;
     h.keys("Enter").await;
     h.advance(1_000).await;
     assert!(
@@ -249,23 +226,20 @@ async fn jobs_list_details_history_and_follow() {
         "跳到那一次的会话：{}",
         h.chat_title()
     );
-    h.keys("Tab Space").await;
+    let before = h.calls("dev").len();
+    h.keys("Tab Space R s t e d").await;
     assert!(
-        h.calls("dev")
-            .iter()
-            .any(|c| matches!(c, Command::SetJobEnabled { enabled: false, .. }))
-    );
-    h.keys("R").await;
-    assert!(
-        h.calls("dev")
-            .iter()
-            .any(|c| matches!(c, Command::RunJobNow { .. }))
+        !h.calls("dev")[before..].iter().any(|c| matches!(
+            c,
+            Command::SetJobEnabled { .. } | Command::RunJobNow { .. } | Command::StopFiring { .. }
+        )),
+        "启停、立即运行、停下都不放键"
     );
     h.tab(model::Tab::Jobs).await;
-    h.keys("e").await;
+    h.keys("m").await;
     assert_eq!(
-        h.core.state.ui.composer.text, "修改作业 #1「每日巡检」：",
-        "修改在用户会话里说"
+        h.core.state.ui.composer.text, "作业 #1「每日巡检」：",
+        "作业的操作在用户会话里说"
     );
     assert!(h.core.state.chat_is_user_session(), "回到了用户会话");
     h.tab(model::Tab::Jobs).await;
@@ -481,16 +455,6 @@ async fn ended_runs_sit_under_ended_and_show_where_they_came_from() {
     ] {
         assert!(text.contains(want), "缺 {want}\n{text}");
     }
-    let before = h.calls("dev").len();
-    h.keys("p x").await;
-    h.settle().await;
-    assert!(
-        !h.calls("dev")[before..]
-            .iter()
-            .any(|c| matches!(c, Command::RunOp { .. })),
-        "结束了的运行不发运行操作"
-    );
-    assert!(h.core.state.ui.confirm.is_none(), "也不问要不要取消");
     h.keys("Left").await;
     h.settle().await;
     assert_eq!(
@@ -500,10 +464,10 @@ async fn ended_runs_sit_under_ended_and_show_where_they_came_from() {
     );
 }
 
-/// 护栏写在定义里；自动停用的、正在跑的在列表里看得出来；`s` 停下正在跑的那次（二次确认），
-/// 下半选中一次触发按 `t` 照原样再跑一次（交互 §5.4）。
+/// 护栏写在定义里；自动停用的、正在跑的在列表里看得出来；下半选中一次触发按 `m`，话头写明是哪一次；
+/// 简单作业的一次触发 → 展开是那个会话的任务树（交互 §5.4）。
 #[tokio::test(start_paused = true)]
-async fn jobs_show_guards_and_stop_or_retry_a_firing() {
+async fn jobs_show_guards_and_a_firing_is_talked_about_and_unfolds_its_tree() {
     let mut h = Harness::new("default", SIZE).await;
     h.tab(model::Tab::Jobs).await;
     h.settle().await;
@@ -518,28 +482,6 @@ async fn jobs_show_guards_and_stop_or_retry_a_firing() {
         "{}",
         h.lower()
     );
-
-    let rows = h.core.state.job_rows();
-    let night = rows.iter().position(|id| id.as_str() == "j5").unwrap();
-    h.pick_upper(night).await;
-    h.settle().await;
-    h.keys("s").await;
-    assert!(matches!(
-        h.core.state.ui.confirm,
-        Some(model::Confirm::StopFiring(..))
-    ));
-    h.keys("y").await;
-    h.settle().await;
-    assert!(h.calls("dev").iter().any(|c| matches!(
-        c,
-        Command::StopFiring { job, fired_ms: Some(_) } if job.as_str() == "j5"
-    )));
-
-    h.pick_upper(0).await;
-    h.settle().await;
-    h.keys("s").await;
-    assert!(h.core.state.ui.confirm.is_none(), "没在跑的不问");
-    assert!(h.text().contains("没有正在跑的"));
     let first = h
         .core
         .state
@@ -549,13 +491,25 @@ async fn jobs_show_guards_and_stop_or_retry_a_firing() {
         .unwrap();
     h.pick_lower(first).await;
     h.settle().await;
-    let before = h.calls("dev").len();
-    h.keys("t").await;
+    let n = h.core.state.job_lower_rows().len();
+    h.keys("Right").await;
     h.settle().await;
+    let rows = h.core.state.job_lower_rows();
+    assert!(rows.len() >= n, "展开那一次");
+    assert!(h.lower().contains("▾ "), "{}", h.lower());
     assert!(
-        h.calls("dev")[before..]
+        h.calls("dev")
             .iter()
-            .any(|c| matches!(c, Command::RunJobNow { job, .. } if job.as_str() == "j1"))
+            .any(|c| matches!(c, Command::SessionTasks { .. })),
+        "取那个会话的任务树"
+    );
+    h.keys("Left").await;
+    assert_eq!(h.core.state.job_lower_rows().len(), n, "收起");
+    h.keys("m").await;
+    let text = h.core.state.ui.composer.text.clone();
+    assert!(
+        text.starts_with("作业 #1「每日巡检」") && text.contains("那一次（fired_ms "),
+        "{text}"
     );
 }
 

@@ -1,17 +1,17 @@
 //! 流程标签（需求 F，交互 §5.3）：上半是流程定义（选中即展开它没结束的运行），末尾是不分流程的
-//! 「已结束」；下半是选中运行的
-//! 主 Agent、各站（不缩进，按进展上色）与站里的子 Agent；选中流程定义时下半是流程设计。
-//! 流程定义本身没有会话：选中它左边不动，改它回到用户会话里说（`n` `e` `d` `R` 放话头）；
-//! 选中运行或站 → 左边切到那里的会话。
+//! 「已结束」；下半是选中运行的整棵树：主 Agent、各站（不缩进，按进展上色）、站的任务，每个有会话的
+//! 节点下面再挂它的子 Agent 与任务；选中流程定义时下半是流程设计。
+//! 键只管界面：流程与运行的操作都回到用户会话里说（`n` 新建、`m` 说选中的这一项，放话头）；
+//! 选中有会话的节点 → 左边切到那个会话，运行里面的事在那里处理。
 
 use keys::Action;
-use port::{Command, RunId, RunOp, RunStatus, RunSummary, RunView, StationId, StationStatus};
+use port::{Command, RunId, RunStatus, RunSummary, RunView, SessionId, StationId, StationStatus};
 use tui::{Line, Tone};
 
 use crate::chat::fmt_k;
 use crate::marks;
 use crate::sessions::{fmt_elapsed, task_glyph};
-use crate::state::{Confirm, Focus, State, Tab};
+use crate::state::{Focus, State, Tab};
 use crate::update::{Effect, Pending};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -41,6 +41,8 @@ pub enum FlowLower {
     Station(StationId),
     /// 站里的一件任务（子 Agent 有会话）。
     StationTask(StationId, usize),
+    /// 某个会话派出的任务（子 Agent、Shell……），带它在树里的前缀。
+    Task(port::TaskId, String),
     /// 选中流程定义时：流程设计的节点图的一行（只看）。
     Design(usize),
     /// 选中流程定义时：定义里的一站（Enter / `v` 看它的配置）。
@@ -115,13 +117,36 @@ impl State {
                 let Some(v) = self.selected_run() else {
                     return vec![];
                 };
+                // 站的任务单列了的会话，在主会话的任务下面不再列一遍。
+                let listed: Vec<SessionId> = v
+                    .stations
+                    .iter()
+                    .flat_map(|st| {
+                        st.session
+                            .iter()
+                            .cloned()
+                            .chain(st.tasks.iter().filter_map(|t| t.session.clone()))
+                    })
+                    .collect();
+                let tasks = |owner: &SessionId, prefix: &str, skip: &[SessionId]| {
+                    let mut t = vec![];
+                    self.work_tasks(owner, prefix, skip, &mut t);
+                    t.into_iter().map(|(id, p)| FlowLower::Task(id, p))
+                };
                 let mut out = vec![FlowLower::Main];
+                out.extend(tasks(&v.main_session, "  ", &listed));
                 for st in &v.stations {
                     out.push(FlowLower::Station(st.id.clone()));
                     if self.station_open(&v.summary.id, &st.id) {
-                        out.extend(
-                            (0..st.tasks.len()).map(|i| FlowLower::StationTask(st.id.clone(), i)),
-                        );
+                        if let Some(sid) = &st.session {
+                            out.extend(tasks(sid, "    ", &[]));
+                        }
+                        for (i, t) in st.tasks.iter().enumerate() {
+                            out.push(FlowLower::StationTask(st.id.clone(), i));
+                            if let Some(sid) = &t.session {
+                                out.extend(tasks(sid, "      ", &[]));
+                            }
+                        }
                     }
                 }
                 out
@@ -140,6 +165,16 @@ impl State {
                 .unwrap_or_default(),
             Some(FlowRow::Ended | FlowRow::More) | None => vec![],
         }
+    }
+
+    /// 一个会话用的模型（流程、作业页的树上写在节点后面）。
+    pub(crate) fn session_model(&self, id: &SessionId) -> Option<String> {
+        self.domain
+            .sessions
+            .iter()
+            .find(|x| &x.id == id)
+            .map(|x| x.provenance.model.clone())
+            .filter(|m| !m.is_empty())
     }
 
     /// 有子 Agent 的站缺省展开，→ / ← 收放。
@@ -369,9 +404,13 @@ pub(crate) fn lower_lines(s: &State, width: usize) -> Vec<Line> {
                     .map(|x| crate::sessions::state_glyph(x.state))
                     .unwrap_or(("○", Tone::Dim));
                 let end = v.summary.ended_ms.unwrap_or(s.ui.now_ms);
+                let mut left = Line::toned(format!("  {g} "), tone)
+                    .push(i18n::t!("flows.main_agent"), Tone::Strong);
+                if let Some(m) = s.session_model(&v.main_session) {
+                    left = left.push(format!("  {m}"), Tone::Dim);
+                }
                 crate::sessions::split_line(
-                    Line::toned(format!("  {g} "), tone)
-                        .push(i18n::t!("flows.main_agent"), Tone::Strong),
+                    left,
                     Line::toned(
                         crate::marks::cost(
                             end.saturating_sub(v.summary.started_ms),
@@ -389,7 +428,14 @@ pub(crate) fn lower_lines(s: &State, width: usize) -> Vec<Line> {
                 let m = marks::station(st.status);
                 // 不缩进：进展靠颜色读（做完的正常、正在做的主色、没轮到的淡色），
                 // 汇合靠"← 等 …"读。
-                let fold = match (st.tasks.is_empty(), s.station_open(&v.summary.id, id)) {
+                let own_tasks = st
+                    .session
+                    .as_ref()
+                    .is_some_and(|sid| s.domain.tasks.values().any(|t| &t.owner == sid));
+                let fold = match (
+                    st.tasks.is_empty() && !own_tasks,
+                    s.station_open(&v.summary.id, id),
+                ) {
                     (true, _) => "  ",
                     (false, true) => "▾ ",
                     (false, false) => "▸ ",
@@ -398,8 +444,11 @@ pub(crate) fn lower_lines(s: &State, width: usize) -> Vec<Line> {
                     .push(format!("{} ", m.glyph()), m.tone())
                     .push(st.title.clone(), m.name_tone())
                     .push(format!("  {}", st.work), Tone::Dim);
-                if st.session.is_some() {
+                if let Some(sid) = &st.session {
                     left = left.push(i18n::t!("flows.own_session"), Tone::Dim);
+                    if let Some(m) = s.session_model(sid) {
+                        left = left.push(format!(" · {m}"), Tone::Dim);
+                    }
                 }
                 let note = join_note(&v.stations, st);
                 if !note.is_empty() {
@@ -430,11 +479,15 @@ pub(crate) fn lower_lines(s: &State, width: usize) -> Vec<Line> {
                 } else {
                     crate::marks::kind_icon(&port::TaskKind::Unknown(String::new()))
                 };
+                let mut left = Line::toned(if last { "    └ " } else { "    ├ " }, Tone::Dim)
+                    .push(format!("{g} "), tone)
+                    .push(format!("{icon} "), itone)
+                    .push(t.label.clone(), Tone::Normal);
+                if let Some(m) = t.session.as_ref().and_then(|sid| s.session_model(sid)) {
+                    left = left.push(format!("  {m}"), Tone::Dim);
+                }
                 crate::sessions::split_line(
-                    Line::toned(if last { "    └ " } else { "    ├ " }, Tone::Dim)
-                        .push(format!("{g} "), tone)
-                        .push(format!("{icon} "), itone)
-                        .push(t.label.clone(), Tone::Normal),
+                    left,
                     Line::toned(
                         crate::marks::cost(
                             0,
@@ -451,6 +504,10 @@ pub(crate) fn lower_lines(s: &State, width: usize) -> Vec<Line> {
                     width,
                 )
             }
+            FlowLower::Task(id, prefix) => match s.domain.tasks.get(id) {
+                Some(t) => crate::sessions::task_line(s, t, prefix, width),
+                None => Line::default(),
+            },
             FlowLower::Design(_) | FlowLower::DefStation(_) => Line::default(),
         })
         .collect()
@@ -521,8 +578,24 @@ pub(crate) fn action(s: &mut State, a: Action) -> Option<Vec<Effect>> {
     }
 }
 
-fn run_op(s: &mut State, run: RunId, op: RunOp) -> Vec<Effect> {
-    vec![s.call(Pending::Ignore, Command::RunOp { run, op })]
+/// 运行的话头：主题、流程、ID（ID 让工具对上是哪一次，主题让人看得懂）。
+fn run_ref(s: &State, flow: &str, id: &RunId) -> String {
+    let subject = s
+        .run_summary(flow, id)
+        .map(|r| r.subject.clone())
+        .or_else(|| {
+            s.domain
+                .run_views
+                .get(id)
+                .map(|v| v.summary.subject.clone())
+        })
+        .unwrap_or_default();
+    i18n::t!(
+        "flows.prefill_run_ref",
+        subject = subject,
+        flow = s.flow_title(flow),
+        id = id
+    )
 }
 
 fn upper_action(s: &mut State, a: Action) -> Option<Vec<Effect>> {
@@ -560,8 +633,6 @@ fn upper_action(s: &mut State, a: Action) -> Option<Vec<Effect>> {
                 },
             )]
         }
-        // 结束了的运行停不了也取消不了。
-        (Action::PauseResume | Action::Close, Some(FlowRow::Run(..))) if ended => vec![],
         (Action::Collapse, Some(FlowRow::Flow(name) | FlowRow::Run(name, _))) => {
             s.ui.flow_expanded.remove(&name);
             s.ui.upper_mut().selected = s
@@ -577,13 +648,13 @@ fn upper_action(s: &mut State, a: Action) -> Option<Vec<Effect>> {
             vec![]
         }
         (Action::New, _) => crate::jobs::prefill(s, &i18n::t!("flows.prefill_new"), NOTICE),
-        (Action::Edit | Action::Delete | Action::RunNow, Some(FlowRow::Flow(name))) => {
+        (Action::Mention, Some(FlowRow::Flow(name))) => {
             let (n, title) = (s.flow_number(&name), s.flow_title(&name));
-            let text = match a {
-                Action::Edit => i18n::t!("flows.prefill_edit", n = n, title = title),
-                Action::Delete => i18n::t!("flows.prefill_delete", n = n, title = title),
-                _ => i18n::t!("flows.prefill_run", n = n, title = title),
-            };
+            let text = i18n::t!("flows.prefill_flow", n = n, title = title);
+            crate::jobs::prefill(s, &text, NOTICE)
+        }
+        (Action::Mention, Some(FlowRow::Run(flow, id))) => {
+            let text = i18n::t!("flows.prefill_run", run = run_ref(s, &flow, &id));
             crate::jobs::prefill(s, &text, NOTICE)
         }
         (Action::View, Some(FlowRow::Flow(name))) => {
@@ -600,22 +671,7 @@ fn upper_action(s: &mut State, a: Action) -> Option<Vec<Effect>> {
             });
             vec![]
         }
-        (Action::PauseResume, Some(FlowRow::Run(flow, id))) => {
-            let op = match s.run_summary(&flow, &id).map(|r| &r.status) {
-                Some(RunStatus::Paused | RunStatus::Pausing) => RunOp::Resume,
-                _ => RunOp::Pause,
-            };
-            run_op(s, id, op)
-        }
-        (Action::Close, Some(FlowRow::Run(flow, id))) => {
-            let subject = s
-                .run_summary(&flow, &id)
-                .map(|r| r.subject.clone())
-                .unwrap_or_default();
-            s.ui.confirm = Some(Confirm::CancelRun(id, subject));
-            vec![]
-        }
-        (Action::Rework, _) if s.domain.load_errors[Tab::Flows.index()].is_some() => {
+        (Action::Retry, _) if s.domain.load_errors[Tab::Flows.index()].is_some() => {
             s.domain.load_errors[Tab::Flows.index()] = None;
             vec![s.call(Pending::Flows, Command::ListFlows)]
         }
@@ -633,7 +689,6 @@ fn lower_action(s: &mut State, a: Action) -> Option<Vec<Effect>> {
     if let Some(FlowRow::Flow(name)) = s.selected_flow_row() {
         return def_action(s, a, &name);
     }
-    let ended = s.selected_ended_run().is_some();
     let run = s.selected_run()?.clone();
     let rows = s.flow_lower_rows();
     let row = rows.get(s.ui.lower[Tab::Flows.index()].selected)?.clone();
@@ -647,6 +702,19 @@ fn lower_action(s: &mut State, a: Action) -> Option<Vec<Effect>> {
     match (a, &row) {
         (Action::Expand, FlowLower::Station(st)) => {
             s.ui.station_collapsed.remove(&format!("{id}/{st}"));
+            return Some(vec![]);
+        }
+        (Action::Expand | Action::Collapse, FlowLower::Task(t, _))
+            if s.domain
+                .tasks
+                .get(t)
+                .is_some_and(|x| x.agent_session.is_some()) =>
+        {
+            if a == Action::Expand {
+                s.ui.tree_collapsed.remove(t);
+            } else {
+                s.ui.tree_collapsed.insert(t.clone());
+            }
             return Some(vec![]);
         }
         (Action::Collapse, FlowLower::Station(st) | FlowLower::StationTask(st, _)) => {
@@ -667,28 +735,43 @@ fn lower_action(s: &mut State, a: Action) -> Option<Vec<Effect>> {
             s.ui.focus = Focus::Composer;
             vec![]
         }
-        // 结束了的运行，站上的操作都没有意义。
-        (Action::Confirm | Action::Release | Action::Retry | Action::Force | Action::Rework, _)
-            if ended =>
-        {
-            vec![]
+        // 站上的确认、放行、强制放行、返工、重试都在对话里说：话头写明是哪次运行的哪一站、它在等什么。
+        (Action::Mention, Some(st)) => {
+            let waits = st
+                .unmet
+                .clone()
+                .or_else(|| match &run.summary.status {
+                    RunStatus::Waiting { reason } => Some(reason.clone()),
+                    _ => None,
+                })
+                .filter(|_| {
+                    matches!(
+                        st.status,
+                        StationStatus::Held | StationStatus::Unmet | StationStatus::Working
+                    )
+                })
+                .map(|w| i18n::t!("flows.prefill_waits", what = w))
+                .unwrap_or_default();
+            let text = i18n::t!(
+                "flows.prefill_station",
+                run = run_ref(s, &run.summary.flow, &id),
+                station = st.title,
+                waits = waits
+            );
+            crate::jobs::prefill(s, &text, NOTICE)
         }
-        (Action::Confirm, Some(st)) => run_op(s, id, RunOp::Confirm { station: st.id }),
-        (Action::Release, Some(st)) => run_op(s, id, RunOp::Release { station: st.id }),
-        (Action::Retry, Some(st)) => run_op(s, id, RunOp::Retry { station: st.id }),
-        (Action::Force, Some(st)) => {
-            s.ui.confirm = Some(Confirm::ForceStation(id, st.id, st.title));
-            vec![]
-        }
-        (Action::Rework, Some(st)) => {
-            s.ui.confirm = Some(Confirm::Rework(id, st.id, st.title));
-            vec![]
+        (Action::Mention, None) => {
+            let text = i18n::t!(
+                "flows.prefill_run",
+                run = run_ref(s, &run.summary.flow, &id)
+            );
+            crate::jobs::prefill(s, &text, NOTICE)
         }
         _ => return None,
     })
 }
 
-/// 选中流程定义时下半的键：Enter / `v` 用浮层看一站的配置，`n` `e` `d` `R` 同上半。
+/// 选中流程定义时下半的键：Enter / `v` 用浮层看一站的配置，`n` `m` 同上半。
 fn def_action(s: &mut State, a: Action, name: &str) -> Option<Vec<Effect>> {
     let row = s
         .flow_lower_rows()
@@ -713,9 +796,7 @@ fn def_action(s: &mut State, a: Action, name: &str) -> Option<Vec<Effect>> {
             });
             Some(vec![])
         }
-        (Action::View | Action::New | Action::Edit | Action::Delete | Action::RunNow, _) => {
-            upper_action(s, a)
-        }
+        (Action::View | Action::New | Action::Mention, _) => upper_action(s, a),
         _ => None,
     }
 }

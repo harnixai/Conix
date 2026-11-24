@@ -172,3 +172,69 @@ async fn a_job_session_cannot_touch_another_job() {
         "另一个作业还在"
     );
 }
+
+/// 运行与触发的根入口（architecture §8.12）：一次触发之后，用户会话不用问就查得到它（work_list），
+/// 看得到实例记下的报告（work_show：结局、会话的模型、最后一轮回复）；运行时目录里有 report.json。
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "live"]
+async fn a_user_session_finds_a_firing_with_work_list_and_reads_its_report() {
+    let lv = Live::new();
+    let mut c = lv.start_trusted().await;
+    c.answering(Answering::Auto);
+    let j = match c
+        .ok(Command::SaveJob {
+            job: job("live-work", "Reply with only the word PONG."),
+        })
+        .await
+    {
+        Reply::Job(j) => j,
+        r => panic!("{r:?}"),
+    };
+    c.ok(Command::RunJobNow {
+        job: j.id.clone(),
+        subject: None,
+        prompt_append: None,
+    })
+    .await;
+    let id = j.id.clone();
+    let done = c
+        .wait_event("触发的结局", TURN, |e| match e {
+            Event::JobFired { job, entry }
+                if *job == id && entry.outcome != JobOutcome::Running =>
+            {
+                Some(entry.clone())
+            }
+            _ => None,
+        })
+        .await;
+    assert_eq!(done.outcome, JobOutcome::Done, "{done:?}");
+    let report = std::path::Path::new(&lv.project_path())
+        .join(".conix/state/conix/job-runs")
+        .join(&j.id.0)
+        .join(done.fired_ms.to_string())
+        .join("report.json");
+    let saved = std::fs::read_to_string(&report).expect("运行时目录里有报告");
+    assert!(saved.contains("PONG"), "最后一轮回复记下了：{saved}");
+
+    let s = c.new_session().await;
+    c.watch(&s).await;
+    let t = c
+        .turn(
+            &s,
+            "Call work_list with kind \"job\". Then call work_show for that job's latest firing \
+             (job \"#1\"). Then reply with only the outcome of that firing, one word.",
+        )
+        .await;
+    t.ended();
+    for tool in ["work_list", "work_show"] {
+        assert!(t.tools.iter().any(|n| n == tool), "{tool}: {:?}", t.tools);
+        assert!(!asked_for(&t, tool), "查看类不问：{tool}");
+    }
+    assert!(
+        t.results
+            .iter()
+            .any(|(r, err)| !err && r.contains("reply_tail") && r.contains("PONG")),
+        "work_show 回报告：{:?}",
+        t.results
+    );
+}

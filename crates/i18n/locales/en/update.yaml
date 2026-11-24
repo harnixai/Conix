@@ -4,7 +4,6 @@ update:
   stopping_instance: "Stopping instance {name} …"
   forcing: "Force-attaching {name} …"
   stopping: "Stopping {name} …"
-  force_reason: "Forced through manually in Conix"
   attaching: "Attaching {name} …"
   starting: "Starting {name} …"
   creating: "Creating instance …"

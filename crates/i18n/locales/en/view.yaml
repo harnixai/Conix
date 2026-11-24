@@ -71,11 +71,7 @@ view:
     close_session: "Close session \"{title}\"? · y to confirm / any other key to cancel"
     stop_task: "Stop \"{title}\"? · y to confirm / any other key to cancel"
     clear_goal: "Clear this goal? · y to confirm / any other key to cancel"
-    cancel_run: "Cancel run \"{title}\"? · y to confirm / any other key to cancel"
-    stop_firing: "Stop the running firing of “{name}”? · y to confirm / any other key to cancel"
     delete_session: "Delete session “{title}”? Its transcript, data and sub-agents go too, for good · y to confirm / any other key to cancel"
-    force_station: "Force \"{title}\" through? Exit conditions will no longer be checked · y to confirm / any other key to cancel"
-    rework: "Send back to \"{title}\" for rework? All stations after it will be redone · y to confirm / any other key to cancel"
   models:
     title: "Pick a model"
     keys: "↑↓ select · Enter to switch (from the next turn) · Esc to keep"

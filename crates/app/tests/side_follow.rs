@@ -189,17 +189,17 @@ async fn selecting_a_flow_or_a_job_keeps_the_chat() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn n_e_d_put_a_lead_in_into_the_user_session() {
+async fn n_and_m_put_a_lead_in_into_the_user_session() {
     let mut h = Harness::new("default", SIZE).await;
-    // 草稿上按 e：留在草稿，话头发出去就是一个新会话。
+    // 草稿上按 m：留在草稿，话头发出去就是一个新会话。
     h.tab(model::Tab::Jobs).await;
     h.pick_upper(0).await;
-    h.keys("e").await;
+    h.keys("m").await;
     assert!(h.core.state.ui.chat.is_none(), "草稿留在草稿");
-    assert_eq!(h.core.state.ui.composer.text, "修改作业 #1「每日巡检」：");
+    assert_eq!(h.core.state.ui.composer.text, "作业 #1「每日巡检」：");
     h.keys("Ctrl+U").await;
     h.tab(model::Tab::Jobs).await;
-    // 从作业触发出来的会话里按 e：回到最近活跃的用户会话。
+    // 左边是作业触发出来的会话时按 m（Tab 回到上半，说的是作业）：回到最近活跃的用户会话。
     let entry = h
         .core
         .state
@@ -208,15 +208,11 @@ async fn n_e_d_put_a_lead_in_into_the_user_session() {
         .position(|r| matches!(r, model::JobLower::Entry(0)))
         .unwrap();
     h.pick_lower(entry).await;
-    h.keys("Tab e").await;
-    assert_eq!(h.core.state.ui.composer.text, "修改作业 #1「每日巡检」：");
+    h.keys("Tab m").await;
+    assert_eq!(h.core.state.ui.composer.text, "作业 #1「每日巡检」：");
     assert!(h.core.state.chat_is_user_session());
     let mine = h.core.state.recent_user_session().unwrap();
     assert_eq!(h.core.state.ui.focus, Focus::Composer);
-    h.keys("Ctrl+U").await;
-    h.tab(model::Tab::Jobs).await;
-    h.keys("d").await;
-    assert_eq!(h.core.state.ui.composer.text, "删除作业 #1「每日巡检」");
     h.keys("Ctrl+U").await;
     h.tab(model::Tab::Jobs).await;
     h.keys("n").await;
@@ -224,12 +220,8 @@ async fn n_e_d_put_a_lead_in_into_the_user_session() {
     h.keys("Ctrl+U").await;
     h.tab(model::Tab::Flows).await;
     h.pick_upper(0).await;
-    h.keys("e").await;
-    assert_eq!(h.core.state.ui.composer.text, "修改流程 #1「需求到上线」：");
-    h.keys("Ctrl+U").await;
-    h.tab(model::Tab::Flows).await;
-    h.keys("d").await;
-    assert_eq!(h.core.state.ui.composer.text, "删除流程 #1「需求到上线」");
+    h.keys("m").await;
+    assert_eq!(h.core.state.ui.composer.text, "流程 #1「需求到上线」：");
     h.keys("Ctrl+U").await;
     h.tab(model::Tab::Flows).await;
     h.keys("n").await;

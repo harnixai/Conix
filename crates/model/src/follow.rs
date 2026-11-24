@@ -81,6 +81,22 @@ fn title_of(s: &State, id: &SessionId) -> String {
 /// 作业下半一次取多少条触发记录。
 const JOB_HISTORY_PAGE: u32 = 50;
 
+/// 没取过任务树的会话各取一次 `SessionTasks`。
+fn load_tasks(s: &mut State, sessions: Vec<port::SessionId>) -> Vec<Effect> {
+    let mut out = vec![];
+    for sid in sessions {
+        if !s.domain.tasks_loaded.contains(&sid) {
+            out.extend(load(
+                s,
+                format!("tasks:{sid}"),
+                Pending::Tasks(sid.clone()),
+                Command::SessionTasks { session: sid },
+            ));
+        }
+    }
+    out
+}
+
 fn load(s: &mut State, key: String, what: Pending, cmd: Command) -> Vec<Effect> {
     if !s.ui.loading.insert(key) {
         return vec![];
@@ -164,6 +180,7 @@ fn row_keys(s: &State, tab: Tab, upper: bool) -> Vec<String> {
                 FlowLower::Main => "main".into(),
                 FlowLower::Station(id) => format!("st:{id}"),
                 FlowLower::StationTask(id, k) => format!("stt:{id}:{k}"),
+                FlowLower::Task(id, _) => format!("task:{id}"),
                 FlowLower::Design(i) => format!("design:{i}"),
                 FlowLower::DefStation(i) => format!("def:{i}"),
             })
@@ -185,6 +202,7 @@ fn row_keys(s: &State, tab: Tab, upper: bool) -> Vec<String> {
                         .get(*i)
                         .map(|e| format!("e:{}", e.fired_ms))
                         .unwrap_or_default(),
+                    JobLower::EntryTask(_, t, _) => format!("task:{t}"),
                 })
                 .collect()
         }
@@ -391,7 +409,20 @@ fn data(s: &mut State) -> Vec<Effect> {
                         Command::GetFlow { name },
                     ));
                 }
-                Some(FlowRow::Run(_, id)) if !s.domain.run_views.contains_key(&id) => {
+                Some(FlowRow::Run(_, id)) if s.domain.run_views.contains_key(&id) => {
+                    // 运行的树要每个会话的任务：没取过的取一次快照，之后靠 TaskUpserted 跟上。
+                    let v = &s.domain.run_views[&id];
+                    let sessions: Vec<port::SessionId> = std::iter::once(v.main_session.clone())
+                        .chain(v.stations.iter().flat_map(|st| {
+                            st.session
+                                .iter()
+                                .cloned()
+                                .chain(st.tasks.iter().filter_map(|t| t.session.clone()))
+                        }))
+                        .collect();
+                    out.extend(load_tasks(s, sessions));
+                }
+                Some(FlowRow::Run(_, id)) => {
                     out.extend(load(
                         s,
                         format!("run:{id}"),
@@ -406,6 +437,8 @@ fn data(s: &mut State) -> Vec<Effect> {
             }
         }
         Tab::Jobs => {
+            let expanded = s.expanded_firing_sessions();
+            out.extend(load_tasks(s, expanded));
             if let Some(id) = s.selected_job()
                 && !s.domain.job_history.contains_key(&id)
             {
@@ -552,10 +585,34 @@ fn target_at(s: &State, tab: Tab, upper: bool) -> Option<Target> {
                         Some(t.id.clone()),
                     ))
                 }
+                FlowLower::Task(id, _) => {
+                    let t = s.domain.tasks.get(id)?;
+                    let parents = vec![(v.main_session.clone(), v.summary.subject.clone())];
+                    Some(match t.agent_session.clone() {
+                        Some(child) => Target::Session(child, parents, Some(t.id.clone())),
+                        None => Target::Output(t.owner.clone(), t.id.clone(), parents),
+                    })
+                }
                 FlowLower::Design(_) | FlowLower::DefStation(_) => None,
             }
         }
         (Tab::Jobs, true) => None,
+        (Tab::Jobs, false)
+            if let Some(crate::jobs::JobLower::EntryTask(i, t, _)) = s
+                .job_lower_rows()
+                .get(s.ui.lower[Tab::Jobs.index()].selected) =>
+        {
+            let t = s.domain.tasks.get(t)?;
+            let e = s.domain.job_history.get(&s.selected_job()?)?.get(*i)?;
+            let parents = match &e.target {
+                Some(port::JobTarget::Session { id, title }) => vec![(id.clone(), title.clone())],
+                _ => vec![],
+            };
+            Some(match t.agent_session.clone() {
+                Some(child) => Target::Session(child, parents, Some(t.id.clone())),
+                None => Target::Output(t.owner.clone(), t.id.clone(), parents),
+            })
+        }
         (Tab::Jobs, false) => match s.selected_job_target()? {
             port::JobTarget::Session { id, .. } => Some(Target::Session(id, vec![], None)),
             port::JobTarget::Run { id, .. } => {

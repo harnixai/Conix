@@ -99,13 +99,8 @@ pub enum Confirm {
     CloseSession(SessionId, String),
     StopTask(port::TaskId, String),
     ClearGoal(SessionId),
-    CancelRun(port::RunId, String),
-    /// 停下作业正在跑的那一次：作业、哪一次（省略 = 正在跑的那次）、名字。
-    StopFiring(port::JobId, Option<u64>, String),
     /// 删掉一个已关闭的会话：会话、名字。
     DeleteSession(SessionId, String),
-    ForceStation(port::RunId, port::StationId, String),
-    Rework(port::RunId, port::StationId, String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -192,6 +187,11 @@ pub struct Domain {
     pub convs: Map<SessionId, Conversation>,
     /// 任务到目前为止的输出（看任务输出时取，之后 `TaskOutput` 事件追加）。
     pub task_output: Map<port::TaskId, String>,
+    /// 所有会话的任务（`TaskUpserted` 每个会话的都推，加上 `SessionTasks` 的快照）：流程、作业页画运行与
+    /// 触发的树要没被 Watch 的会话的任务。
+    pub tasks: Map<port::TaskId, port::Task>,
+    /// 取过 `SessionTasks` 的会话：之后靠 `TaskUpserted` 跟上。
+    pub tasks_loaded: std::collections::HashSet<SessionId>,
     /// 每个流程的运行（展开流程时取）。
     pub runs: Map<String, Vec<port::RunSummary>>,
     pub run_views: Map<port::RunId, port::RunView>,
@@ -298,6 +298,8 @@ pub struct Ui {
     pub ended_noticed: Option<port::RunId>,
     /// 运行里收起的站（`运行/站`）；有子 Agent 的站缺省展开。
     pub station_collapsed: std::collections::HashSet<String>,
+    /// 作业页展开的触发记录（`作业/触发时刻`）：展开是那次的会话的任务树。
+    pub entry_expanded: std::collections::HashSet<String>,
     /// 上一次因为选中而自动展开的流程：同一个流程被 ← 收起后不再自动展开。
     pub flow_auto: Option<String>,
     /// 上一次"选中即切换"的依据（选中的是哪个对象）；选中没变就不再切。
@@ -422,6 +424,7 @@ impl State {
                 pending_jump_set: false,
                 ended_noticed: None,
                 station_collapsed: Default::default(),
+                entry_expanded: Default::default(),
                 flow_auto: None,
                 last_follow: None,
                 anchors: Default::default(),

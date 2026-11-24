@@ -1,5 +1,6 @@
-//! 作业标签（需求 J，交互 §5.4）：上半是作业列表，下半是选中作业的定义、执行统计与触发记录。
-//! 作业本身没有会话，选中它左边不动；新建、修改、删除回到用户会话里说（`n` `e` `d` 放话头）。
+//! 作业标签（需求 J，交互 §5.4）：上半是作业列表，下半是选中作业的定义、执行统计与触发记录；简单作业的
+//! 一次触发展开是那个会话的任务树。作业本身没有会话，选中它左边不动。键只管界面：新建、修改、删除、启停、
+//! 立即运行、停下都回到用户会话里说（`n` 新建、`m` 说选中的这一项，放话头）。
 
 use keys::Action;
 use port::{Command, JobId, JobKind, JobOutcome, JobTarget};
@@ -18,6 +19,8 @@ pub enum JobLower {
     Stat(usize),
     Heading,
     Entry(usize),
+    /// 展开的一次触发（简单作业）下面，它那个会话派出的任务。
+    EntryTask(usize, port::TaskId, String),
 }
 
 impl State {
@@ -55,8 +58,16 @@ impl State {
         let stats = job_stats(history.map_or(&[][..], Vec::as_slice)).len();
         out.extend((0..stats).map(JobLower::Stat));
         out.push(JobLower::Heading);
-        let n = history.map_or(0, Vec::len);
-        out.extend((0..n).map(JobLower::Entry));
+        for (i, e) in history.map_or(&[][..], Vec::as_slice).iter().enumerate() {
+            out.push(JobLower::Entry(i));
+            if let Some(JobTarget::Session { id: sid, .. }) = &e.target
+                && self.ui.entry_expanded.contains(&entry_key(&id, e.fired_ms))
+            {
+                let mut tasks = vec![];
+                self.work_tasks(sid, "  ", &[], &mut tasks);
+                out.extend(tasks.into_iter().map(|(t, p)| JobLower::EntryTask(i, t, p)));
+            }
+        }
         out
     }
 
@@ -77,6 +88,30 @@ impl State {
             _ => None,
         }
     }
+
+    /// 展开着的触发的会话：它们的任务树要取。
+    pub(crate) fn expanded_firing_sessions(&self) -> Vec<port::SessionId> {
+        let Some(id) = self.selected_job() else {
+            return vec![];
+        };
+        self.domain
+            .job_history
+            .get(&id)
+            .map(|h| {
+                h.iter()
+                    .filter(|e| self.ui.entry_expanded.contains(&entry_key(&id, e.fired_ms)))
+                    .filter_map(|e| match &e.target {
+                        Some(JobTarget::Session { id, .. }) => Some(id.clone()),
+                        _ => None,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+}
+
+pub(crate) fn entry_key(job: &JobId, fired_ms: u64) -> String {
+    format!("{job}/{fired_ms}")
 }
 
 pub(crate) fn upper_lines(s: &State, width: usize) -> Vec<Line> {
@@ -166,20 +201,37 @@ pub(crate) fn lower_lines(s: &State, width: usize) -> Vec<Line> {
                 },
                 Tone::Dim,
             ),
-            JobLower::Entry(i) => entry_line(&history[*i], width),
+            JobLower::Entry(i) => {
+                let e = &history[*i];
+                let fold = match &e.target {
+                    Some(JobTarget::Session { .. })
+                        if s.ui.entry_expanded.contains(&entry_key(&id, e.fired_ms)) =>
+                    {
+                        "▾ "
+                    }
+                    Some(JobTarget::Session { .. }) => "▸ ",
+                    _ => "  ",
+                };
+                entry_line(e, fold, width)
+            }
+            JobLower::EntryTask(_, t, prefix) => match s.domain.tasks.get(t) {
+                Some(t) => crate::sessions::task_line(s, t, &format!("  {prefix}"), width),
+                None => Line::default(),
+            },
         })
         .collect()
 }
 
 /// 触发记录的一行：时刻、结局，右边是耗时、用量与去向。
-fn entry_line(e: &port::JobEntry, width: usize) -> Line {
+fn entry_line(e: &port::JobEntry, fold: &str, width: usize) -> Line {
     let (o, tone) = outcome(&e.outcome);
     let target = match &e.target {
         Some(JobTarget::Session { title, .. }) => i18n::t!("jobs.target_session", title = title),
         Some(JobTarget::Run { subject, .. }) => i18n::t!("jobs.target_run", subject = subject),
         None => String::new(),
     };
-    let mut left = Line::toned(format!("{}  ", fmt_clock(e.fired_ms)), Tone::Dim).push(o, tone);
+    let mut left =
+        Line::toned(format!("{fold}{}  ", fmt_clock(e.fired_ms)), Tone::Dim).push(o, tone);
     if let Some(a) = e
         .audit
         .as_ref()
@@ -208,36 +260,58 @@ pub(crate) fn action(s: &mut State, a: Action) -> Option<Vec<Effect>> {
         .and_then(|i| s.domain.jobs.iter().find(|j| &j.id == i))
         .cloned();
     let n = job.as_ref().map_or(0, |j| s.job_number(&j.id));
+    let lower = s.ui.focus == Focus::SideLower;
+    let row = if lower {
+        s.job_lower_rows()
+            .get(s.ui.lower[Tab::Jobs.index()].selected)
+            .cloned()
+    } else {
+        None
+    };
     Some(match (a, job) {
-        (Action::ToggleEnabled, Some(j)) => vec![s.call(
-            Pending::Ignore,
-            Command::SetJobEnabled {
-                job: j.id,
-                enabled: !j.enabled,
-            },
-        )],
-        (Action::RunNow, Some(j)) => {
-            s.notice(i18n::t!("jobs.run_now", name = j.name), false);
-            vec![s.call(
-                Pending::Ignore,
-                Command::RunJobNow {
-                    job: j.id,
-                    subject: None,
-                    prompt_append: None,
-                },
-            )]
+        // 展开、收起一次触发：简单作业那次的会话的任务树。
+        (Action::Expand | Action::Collapse, Some(j)) if matches!(row, Some(JobLower::Entry(_))) => {
+            let e = selected_entry(s)?;
+            if !matches!(e.target, Some(JobTarget::Session { .. })) {
+                return None;
+            }
+            let k = entry_key(&j.id, e.fired_ms);
+            if a == Action::Expand {
+                s.ui.entry_expanded.insert(k);
+            } else {
+                s.ui.entry_expanded.remove(&k);
+            }
+            vec![]
+        }
+        (Action::Expand | Action::Collapse, _)
+            if matches!(&row, Some(JobLower::EntryTask(_, t, _))
+                if s.domain.tasks.get(t).is_some_and(|x| x.agent_session.is_some())) =>
+        {
+            let Some(JobLower::EntryTask(_, t, _)) = row else {
+                return None;
+            };
+            if a == Action::Expand {
+                s.ui.tree_collapsed.remove(&t);
+            } else {
+                s.ui.tree_collapsed.insert(t);
+            }
+            vec![]
         }
         (Action::New, _) => prefill(s, &i18n::t!("jobs.prefill_new"), "jobs.notice_tool"),
-        (Action::Edit, Some(j)) => prefill(
-            s,
-            &i18n::t!("jobs.prefill_edit", n = n, name = j.name),
-            "jobs.notice_tool",
-        ),
-        (Action::Delete, Some(j)) => prefill(
-            s,
-            &i18n::t!("jobs.prefill_delete", n = n, name = j.name),
-            "jobs.notice_tool",
-        ),
+        // 启停、立即运行、停下、修改、删除都在对话里说：话头写明是哪个作业，选中一次触发就写明是哪一次。
+        (Action::Mention, Some(j)) => {
+            let text = match selected_entry(s).filter(|_| lower) {
+                Some(e) => i18n::t!(
+                    "jobs.prefill_entry",
+                    n = n,
+                    name = j.name,
+                    time = fmt_clock(e.fired_ms),
+                    fired = e.fired_ms
+                ),
+                None => i18n::t!("jobs.prefill_job", n = n, name = j.name),
+            };
+            prefill(s, &text, "jobs.notice_tool")
+        }
         (Action::View, Some(j)) => {
             let history = s.domain.job_history.get(&j.id).cloned().unwrap_or_default();
             let mut lines: Vec<String> =
@@ -247,7 +321,7 @@ pub(crate) fn action(s: &mut State, a: Action) -> Option<Vec<Effect>> {
             lines.push(String::new());
             lines.push(i18n::t!("jobs.history_all", n = history.len()));
             for e in &history {
-                lines.push(entry_line(e, 200).text());
+                lines.push(entry_line(e, "", 200).text());
                 if let Some(a) = &e.audit {
                     lines.extend(audit_lines(a));
                 }
@@ -264,6 +338,12 @@ pub(crate) fn action(s: &mut State, a: Action) -> Option<Vec<Effect>> {
             jump_to_flow(s, &name);
             vec![]
         }
+        // 流程作业的一次触发：跳到流程标签里它起的那次运行。
+        (Action::Open, _) if lower && selected_run_link(s).is_some() => {
+            let (flow, run) = selected_run_link(s)?;
+            jump_to_run(s, &flow, &run);
+            vec![]
+        }
         (Action::Open, _) => {
             s.show_chat_pub();
             s.ui.focus = Focus::Composer;
@@ -272,53 +352,6 @@ pub(crate) fn action(s: &mut State, a: Action) -> Option<Vec<Effect>> {
         (Action::Retry, _) if s.domain.load_errors[Tab::Jobs.index()].is_some() => {
             s.domain.load_errors[Tab::Jobs.index()] = None;
             vec![s.call(Pending::Jobs, Command::ListJobs)]
-        }
-        // 选中那条触发记录：照原样再跑一次（定义不变，这一次就是现在）。
-        (Action::Retry, Some(j)) if s.ui.focus == Focus::SideLower => {
-            let entry = selected_entry(s)?;
-            s.notice(
-                i18n::t!(
-                    "jobs.retry",
-                    name = j.name,
-                    time = fmt_clock(entry.fired_ms)
-                ),
-                false,
-            );
-            vec![s.call(
-                Pending::Ignore,
-                Command::RunJobNow {
-                    job: j.id,
-                    subject: None,
-                    prompt_append: None,
-                },
-            )]
-        }
-        // 停下正在跑的那一次：下半选中了某次就是那次，否则是作业正在跑的那次（流程作业由实例找它起的运行）。
-        (Action::Stop, Some(j)) => {
-            let picked = if s.ui.focus == Focus::SideLower {
-                selected_entry(s)
-            } else {
-                None
-            };
-            let fired = match (&picked, &j.kind) {
-                (Some(e), _) => Some(e.fired_ms),
-                (None, JobKind::Simple { .. }) => j.running_ms,
-                (None, JobKind::Flow { .. }) => None,
-            };
-            let running = match (&picked, &j.kind) {
-                (Some(e), _) => {
-                    e.outcome == JobOutcome::Running
-                        || matches!(e.target, Some(JobTarget::Run { .. }))
-                }
-                (None, JobKind::Simple { .. }) => j.running_ms.is_some(),
-                (None, JobKind::Flow { .. }) => true,
-            };
-            if !running {
-                s.notice(i18n::t!("jobs.stop_none", name = j.name), false);
-                return Some(vec![]);
-            }
-            s.ui.confirm = Some(crate::state::Confirm::StopFiring(j.id, fired, j.name));
-            vec![]
         }
         _ => return None,
     })
@@ -357,6 +390,41 @@ fn selected_entry(s: &State) -> Option<port::JobEntry> {
     {
         JobLower::Entry(i) => s.domain.job_history.get(&id)?.get(*i).cloned(),
         _ => None,
+    }
+}
+
+/// 选中的是流程作业的一次触发：它起的运行（流程、运行 ID）。
+fn selected_run_link(s: &State) -> Option<(String, port::RunId)> {
+    let e = selected_entry(s)?;
+    let Some(JobTarget::Run { id, .. }) = e.target else {
+        return None;
+    };
+    let flow = s
+        .domain
+        .run_views
+        .get(&id)
+        .map(|v| v.summary.flow.clone())
+        .or_else(|| {
+            let job = s.selected_job()?;
+            match &s.domain.jobs.iter().find(|j| j.id == job)?.kind {
+                JobKind::Flow { flow, .. } => Some(flow.clone()),
+                JobKind::Simple { .. } => None,
+            }
+        })?;
+    Some((flow, id))
+}
+
+/// 跳到流程标签里那次运行：没结束的在它的流程下面，结束了的在「已结束」里。
+fn jump_to_run(s: &mut State, flow: &str, run: &port::RunId) {
+    s.ui.tab = Tab::Flows;
+    s.ui.focus = Focus::SideUpper;
+    s.ui.filter[Tab::Flows.index()].clear();
+    s.ui.flow_expanded.insert(flow.to_string());
+    s.ui.ended_expanded = true;
+    let row = crate::flows::FlowRow::Run(flow.to_string(), run.clone());
+    match s.flow_rows().iter().position(|r| r == &row) {
+        Some(i) => crate::follow::select(s, Tab::Flows, true, i),
+        None => jump_to_flow(s, flow),
     }
 }
 

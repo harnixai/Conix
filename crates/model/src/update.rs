@@ -106,6 +106,8 @@ pub(crate) enum Pending {
         follow: bool,
     },
     JobHistory(port::JobId),
+    /// 流程、作业页的树：一个会话的任务树。
+    Tasks(port::SessionId),
     /// `/trust`：信任（`true`）或不再信任实例的项目。
     Trusted(bool),
     /// `/notify`：测试通知出口。
@@ -439,33 +441,6 @@ fn confirmed(s: &mut State, c: Confirm) -> Vec<Effect> {
         Confirm::DeleteSession(session, _) => {
             vec![s.call(Pending::Ignore, Command::DeleteSession { session })]
         }
-        Confirm::StopFiring(job, fired_ms, _) => {
-            vec![s.call(Pending::Ignore, Command::StopFiring { job, fired_ms })]
-        }
-        Confirm::CancelRun(run, _) => vec![s.call(
-            Pending::Ignore,
-            Command::RunOp {
-                run,
-                op: port::RunOp::Cancel,
-            },
-        )],
-        Confirm::ForceStation(run, station, _) => vec![s.call(
-            Pending::Ignore,
-            Command::RunOp {
-                run,
-                op: port::RunOp::Force {
-                    station,
-                    reason: i18n::t!("update.force_reason"),
-                },
-            },
-        )],
-        Confirm::Rework(run, to, _) => vec![s.call(
-            Pending::Ignore,
-            Command::RunOp {
-                run,
-                op: port::RunOp::Rework { to },
-            },
-        )],
         Confirm::ClearGoal(id) => vec![s.call(
             Pending::Ignore,
             Command::UpdateGoal {
@@ -1273,6 +1248,7 @@ fn event(s: &mut State, e: Event) -> Vec<Effect> {
             out.push(s.call(Pending::PluginsRefresh, Command::ListPlugins));
         }
         Event::TaskUpserted(t) => {
+            s.domain.tasks.insert(t.id.clone(), t.clone());
             for c in s.domain.convs.values_mut() {
                 let mine = c.summary.id == t.owner
                     || c.tasks
@@ -1365,6 +1341,7 @@ fn reply(s: &mut State, id: ReqId, r: Result<Reply, PortError>) -> Vec<Effect> {
         Pending::FlowDetail(f) => Some(format!("flow:{f}")),
         Pending::RunView { id, .. } => Some(format!("run:{id}")),
         Pending::JobHistory(j) => Some(format!("history:{j}")),
+        Pending::Tasks(sid) => Some(format!("tasks:{sid}")),
         _ => None,
     };
     if let Some(k) = key {
@@ -1375,6 +1352,11 @@ fn reply(s: &mut State, id: ReqId, r: Result<Reply, PortError>) -> Vec<Effect> {
         Err(e) => {
             if matches!(what, Pending::EndedRuns { .. }) {
                 s.domain.ended_loaded = true;
+            }
+            // 取不到任务树就算了：树上少几行，不能每帧都再问一次、每次都报错。
+            if let Pending::Tasks(sid) = what {
+                s.domain.tasks_loaded.insert(sid);
+                return vec![];
             }
             let tab = match what {
                 Pending::Sessions => Some(Tab::Sessions),
@@ -1449,6 +1431,12 @@ fn reply(s: &mut State, id: ReqId, r: Result<Reply, PortError>) -> Vec<Effect> {
         }
         (Pending::JobHistory(j), Reply::JobHistory(v)) => {
             d.job_history.insert(j, v);
+        }
+        (Pending::Tasks(sid), Reply::Tasks(v)) => {
+            for t in v {
+                d.tasks.insert(t.id.clone(), t);
+            }
+            d.tasks_loaded.insert(sid);
         }
         (what, reply) => return crate::chat_update::chat_reply(s, what, reply),
     }

@@ -122,7 +122,7 @@ conix --mock default                 # 只加载种子，不跑时间线
 | m09-session-tree | 3 层子 Agent + 各种任务，状态频繁变化；进入子 Agent、看 Shell 输出、发消息、停止 | S-04 S-05 S-06 C-16 · 交互 §4.1 §5.2 |
 | m10-goal-todo | goal 自动开轮、受阻、暂停和恢复；todo 逐项完成 | S-02 S-03 · 交互 §5.2 |
 | m11-flow-run | 一次运行走完：并行的站、搁置后放行、等确认、未达标后返工、暂停后恢复、取消 | F-02 F-03 F-04 F-05 · 交互 §5.3 |
-| m12-flow-author | 选中流程定义左边不动、右下是流程设计；在用户会话里说着改流程，设计跟着变；`R` 起话头启动运行；查看定义 | F-07 F-08 · 交互 §4.1 §5.3 |
+| m12-flow-author | 选中流程定义左边不动、右下是流程设计；在用户会话里说着改流程，设计跟着变；`m` 起话头启动运行；查看定义 | F-07 F-08 · 交互 §4.1 §5.3 |
 | m13-jobs | 简单作业和流程作业按时触发、失败、立即运行、启用和停用、从历史跳转 | J-01 至 J-04 · 交互 §5.4 |
 | m14-attention | 多处同时等人（会话、站、受阻的 goal、失败的作业），用 ^R 依次处理，角标随之变化 | L-04 L-05 |
 | m15-reconnect | 与实例断线 → 重连中 → 恢复（`Resynced` + 快照），列表变灰后恢复；实例被停止后回到实例选择 | I-09 · 交互 §9 |
@@ -310,23 +310,27 @@ catch_up`（再按名字过滤）。凭据取仓库根的 `.env`（worktree 里�
 | S-13 | 会话列表只列人发起的；第一行新建；启动即草稿 | live_sessions::only_this_projects_sessions_are_listed、live_turns::a_sub_agent_shows_up_as_a_task_with_its_own_session（子 Agent 不进列表）；live_flows::a_run_goes_from_start_to_finish（流程会话不进列表）；app/side_follow::the_workbench_starts_on_a_draft；app/sessions::new_session_row_opens_a_draft_and_the_first_words_create_it | LIVE + mock 场景 |
 | S-14 | todo 带编号，完成的在下，面板 10 行 | app/sessions::todos_are_numbered_open_first_done_last | mock 场景 |
 | S-15 | `#n` 与 ID | app/side_follow::numbers_follow_the_canonical_order_and_ignore_the_filter；live_tools::a_user_session_manages_jobs_and_names_itself_with_host_tools（`#n` 与 ID） | mock 场景 + LIVE |
-| S-16 | 每个会话都有会话、流程、作业的工具；作用域与权限 | live_tools::{a_user_session_manages_jobs_and_names_itself_with_host_tools, a_job_session_cannot_touch_another_job}；live_flows::a_user_session_validates_and_creates_a_flow_once_the_project_is_trusted、a_user_session_creates_and_runs_a_flow_job_with_the_job_tools | LIVE |
+| S-16 | 每个会话都有会话、流程、作业的工具；作用域与权限 | live_tools::{a_user_session_manages_jobs_and_names_itself_with_host_tools, a_job_session_cannot_touch_another_job}；host/hub::a_job_fired_session_only_looks_at_jobs_and_nobody_else_touches_it（外面的会话动不了触发里的会话、触发里的会话对作业只读）；host/flows/tools 的单测（运行里的会话不操作运行）；live_flows::a_user_session_validates_and_creates_a_flow_once_the_project_is_trusted、a_user_session_creates_and_runs_a_flow_job_with_the_job_tools | LIVE |
 | F-01 | 列出流程定义（名字、来源、运行数） | live_flows::the_builtin_example_flow_is_offered；app/flows_jobs::selecting_a_flow_keeps_the_chat_and_shows_its_design_below | LIVE |
 | F-02 | 展开流程看运行 | live_flows::a_run_goes_from_start_to_finish；app/flows_jobs::ended_runs_sit_under_ended_and_show_where_they_came_from | LIVE |
-| F-03 | 运行的各站与状态 | live_flows::a_run_goes_from_start_to_finish、run_ops_release_pause_resume_rework_force_and_confirm；app/flows_jobs::m11_run_progresses_live | LIVE |
+| F-03 | 运行的整棵树：主会话、站、站的任务、子 Agent 与任务，带模型 | live_flows::a_run_goes_from_start_to_finish；app/flows_jobs::m11_run_progresses_live、run_stations_are_flat_colored_and_switch_to_their_context（模型列）；host/hub::session_tasks_gather_the_whole_tree_down_the_sub_agents | LIVE + mock 场景 |
 | F-04 | 选中运行切到主会话；站里的会话可进 | live_flows::a_run_goes_from_start_to_finish（主会话归属）；app/flows_jobs::selecting_a_run_follows_its_main_agent_and_shows_stations、run_stations_are_flat_colored_and_switch_to_their_context | LIVE |
-| F-05 | 运行的操作：确认、放行、强制放行、返工、重试、暂停、恢复、取消 | live_flows::run_ops_release_pause_resume_rework_force_and_confirm、a_flow_with_runs_not_finished_cannot_be_changed_until_they_are_cancelled；app/flows_jobs::station_ops_and_run_ops | LIVE |
+| F-05 | 运行的操作在用户会话里说，界面不放键；`m` 放话头 | live_flows::run_ops_release_pause_resume_rework_force_and_confirm、a_flow_with_runs_not_finished_cannot_be_changed_until_they_are_cancelled（工具）；app/flows_jobs::run_and_station_ops_are_talked_about_not_keyed；host/flows::project_runs_span_flows_and_an_ended_run_is_run_again（重跑） | LIVE + mock 场景 |
 | F-06 | 启动一次运行（用户会话里说） | live_flows::a_run_goes_from_start_to_finish；live_flows::a_user_session_creates_and_runs_a_flow_job_with_the_job_tools | LIVE |
 | F-07 | 流程设计图；会话里设计、校验、保存；有运行时不许改 | live_flows::a_user_session_validates_and_creates_a_flow_once_the_project_is_trusted、a_flow_with_runs_not_finished_cannot_be_changed_until_they_are_cancelled；app/flows_jobs::m12_change_the_flow_by_talking_and_the_design_updates | LIVE |
 | F-08 | 看 YAML 与每站配置 | live_flows::the_builtin_example_flow_is_offered（`yaml`、站的 `needs`）；app/flows_jobs::a_station_of_a_definition_opens_its_config_in_an_overlay | LIVE + mock 场景 |
 | F-09a | 项目的流程与内置、插件的区分（`◎`）；项目里同名的取代内置的；不读全局目录 | 来源标记：app/flows_jobs::global_flows_are_marked_and_flow_jobs_jump_to_their_flow；live_flows::flows_live_in_the_project_and_a_projects_same_named_flow_replaces_a_builtin_one（项目的为 Project，与内置同名的取代它，`~/.conix/flows/` 里的不列） | LIVE |
 | F-09b | 流程格式与 Harnix 兼容 | live_flows::our_session_host_passes_the_conformance_suite | LIVE |
 | J-01 | 列作业：触发规则、类型、启用、下次、上次结果 | live_jobs::jobs_are_saved_listed_toggled_and_deleted；app/flows_jobs::jobs_list_details_history_and_follow | LIVE |
-| J-02 | 触发历史，跳到那一次的会话 / 运行 | live_jobs::run_now_fires_a_job_session_and_records_the_outcome；app/flows_jobs::jobs_list_details_history_and_follow | LIVE |
-| J-03 | 作业定义、新建修改删除在会话里说 | live_tools::a_user_session_manages_jobs_and_names_itself_with_host_tools；live_flows::a_user_session_creates_and_runs_a_flow_job_with_the_job_tools；app/side_follow::n_e_d_put_a_lead_in_into_the_user_session | LIVE |
-| J-04 | 启用 / 停用、立即运行 | live_jobs::jobs_are_saved_listed_toggled_and_deleted、run_now_fires_a_job_session_and_records_the_outcome；live_flows::a_flow_job_starts_a_run_when_it_fires | LIVE |
+| J-02 | 触发历史，跳到那一次的会话 / 运行；简单作业的触发展开成任务树 | live_jobs::run_now_fires_a_job_session_and_records_the_outcome；app/flows_jobs::jobs_list_details_history_and_follow、jobs_show_guards_and_a_firing_is_talked_about_and_unfolds_its_tree | LIVE |
+| J-03 | 作业定义、新建修改删除在会话里说 | live_tools::a_user_session_manages_jobs_and_names_itself_with_host_tools；live_flows::a_user_session_creates_and_runs_a_flow_job_with_the_job_tools；app/side_follow::n_and_m_put_a_lead_in_into_the_user_session | LIVE |
+| J-04 | 启用 / 停用、立即运行、停下在会话里说，界面不放键 | live_jobs::jobs_are_saved_listed_toggled_and_deleted、run_now_fires_a_job_session_and_records_the_outcome；live_flows::a_flow_job_starts_a_run_when_it_fires；app/flows_jobs::jobs_list_details_history_and_follow（键不再发命令） | LIVE |
 | J-05a | 右上一行一个作业；右下定义、统计、触发记录 | live_jobs::jobs_are_saved_listed_toggled_and_deleted、run_now_fires_a_job_session_and_records_the_outcome（触发记录落盘）；app/flows_jobs::jobs_list_details_history_and_follow | LIVE |
 | J-05b | 作业属于实例；错过的触发按配置补跑或跳过 | live_jobs::a_missed_firing_is_caught_up_once_only_when_asked、a_firing_left_running_by_a_crash_is_marked_interrupted_on_start、a_firing_cut_short_by_a_stop_is_recorded_as_stopped_by_the_instance | LIVE |
+| W-01 | 一次查到所有运行与触发 | host/flows::project_runs_span_flows_and_an_ended_run_is_run_again；host/hub::a_firing_keeps_a_report_that_work_tools_show_list_and_clean_up（work_list）；live_tools::a_user_session_finds_a_firing_with_work_list_and_reads_its_report | LIVE |
+| W-02 | 运行、触发的运行时目录与报告 | host/hub::a_firing_keeps_a_report_that_work_tools_show_list_and_clean_up；host/flows::project_runs_span_flows_and_an_ended_run_is_run_again（conix-report.json）；live_tools::a_user_session_finds_a_firing_with_work_list_and_reads_its_report | LIVE |
+| W-03 | 会话里清理已结束的 | host/hub::a_firing_keeps_a_report_that_work_tools_show_list_and_clean_up（先列后清、作业会话清不了）；流程运行的清理等 Harnix#70 | 缺 LIVE |
+| W-04 | 会话里自检、测试通知 | 无专门用例（conix_doctor / notify_test 与 /doctor、/notify 走同一条命令） | 缺 |
 | D-01 | `/doctor`：生效配置与引擎自检 | host/hub::doctor_reports_the_engines_checks_and_the_instances_own（离线、假引擎）；live_diagnostics::doctor_reports_the_engines_checks_and_the_instances_own（真实实例的每一项）、doctor_flags_an_inherited_job_network_and_an_unreadable_config | LIVE |
 | D-02 | 键位覆盖、冲突启动时报出 | keys 单测（`crates/keys`）；app/keys::*；app/guards | 单测 + mock 场景 |
 | D-03 | 一键帮助 | app/keys::the_help_lists_the_focused_context_with_shared_keys_on_one_line、ctrl_h_erases_while_typing_and_is_help_otherwise | mock 场景 |

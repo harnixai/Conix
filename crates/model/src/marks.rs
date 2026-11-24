@@ -164,7 +164,7 @@ pub(crate) fn kind_label(k: &TaskKind) -> String {
     }
 }
 
-/// 流程从哪来：`全局 · 内置` / `项目` ……
+/// 流程从哪来：`内置` / `项目` / `插件 <名字>`。
 pub(crate) fn origin_label(o: port::FlowOrigin) -> String {
     match o {
         port::FlowOrigin::Builtin => i18n::t!("marks.origin.builtin"),

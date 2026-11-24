@@ -184,6 +184,59 @@ impl State {
         }
     }
 
+    /// 流程、作业页的树：`owner` 派出的任务，子 Agent 的接着往下（来自 `domain.tasks`，不要求 Watch）。
+    /// 在跑的在前；`skip` 里的会话（站的任务已经单列了它们）不重复列。
+    pub(crate) fn work_tasks(
+        &self,
+        owner: &SessionId,
+        prefix: &str,
+        skip: &[SessionId],
+        out: &mut Vec<(TaskId, String)>,
+    ) {
+        self.work_tasks_at(owner, prefix, skip, out, 0);
+    }
+
+    fn work_tasks_at(
+        &self,
+        owner: &SessionId,
+        prefix: &str,
+        skip: &[SessionId],
+        out: &mut Vec<(TaskId, String)>,
+        depth: u8,
+    ) {
+        if depth > 8 {
+            return;
+        }
+        let mut mine: Vec<&Task> = self
+            .domain
+            .tasks
+            .values()
+            .filter(|t| &t.owner == owner)
+            .filter(|t| t.agent_session.as_ref().is_none_or(|c| !skip.contains(c)))
+            .collect();
+        mine.sort_by_key(|t| {
+            (
+                t.status.finished(),
+                t.status != TaskStatus::Waiting,
+                t.started_ms,
+            )
+        });
+        let n = mine.len();
+        for (i, t) in mine.into_iter().enumerate() {
+            let last = i + 1 == n;
+            out.push((
+                t.id.clone(),
+                format!("{prefix}{}", if last { "└ " } else { "├ " }),
+            ));
+            if let Some(child) = &t.agent_session
+                && !self.ui.tree_collapsed.contains(&t.id)
+            {
+                let next = format!("{prefix}{}", if last { "  " } else { "│ " });
+                self.work_tasks_at(child, &next, skip, out, depth + 1);
+            }
+        }
+    }
+
     /// 选中主 Agent 的整棵任务树（测试与视图用）。
     pub fn conv_tasks(&self) -> Vec<Task> {
         self.selected_session()
@@ -423,7 +476,6 @@ fn session_line(s: &State, x: &SessionSummary, num: String, width: usize) -> Lin
 }
 
 pub(crate) fn lower_lines(s: &State, width: usize) -> Vec<Line> {
-    let now = s.ui.now_ms;
     s.tree_rows()
         .iter()
         .map(|r| match r {
@@ -457,41 +509,45 @@ pub(crate) fn lower_lines(s: &State, width: usize) -> Vec<Line> {
                     Tone::Dim,
                 )
             }
-            TreeRow::Task { id, prefix } => {
-                let Some(t) = s.task(id) else {
-                    return Line::default();
-                };
-                let (g, tone) = task_glyph(t.status);
-                let mark = match (&t.agent_session, s.ui.tree_collapsed.contains(&t.id)) {
-                    (Some(_), false) => "▾ ",
-                    (Some(_), true) => "▸ ",
-                    (None, _) => "",
-                };
-                let kind = match &t.kind {
-                    TaskKind::Agent => t
-                        .agent_type
-                        .clone()
-                        .unwrap_or_else(|| i18n::t!("sessions.sub_agent")),
-                    k => crate::marks::kind_label(k),
-                };
-                let end = t.ended_ms.unwrap_or(now);
-                // 子 Agent 与任务用图标分开：◆ 是子 Agent（选中切到它的会话），其余是任务
-                // （选中看它的输出）。
-                let (icon, itone) = crate::marks::kind_icon(&t.kind);
-                let left = Line::toned(prefix.clone(), Tone::Dim)
-                    .push(mark, Tone::Dim)
-                    .push(format!("{g} "), tone)
-                    .push(format!("{icon} "), itone)
-                    .push(t.label.clone(), Tone::Normal)
-                    .push(format!("  {kind}"), Tone::Dim);
-                let right = Line::toned(
-                    crate::marks::cost(end.saturating_sub(t.started_ms), Some(&t.usage)),
-                    Tone::Dim,
-                );
-                split_line(left, right, width)
-            }
+            TreeRow::Task { id, prefix } => match s.task(id) {
+                Some(t) => task_line(s, t, prefix, width),
+                None => Line::default(),
+            },
         })
         .collect()
+}
+
+/// 任务树的一行：会话标签的拆分树与流程、作业页的树共用。
+pub(crate) fn task_line(s: &State, t: &Task, prefix: &str, width: usize) -> Line {
+    let (g, tone) = task_glyph(t.status);
+    let mark = match (&t.agent_session, s.ui.tree_collapsed.contains(&t.id)) {
+        (Some(_), false) => "▾ ",
+        (Some(_), true) => "▸ ",
+        (None, _) => "",
+    };
+    // 子 Agent 写它的 agent 类型：引擎还不报子 Agent 实际用的模型（Agix#98），类型多半就定了模型。
+    let kind = match &t.kind {
+        TaskKind::Agent => t
+            .agent_type
+            .clone()
+            .unwrap_or_else(|| i18n::t!("sessions.sub_agent")),
+        k => crate::marks::kind_label(k),
+    };
+    let end = t.ended_ms.unwrap_or(s.ui.now_ms);
+    // 子 Agent 与任务用图标分开：◆ 是子 Agent（选中切到它的会话），其余是任务
+    // （选中看它的输出）。
+    let (icon, itone) = crate::marks::kind_icon(&t.kind);
+    let left = Line::toned(prefix.to_string(), Tone::Dim)
+        .push(mark, Tone::Dim)
+        .push(format!("{g} "), tone)
+        .push(format!("{icon} "), itone)
+        .push(t.label.clone(), Tone::Normal)
+        .push(format!("  {kind}"), Tone::Dim);
+    let right = Line::toned(
+        crate::marks::cost(end.saturating_sub(t.started_ms), Some(&t.usage)),
+        Tone::Dim,
+    );
+    split_line(left, right, width)
 }
 
 /// 右下框标题右边的摘要：几件在跑。
