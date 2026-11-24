@@ -750,33 +750,36 @@ async fn flows_live_in_the_project_and_a_projects_same_named_flow_replaces_a_bui
         ONE_STATION.replace("name: live-echo", "name: live-old"),
     )
     .unwrap();
-    install(
-        &lv,
-        &[
-            ("live-echo", ONE_STATION),
-            (
-                "example-review",
-                &ONE_STATION
-                    .replace("name: live-echo", "name: example-review")
-                    .replace("title: Live echo", "title: Project review"),
-            ),
-        ],
-    );
+    install(&lv, &[("live-echo", ONE_STATION)]);
     let c = lv.start_trusted().await;
     let all = flows(&c).await;
-    let find = |name: &str| all.iter().find(|f| f.name == name).cloned();
-    let mine = find("live-echo").expect("项目的流程列得出");
+    let find = |all: &[port::FlowSummary], name: &str| all.iter().find(|f| f.name == name).cloned();
+    let mine = find(&all, "live-echo").expect("项目的流程列得出");
     assert_eq!(mine.origin, FlowOrigin::Project, "{mine:?}");
-    let replaced = find("example-review").unwrap();
+    let builtin = find(&all, "example-review").expect("内置的列得出");
+    assert!(
+        builtin.origin == FlowOrigin::Builtin && builtin.origin.is_shared(),
+        "{builtin:?}"
+    );
+    assert!(find(&all, "live-old").is_none(), "全局目录不再读：{all:?}");
+
+    // 项目里放一份同名的：流程库在实例启动时读，重启之后看到的是项目的那份。
+    install(
+        &lv,
+        &[(
+            "example-review",
+            &ONE_STATION
+                .replace("name: live-echo", "name: example-review")
+                .replace("title: Live echo", "title: Project review"),
+        )],
+    );
+    drop(c);
+    let c = lv.restart().await;
+    let all = flows(&c).await;
+    let replaced = find(&all, "example-review").unwrap();
     assert_eq!(
         (replaced.origin, replaced.title.as_str()),
         (FlowOrigin::Project, "Project review"),
         "项目的那份取代内置的：{all:?}"
     );
-    assert!(
-        all.iter()
-            .any(|f| f.origin == FlowOrigin::Builtin && f.origin.is_shared()),
-        "内置的照样有：{all:?}"
-    );
-    assert!(find("live-old").is_none(), "全局目录不再读：{all:?}");
 }
