@@ -177,3 +177,100 @@ async fn the_stop_instance_command_shuts_the_instance_down() {
     assert!(lv.read("meta.json")["stopped_ms"].is_u64());
     assert!(!lv.layout().socket(NAME).exists());
 }
+
+/// 脱离期间一次作业失败了：下一次接入时实例推一次 `AwaySummary`，里面有这条失败，指向那个作业；再下一次接入就没有了。
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "live"]
+async fn what_happened_while_detached_is_pushed_once_on_the_next_attach() {
+    let lv = Live::with(Opts {
+        codix_yaml: Some("jobs:\n  defaults:\n    timeout: 2s\n".into()),
+        ..Default::default()
+    });
+    let c = lv.start_trusted().await;
+    let Reply::Job(j) = c
+        .ok(Command::SaveJob {
+            job: port::Job {
+                id: port::JobId(String::new()),
+                name: "away".into(),
+                cron: "0 3 * * *".into(),
+                kind: port::JobKind::Simple {
+                    prompt: "Write a 3000-word essay on the history of timekeeping. Do not use any tools."
+                        .into(),
+                    skills: vec![],
+                    project: None,
+                    scene: None,
+                    model: None,
+                },
+                enabled: true,
+                catch_up: false,
+                created_ms: 0,
+                guard: Default::default(),
+                auto_disabled: None,
+                effective_guard: None,
+                next_fire_ms: None,
+                last: None,
+                running_ms: None,
+                today_tokens: 0,
+            },
+        })
+        .await
+    else {
+        panic!("save_job")
+    };
+    c.ok(Command::RunJobNow {
+        job: j.id.clone(),
+        subject: None,
+        prompt_append: None,
+    })
+    .await;
+    // 触发一开始就脱离；两秒的超时到了、记录落盘时，没有人在。
+    c.ok(Command::Detach).await;
+    drop(c);
+    let deadline = std::time::Instant::now() + live::TURN;
+    loop {
+        let done = lv
+            .job_history_file(&j.id.0)
+            .iter()
+            .any(|e| e.outcome != port::JobOutcome::Running);
+        if done {
+            break;
+        }
+        assert!(std::time::Instant::now() < deadline, "那一次一直没有结局");
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+
+    let mut b = loop {
+        match lv.attach(Attach::default()).await {
+            Ok(b) => break b,
+            // 上一条连接的收尾与这次接入可能交错：被占用就稍后再试。
+            Err(PortError::Occupied { .. }) => tokio::time::sleep(Duration::from_millis(200)).await,
+            Err(e) => panic!("接入：{e}"),
+        }
+    };
+    let alerts = b
+        .wait_event("离开期间的摘要", QUICK, |e| match e {
+            Event::AwaySummary { alerts, .. } => Some(alerts.clone()),
+            _ => None,
+        })
+        .await;
+    assert!(
+        alerts.iter().any(|a| a.kind == port::AlertKind::JobFailed
+            && a.target == Some(port::AlertTarget::Job(j.id.clone()))),
+        "{alerts:?}"
+    );
+
+    // 只推一次：脱离再接入，没有新的事就没有摘要。
+    b.ok(Command::Detach).await;
+    drop(b);
+    let b = loop {
+        match lv.attach(Attach::default()).await {
+            Ok(b) => break b,
+            Err(PortError::Occupied { .. }) => tokio::time::sleep(Duration::from_millis(200)).await,
+            Err(e) => panic!("接入：{e}"),
+        }
+    };
+    b.expect_none("摘要不再来", Duration::from_secs(2), |e| {
+        matches!(e, Event::AwaySummary { .. })
+    })
+    .await;
+}

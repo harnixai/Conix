@@ -735,3 +735,46 @@ async fn run_ops_release_pause_resume_rework_force_and_confirm() {
     })
     .await;
 }
+
+/// 全局流程（`~/.codix/flows/`）列出来来源是 Global；项目里放同名的，列出来的是项目的那份（不再是 Global）；
+/// 全局的流程与内置的同名，来源是 Override。
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "live"]
+async fn global_flows_are_marked_and_a_projects_same_named_flow_replaces_them() {
+    let lv = Live::new();
+    install(
+        &lv,
+        &[
+            ("live-echo", ONE_STATION),
+            (
+                "example-review",
+                &ONE_STATION.replace("name: live-echo", "name: example-review"),
+            ),
+        ],
+    );
+    let c = lv.start_trusted().await;
+    let find = |all: Vec<port::FlowSummary>, name: &str| all.into_iter().find(|f| f.name == name);
+    let g = find(flows(&c).await, "live-echo").expect("全局的流程列得出");
+    assert_eq!(g.origin, FlowOrigin::Global, "{g:?}");
+
+    let dir = std::path::Path::new(&lv.project_path()).join(".codix/flows");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("live-echo.yaml"),
+        ONE_STATION.replace("title: Live echo", "title: Project echo"),
+    )
+    .unwrap();
+    // 流程库在实例启动时读：重启之后看到项目里的两份。
+    drop(c);
+    let c = lv.restart().await;
+    let all = flows(&c).await;
+    let mine = find(all.clone(), "live-echo").unwrap();
+    assert_eq!(mine.title, "Project echo", "项目的那份取代全局的：{all:?}");
+    assert_ne!(mine.origin, FlowOrigin::Global, "{mine:?}");
+    let builtin = find(all.clone(), "example-review").unwrap();
+    assert_eq!(
+        builtin.origin,
+        FlowOrigin::Override,
+        "全局的覆盖了内置的：{all:?}"
+    );
+}

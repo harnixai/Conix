@@ -189,13 +189,19 @@ mock 那一套不动，真实后端按层另加用例，全部离线、不调模
 | 文件 | 覆盖 |
 |---|---|
 | `live_instance.rs` | 新建、列出、发现文件与 `meta.json`、目录 0700 与 socket 0600、同名第二个实例拿不到锁、同一项目的第二个实例被拒并报出占着它的实例、停掉再照 `meta.json` 拉起、实例被杀后看护进程把它拉起来（`list` 写出重启次数）、连看护进程一起被杀后列为残留并清理 |
-| `live_attach.rs` | `Hello` 与能力位、被占用、强制接入踢人、脱离放开接入、空闲脱离、心跳超时断开后重连、实例被停与 `StopInstance` |
-| `live_sessions.rs` | 只列本项目的会话、受信项目的会话放在项目里（不受信的在全局，都跨重启列得出）、第一句话做名字、改名与关闭跨重启保留、换模型、命令表、Watch 快照的历史与 todo、拒绝逐轮权限模式 |
+| `live_attach.rs` | `Hello` 与能力位、被占用、强制接入踢人、脱离放开接入、空闲脱离、心跳超时断开后重连、实例被停与 `StopInstance`、脱离期间的事在下一次接入时推一次 `AwaySummary` |
+| `live_sessions.rs` | 只列本项目的会话、受信项目的会话放在项目里（不受信的在全局，都跨重启列得出）、第一句话做名字、改名与关闭跨重启保留、换模型、命令表、Watch 快照的历史与 todo、拒绝逐轮权限模式、建会话带模型与模式、已关闭的会话（列、看、重开、删）、重启后的累计用量 |
 | `live_turns.rs` | 文字与用量、忙时退回、插话送达、排队、中断、权限与模型提问的作答、侧问分叉、goal 的事件与快照、后台任务的输出与停止、子 Agent 的侧链会话与给它发消息 |
 | `live_jobs.rs` | 增删改与启停（定义进 `.codix/jobs.json`、启停进本机的 `jobs-state.json`）、立即运行触发的会话与结局、触发记录落盘、重启后没跑完的那次记为中断、错过的触发只补一次、停下正在跑的那一次记成手动停下、codix.yaml 给的超时到了被打断记成超时、停实例与崩溃留下的那次记成"实例停了"、一次失败的触发经配置的命令出口送出（TestNotify 回每个出口的结果）。作业定义要项目受信才读写，用例用 `start_trusted` |
 | `live_flows.rs` | 流程：内置示例流程；项目没受信时 `flow_create` 存不进去、`/trust` 之后存进项目自己的流程包；用户会话经 `flow_validate` / `flow_create` 写流程；一次运行从头跑到尾、主会话的归属；`workspace: worktree` 的运行在仓库根的 `.wkts/<运行>/`、主仓库看不到它与项目状态；有运行时 `flow_update` 被拒并列出运行，取消后才能改；运行操作经端口落到派工器（搁置的站放行、暂停与恢复、返工、强制放行、确认）；运行里的会话动不了别的流程；流程作业触发一次运行；用户会话用 `job_validate` / `job_save` / `job_run` 在对话里建出流程作业并换主题跑一次；库的一致性套件对着 Codix 的 `SessionHost`（带凭据把测试进程再起一遍，引擎嵌在里面） |
 | `live_tui.rs` | 界面经真实实例：经界面新建并接入、底栏那几项；^N 轮换标签（流程标签里是实例给的示例流程）、^G 一圈三格、单栏时换栏；^T、^H；`/trust` 的回复；^X 后台运行后实例还在、再接回来。草稿上第一句话建出会话并跑完一轮，^O 看转录，^G 到右上选中的就是它，`/rename` 经实例改名。真实的权限询问：^G 走开、^R 找回、转回左边进提问框、Enter 批准后工具真的跑了 |
 | `live_tools.rs` | 宿主工具：用户会话经 `job_*` 增改停删作业、`session_rename` 改自己的名；查看不问、改东西经权限询问；`#n` 与 ID；作业触发的会话动不了别的作业 |
+| `live_cli.rs` | 命令行子命令对着真实实例：`codix list` 的一行、`--all`、`codix stop`；首次运行写出的缺省配置按 `CODIX_LANG` |
+| `live_diagnostics.rs` | 真实实例的 `/doctor`（引擎自检加实例自己的几项）、`@` 补全的文件列表、`/model` 的模型列表 |
+| `live_prompts.rs` | 权限的拒绝与本会话总是允许、提问超时被引擎撤回、改文件的 `file_changes` 与 diff |
+| `live_limits.rs` | 一轮因 `turn.max_model_calls` 以 `MaxTurns` 收尾、因预算以 `Budget` 收尾 |
+| `live_config.rs` / `live_config_codix.rs` | 会话里配置自己：provider 的加、测、切、退；`config_show`、`codix_config_set`（校验、备份、jobs 当场生效）；排在前面的 provider 连不上时引擎换到下一个并推 `ProviderSwitched` |
+| `live_plugins.rs` | 插件：包装进去、启用、插件的流程能跑；xforge 从 open 到 archive |
 
 **怎么跑**：`scripts/live.sh`（全部）、`scripts/live.sh live_jobs`（一个文件）、`scripts/live.sh live_jobs
 catch_up`（再按名字过滤）。凭据取仓库根的 `.env`（worktree 里往上找；`CODIX_LIVE_ENV` 可指定），要有
@@ -203,6 +209,9 @@ catch_up`（再按名字过滤）。凭据取仓库根的 `.env`（worktree 里�
 实例进程的环境（`SocketInstances::with_env`），不进测试进程、不打印。同时起的实例数用 `LIVE_THREADS`
 控制（缺省 4）；跑全部时流程的一致性套件不进并发，最后单独串行跑（它自己就要跑十几轮模型，挤在并发里会撞上单轮
 超时）。用例全标 `#[ignore = "live"]`，`./scripts/check.sh` 只编译不跑。
+
+**已知不一致**：`port::FlowOrigin::Override` 的注释写「项目里覆盖了同名全局流程的」，实际 Harnix 只在全局（`~/.codix/flows/`）
+覆盖内置流程时给 `Override`；项目里的同名流程列出来是 `Project`。`live_flows.rs` 的用例照实际行为断言。
 
 **harness**（`crates/codix/tests/live/mod.rs`）：
 
@@ -310,7 +319,7 @@ catch_up`（再按名字过滤）。凭据取仓库根的 `.env`（worktree 里�
 | F-06 | 启动一次运行（用户会话里说） | live_flows::a_run_goes_from_start_to_finish；live_flows::a_user_session_creates_and_runs_a_flow_job_with_the_job_tools | LIVE |
 | F-07 | 流程设计图；会话里设计、校验、保存；有运行时不许改 | live_flows::a_user_session_validates_and_creates_a_flow_once_the_project_is_trusted、a_flow_with_runs_not_finished_cannot_be_changed_until_they_are_cancelled；app/flows_jobs::m12_change_the_flow_by_talking_and_the_design_updates | LIVE |
 | F-08 | 看 YAML 与每站配置 | live_flows::the_builtin_example_flow_is_offered（`yaml`、站的 `needs`）；app/flows_jobs::a_station_of_a_definition_opens_its_config_in_an_overlay | LIVE + mock 场景 |
-| F-09a | 全局流程与项目流程区分（`◎`）；项目里的转全局 | 来源标记：app/flows_jobs::global_flows_are_marked_and_flow_jobs_jump_to_their_flow；`~/.codix/flows/` 里的流程被实例读到并标为 Global、项目同名的为 Override：缺 | 缺 |
+| F-09a | 全局流程与项目流程区分（`◎`）；项目里的转全局 | 来源标记：app/flows_jobs::global_flows_are_marked_and_flow_jobs_jump_to_their_flow；live_flows::global_flows_are_marked_and_a_projects_same_named_flow_replaces_them（`~/.codix/flows/` 的为 Global，全局覆盖内置的为 Override，项目里同名的取代全局的；项目覆盖全局或内置时来源标的是 Project，不是 `FlowOrigin::Override`——与 `port::FlowOrigin` 的注释不一致，见 §8 的备注）；「项目里的转全局」没有用例（P1，未做） | LIVE |
 | F-09b | 流程格式与 Harnix 兼容 | live_flows::our_session_host_passes_the_conformance_suite | LIVE |
 | J-01 | 列作业：触发规则、类型、启用、下次、上次结果 | live_jobs::jobs_are_saved_listed_toggled_and_deleted；app/flows_jobs::jobs_list_details_history_and_follow | LIVE |
 | J-02 | 触发历史，跳到那一次的会话 / 运行 | live_jobs::run_now_fires_a_job_session_and_records_the_outcome；app/flows_jobs::jobs_list_details_history_and_follow | LIVE |
@@ -337,8 +346,8 @@ catch_up`（再按名字过滤）。凭据取仓库根的 `.env`（worktree 里�
 | 插件 | 装、披露、启用、停用、卸载，插件带来的流程能跑 | live_plugins::a_plugin_from_the_package_dirs_is_installed_enabled_and_its_flow_runs；engine/plugins::a_plugin_is_installed_enabled_and_its_flow_runs_on_its_functions；app/plugins::*（`/plugin` 的界面） | LIVE |
 | xforge | 内置的 xforge 流程从 open 到 archive | live_plugins::xforge_quick_goes_from_open_to_archive_with_a_real_model；engine/xforge::xforge_installs_offers_both_flows_and_carries_a_change_from_open_to_archive | LIVE |
 | 会话里配置：provider | 加、测、切、退 provider | live_config::a_provider_is_added_tested_switched_to_and_rolled_back_from_a_session；engine/config::an_unreachable_provider_is_added_tested_and_not_switched_to | LIVE |
-| 会话里配置：`config_show` 与 `codix_config_set` | 看生效配置；改 `codix.yaml`（jobs / notify 当场重读） | host 离线测试里没有，LIVE：缺 | 缺 |
-| provider_switched 通知 | 引擎换了 provider，转录里出一条提示 | model/chat（`ProviderSwitched` 的排版）；真实引擎换 provider 的 `Event::ProviderSwitched`：缺 | 缺 |
+| 会话里配置：`config_show` 与 `codix_config_set` | 看生效配置；改 `codix.yaml`（jobs / notify 当场重读） | live_config_codix::a_session_shows_the_config_and_sets_a_codix_yaml_value | LIVE |
+| provider_switched 通知 | 引擎换了 provider，转录里出一条提示 | model/chat（`ProviderSwitched` 的排版）；live_config_codix::a_dead_first_provider_falls_over_and_the_switch_is_pushed（排在前面的连不上，引擎换到下一个） | LIVE |
 | 作业网络 | `jobs.defaults.network` 与作业的 `network` 下发到会话沙箱 | live_jobs::a_job_with_no_network_still_runs_local_commands | LIVE |
 | 作业预算 | `max_tokens` 下发为会话预算，那次记成被预算停下 | live_jobs::a_job_over_its_token_budget_is_stopped_by_the_engine | LIVE |
 | CronCreate | 作业会话里模型不能自建定时任务 | live_jobs::a_job_session_cannot_create_scheduled_tasks | LIVE |
@@ -347,4 +356,4 @@ catch_up`（再按名字过滤）。凭据取仓库根的 `.env`（worktree 里�
 | `/doctor`：`codix.session_loosen` | 部署方关了放宽时报降级 | host/hub::doctor_reports_the_engines_checks_and_the_instances_own；live_sessions::the_permission_mode_is_the_sessions_and_takes_effect_at_once（放宽生效）；engine/settings::the_cli_layer_lets_a_session_loosen_its_mode；live_diagnostics::doctor_reports_the_engines_checks_and_the_instances_own（真实实例里是 ok） | LIVE |
 | `/doctor`：`codix.jobs_network` | `inherit` 时报降级 | host/hub::doctor_reports_the_engines_checks_and_the_instances_own；live_diagnostics::doctor_flags_an_inherited_job_network_and_an_unreadable_config | LIVE |
 | 会话累计用量 | 重启后会话摘要的 usage 来自引擎的 `session.get` 累计 | host/hub::a_watched_sessions_usage_is_what_the_engine_reports；live_sessions::a_sessions_cumulative_usage_survives_a_restart | LIVE |
-| 离开期间摘要 | 脱离期间作业失败等，再接入时推一次 `AwaySummary` | host/hub::what_happened_while_detached_is_shown_on_attach；app/flows_jobs::the_away_summary_lists_what_happened_and_enter_goes_there；真实实例：缺 | 缺 |
+| 离开期间摘要 | 脱离期间作业失败等，再接入时推一次 `AwaySummary` | host/hub::what_happened_while_detached_is_shown_on_attach；app/flows_jobs::the_away_summary_lists_what_happened_and_enter_goes_there；live_attach::what_happened_while_detached_is_pushed_once_on_the_next_attach | LIVE |
