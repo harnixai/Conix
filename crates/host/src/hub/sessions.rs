@@ -15,7 +15,7 @@ impl Hub {
     }
 
     /// 会话在不在：内存里没有就问引擎，在盘上就带回来、订阅上。
-    /// 在 Codix 里关掉的不算在：引擎的存储里还有它，但它不该被谁再带回来。
+    /// 在 Conix 里关掉的不算在：引擎的存储里还有它，但它不该被谁再带回来。
     pub(crate) async fn bring_back(&self, id: &str) -> Result<bool, RpcError> {
         if self.0.st.locked().sessions.contains_key(id) {
             return Ok(true);
@@ -142,7 +142,7 @@ impl Hub {
     ) -> Result<(), RpcError> {
         self.call(
             "session.appendEntry",
-            json!({"session_id": id, "ns": "codix.flow", "event": event, "payload": payload}),
+            json!({"session_id": id, "ns": "conix.flow", "event": event, "payload": payload}),
         )
         .await
         .map(|_| ())
@@ -391,7 +391,7 @@ impl Hub {
         self.0.reg.locked().get(id).is_some_and(|r| r.closed)
     }
 
-    /// 这个项目里在 Codix 里关掉的会话（Agix 还留着它们的转录），关掉的时刻新的在前。
+    /// 这个项目里在 Conix 里关掉的会话（Agix 还留着它们的转录），关掉的时刻新的在前。
     pub(super) async fn closed_sessions(&self) -> Vec<port::SessionSummary> {
         let Ok(v) = self.call("session.list", json!({})).await else {
             return vec![];

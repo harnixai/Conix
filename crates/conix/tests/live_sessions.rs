@@ -1,4 +1,4 @@
-//! LIVE：会话代理里 Codix 自己做的部分（architecture §8.4）——只列本项目的会话、第一句话做
+//! LIVE：会话代理里 Conix 自己做的部分（architecture §8.4）——只列本项目的会话、第一句话做
 //! 名字、改名与关闭记在 `sessions.json` 里并跨重启保留、换模型、命令表、Watch 快照的历史转换
 //! 与 todo、会话的权限模式（Shift+Tab：立即生效、跨重启保留）。
 
@@ -235,9 +235,9 @@ async fn the_permission_mode_is_the_sessions_and_takes_effect_at_once() {
         "重启后还是 plan"
     );
 
-    // Codix 在 cli 层开了 permissions.client_may_loosen（流程站要 acceptEdits），它与
+    // Conix 在 cli 层开了 permissions.client_may_loosen（流程站要 acceptEdits），它与
     // session.setPermissionMode 的放宽是同一个开关：人在界面上切到比设置宽的 acceptEdits 照样生效。
-    // 部署方的 managed 层关掉它时会被夹回，/doctor 的 codix.session_loosen 报出来。
+    // 部署方的 managed 层关掉它时会被夹回，/doctor 的 conix.session_loosen 报出来。
     let r = c
         .ok(Command::SetPermissionMode {
             session: s.clone(),
@@ -268,7 +268,7 @@ async fn flow_commands_are_wired() {
     assert!(matches!(&r, Err(PortError::Failed(_))), "{r:?}");
 }
 
-/// 会话放在项目里（Agix#94）：受信项目的会话进 `.codix/state/history/<id>/`，全局只留索引；
+/// 会话放在项目里（Agix#94）：受信项目的会话进 `.conix/state/history/<id>/`，全局只留索引；
 /// 不受信时照旧在全局。两种都跨重启列得出。
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "live"]

@@ -1,5 +1,5 @@
 //! 无人值守的护栏（architecture §8.5）：全局缺省与天花板、作业自己写的项、实际生效的值。
-//! 天花板来自这台机器的 `codix.yaml`，作业定义来自仓库：仓库里的作业只能比天花板更紧。
+//! 天花板来自这台机器的 `conix.yaml`，作业定义来自仓库：仓库里的作业只能比天花板更紧。
 
 use port::{JobGuard, Network, Overlap};
 
@@ -79,7 +79,7 @@ impl GuardConfig {
     }
 }
 
-/// `codix.yaml` 的 `jobs:` 段，原样的字符串（`app` 不依赖实例，解析在这里）。
+/// `conix.yaml` 的 `jobs:` 段，原样的字符串（`app` 不依赖实例，解析在这里）。
 #[derive(Debug, Clone, Default)]
 pub struct GuardText {
     pub timeout: Option<String>,

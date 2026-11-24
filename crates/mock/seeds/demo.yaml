@@ -15,10 +15,10 @@ sessions:
   # ---------------------------------------------------------------- demo
   - summary:
       id: demo
-      title: Codix 展示
+      title: Conix 展示
       state: idle
       usage: {input: 24800, output: 5200, cache_read: 18000, cache_write: 2100}
-      provenance: {instance: dev, host: ops-01, project: ~/work/codix, scene: code, model: claude-sonnet-5-5, origin: user}
+      provenance: {instance: dev, host: ops-01, project: ~/work/conix, scene: code, model: claude-sonnet-5-5, origin: user}
       updated_ms: 1763279990000
     running: false
     todos:
@@ -243,9 +243,9 @@ sessions:
           input: cargo test auth
           content: |
             Compiling oauth2 v4.4.2
-               Compiling codix-svc v0.3.0 (/work/codix)
+               Compiling conix-svc v0.3.0 (/work/conix)
                 Finished test [unoptimized + debuginfo] target(s) in 6.84s
-                 Running unittests src/lib.rs (target/debug/deps/codix_svc-4f2a9c)
+                 Running unittests src/lib.rs (target/debug/deps/conix_svc-4f2a9c)
 
             running 20 tests
             test auth::tests::empty_token ... ok
@@ -278,7 +278,7 @@ sessions:
                |             ^^^^^^ help: if this is intentional, prefix it with an underscore: `_client`
                |
                = note: `-D warnings` implied by `-D clippy::all`
-            error: could not compile `codix-svc` due to 1 previous error
+            error: could not compile `conix-svc` due to 1 previous error
       - notice: {text: "上下文已压缩：82.4k → 12.1k tokens"}
       - tool:
           id: d10

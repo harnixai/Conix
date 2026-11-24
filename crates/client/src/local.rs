@@ -31,7 +31,7 @@ pub fn pid_alive(pid: u32) -> bool {
     }
 }
 
-/// 当前进程作为接入者的样子（`codix list` 里"被谁接入"那一栏）。
+/// 当前进程作为接入者的样子（`conix list` 里"被谁接入"那一栏）。
 pub fn this_client() -> ClientInfo {
     let now = now_ms();
     ClientInfo {

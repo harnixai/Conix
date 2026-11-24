@@ -70,7 +70,7 @@ impl State {
             .map(|n| SlashCommand {
                 name: n.to_string(),
                 description: i18n::tr(&format!("chat_update.cmd_{n}")),
-                source: "codix".into(),
+                source: "conix".into(),
             })
             .collect();
         if let Some(conv) = self.conv() {

@@ -999,4 +999,4 @@ jobs:
 
 # 可装的插件包（plugins.md §3）；装好的从零起步。
 plugin_packages:
-  - {name: xforge, version: 0.1.0, path: /opt/codix/share/codix/plugins/xforge-0.1.0.zip}
+  - {name: xforge, version: 0.1.0, path: /opt/conix/share/conix/plugins/xforge-0.1.0.zip}

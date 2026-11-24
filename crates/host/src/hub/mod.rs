@@ -32,7 +32,7 @@ use serde_json::{Value, json};
 use tokio::sync::mpsc;
 use wire::frames::{DaemonEvent, HistoryMessage, SessionEvent, SessionInfo};
 
-pub use config_tools::CodixConfigStore;
+pub use config_tools::ConixConfigStore;
 pub use registry::{Record, Registry};
 pub use session_opts::cli_settings;
 pub(crate) use session_opts::{SessionSettings, rule_strings};
@@ -162,7 +162,7 @@ struct Inner {
     exhausted: Mutex<Option<String>>,
     /// 等人处理的事与通知出口（`attention.rs`）。
     alerts: Mutex<attention::Alerts>,
-    /// 配置里读不懂、退回缺省的项（`codix.yaml` 的 jobs、notify）：`/doctor` 报出来。
+    /// 配置里读不懂、退回缺省的项（`conix.yaml` 的 jobs、notify）：`/doctor` 报出来。
     config_problems: Mutex<Vec<String>>,
     notifier: Mutex<Option<Arc<crate::notify::Notifier>>>,
     /// 侧问分叉出的会话：那一轮结束时把回答作为提示推出去。
@@ -170,9 +170,9 @@ struct Inner {
     default_model: Mutex<String>,
     /// 可装的插件包在哪些目录（`plugins::package_dirs`）。
     plugin_dirs: Mutex<Vec<PathBuf>>,
-    /// `codix.yaml` 的读写（`codix` crate 给），会话里的 `codix_config_set` 用。
-    codix_config: OnceLock<Arc<dyn CodixConfigStore>>,
-    /// `~/.codix`：切换 provider 前的备份放在它下面的 `config-backups/`。
+    /// `conix.yaml` 的读写（`conix` crate 给），会话里的 `conix_config_set` 用。
+    conix_config: OnceLock<Arc<dyn ConixConfigStore>>,
+    /// `~/.conix`：切换 provider 前的备份放在它下面的 `config-backups/`。
     config_home: Mutex<Option<PathBuf>>,
     /// 测通 provider 用的临时会话：不收进会话列表。
     probes: Mutex<HashSet<String>>,
@@ -268,7 +268,7 @@ impl Hub {
             side: Mutex::default(),
             default_model: Mutex::default(),
             plugin_dirs: Mutex::default(),
-            codix_config: OnceLock::new(),
+            conix_config: OnceLock::new(),
             config_home: Mutex::default(),
             probes: Mutex::default(),
             flows: OnceLock::new(),
@@ -382,7 +382,7 @@ impl Hub {
         self.0.flows.get().cloned()
     }
 
-    /// 流程的端口命令（宿主库 `codix.flow.*` 走这里，与界面同一条路）。
+    /// 流程的端口命令（宿主库 `conix.flow.*` 走这里，与界面同一条路）。
     pub(crate) async fn flow_command(&self, cmd: Command) -> Result<Reply, PortError> {
         match self.flows() {
             Some(f) => f.command(cmd).await,
@@ -422,7 +422,7 @@ impl Hub {
         &self.0.project
     }
 
-    /// 护栏的全局缺省与天花板（`codix.yaml` 的 `jobs:`），存在作业存储里：派生的生效值由它算。
+    /// 护栏的全局缺省与天花板（`conix.yaml` 的 `jobs:`），存在作业存储里：派生的生效值由它算。
     pub fn set_guard_config(&self, g: crate::jobs::guard::GuardConfig) {
         if let Ok(sched) = self.scheduler() {
             sched.store().locked().set_guard_config(g);

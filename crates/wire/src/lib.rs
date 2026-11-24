@@ -1,5 +1,5 @@
 //! Agix 协议（`agix/docs/daemon_rpc_protocol.md`）的客户端一侧：NDJSON 分帧的 JSON-RPC 2.0，
-//! 按 `id` 配对回复，通知（`session.event`、`daemon.event`）进一个 channel；以及 Codix 用到的
+//! 按 `id` 配对回复，通知（`session.event`、`daemon.event`）进一个 channel；以及 Conix 用到的
 //! 那几种帧载荷。载荷一律宽松地读：不认识的 `kind`、多出来的字段都跳过，协议只会往下长。
 
 pub mod frames;

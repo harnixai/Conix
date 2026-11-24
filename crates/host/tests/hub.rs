@@ -1384,18 +1384,18 @@ async fn doctor_reports_the_engines_checks_and_the_instances_own() {
     };
     let status = |n: &str| checks.iter().find(|c| c.name == n).map(|c| c.status);
     assert_eq!(status("settings.tiers"), Some(port::HealthStatus::Ok));
-    assert_eq!(status("codix.config"), Some(port::HealthStatus::Degraded));
+    assert_eq!(status("conix.config"), Some(port::HealthStatus::Degraded));
     assert_eq!(
-        status("codix.flows"),
+        status("conix.flows"),
         Some(port::HealthStatus::Failing),
         "这个搭法里没有流程"
     );
-    assert!(status("codix.notify").is_some() && status("codix.gitignore").is_some());
+    assert!(status("conix.notify").is_some() && status("conix.gitignore").is_some());
     assert_eq!(
-        status("codix.session_loosen"),
+        status("conix.session_loosen"),
         Some(port::HealthStatus::Degraded)
     );
-    assert_eq!(status("codix.jobs_network"), Some(port::HealthStatus::Ok));
+    assert_eq!(status("conix.jobs_network"), Some(port::HealthStatus::Ok));
 }
 
 /// 无人值守的这一次做了什么记进触发记录：调了哪些工具各几次、出错几次、改了哪些文件。

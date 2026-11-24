@@ -1,5 +1,5 @@
-//! `codix host` 的看护（architecture §8.7）：由 new / start 拉起的是它，它再拉起真正的实例进程
-//! （同样的参数，环境里带 `CODIX_HOST_CHILD`）并等着。实例非正常退出（崩溃、被杀）就退避重启；
+//! `conix host` 的看护（architecture §8.7）：由 new / start 拉起的是它，它再拉起真正的实例进程
+//! （同样的参数，环境里带 `CONIX_HOST_CHILD`）并等着。实例非正常退出（崩溃、被杀）就退避重启；
 //! 正常停（SIGTERM、StopInstance）就跟着结束。起来不到几秒就自己报错退出的不重启：那是锁被占、
 //! 配置错，重启救不回来。
 
@@ -11,7 +11,7 @@ use client::layout::{read_json, write_json_atomic};
 use tokio::signal::unix::{SignalKind, signal};
 
 /// 实例进程认这个环境变量：有它就是被看护的那个，自己不再看护。
-pub const CHILD_ENV: &str = "CODIX_HOST_CHILD";
+pub const CHILD_ENV: &str = "CONIX_HOST_CHILD";
 
 /// 起来不到这么久就失败的，不是"崩了"，是起不来。
 const STARTUP: Duration = Duration::from_secs(5);
@@ -63,13 +63,13 @@ pub async fn run(name: String, project: std::path::PathBuf) -> Result<()> {
         let now = Instant::now();
         recent.retain(|t| now.duration_since(*t) < WINDOW);
         if recent.len() >= MAX_RESTARTS {
-            eprintln!("codix host {name}: crashed {MAX_RESTARTS} times in 10 minutes; giving up");
+            eprintln!("conix host {name}: crashed {MAX_RESTARTS} times in 10 minutes; giving up");
             record(&layout, &name, |m| m.crashed = true);
             std::process::exit(status.code().unwrap_or(1));
         }
         let wait = BACKOFF[recent.len().min(BACKOFF.len() - 1)];
         recent.push(now);
-        eprintln!("codix host {name}: exited with {status}; restarting in {wait:?}");
+        eprintln!("conix host {name}: exited with {status}; restarting in {wait:?}");
         record(&layout, &name, |m| {
             m.restarts += 1;
             m.last_crash_ms = Some(client::now_ms());

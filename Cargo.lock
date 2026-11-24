@@ -605,36 +605,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "codix"
-version = "0.1.4-2026112303"
-dependencies = [
- "anyhow",
- "app",
- "async-trait",
- "chrono",
- "clap",
- "client",
- "crossterm",
- "engine",
- "futures",
- "harnix-flow",
- "host",
- "i18n",
- "keys",
- "mock",
- "model 0.1.4-2026112303",
- "nix 0.29.0",
- "port",
- "serde_json",
- "serde_yaml",
- "tempfile",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "tui",
-]
-
-[[package]]
 name = "colorchoice"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -674,6 +644,36 @@ dependencies = [
  "thiserror 2.0.21",
  "tokio",
  "tokio-util",
+]
+
+[[package]]
+name = "conix"
+version = "0.1.4-2026112303"
+dependencies = [
+ "anyhow",
+ "app",
+ "async-trait",
+ "chrono",
+ "clap",
+ "client",
+ "crossterm",
+ "engine",
+ "futures",
+ "harnix-flow",
+ "host",
+ "i18n",
+ "keys",
+ "mock",
+ "model 0.1.4-2026112303",
+ "nix 0.29.0",
+ "port",
+ "serde_json",
+ "serde_yaml",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "tui",
 ]
 
 [[package]]

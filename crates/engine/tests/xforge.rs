@@ -1,5 +1,5 @@
 //! 自带插件 `xforge`（plugins/xforge，docs/design/plugins.md §6）在真实嵌入的 Agix 上：装 zip、启用后
-//! quick / solid 两个流程都挂得上；再按 Codix 调函数的样子（`plugin.call`，门禁只读、步骤可写）把一次变更
+//! quick / solid 两个流程都挂得上；再按 Conix 调函数的样子（`plugin.call`，门禁只读、步骤可写）把一次变更
 //! 从开到归档走完。不调模型：模型的活（写三份 .md）由测试直接写文件代替。
 //! 单独一个测试文件：一个进程只能嵌入一份引擎。
 

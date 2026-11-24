@@ -36,7 +36,7 @@ async fn m01_streams_with_thinking_status_and_markdown() {
     let mut h = chat("m01-chat-basic").await;
     assert!(
         h.transcript()
-            .contains(&format!("Codix {}", model::short_version())),
+            .contains(&format!("Conix {}", model::short_version())),
         "欢迎块在最上面"
     );
     ask(&mut h, "介绍一下").await;
@@ -342,7 +342,7 @@ async fn m16_storm_relayouts_one_block_per_delta() {
 #[tokio::test(start_paused = true)]
 async fn demo_history_renders_every_block_kind() {
     let mut h = Harness::new("demo", SIZE).await;
-    h.open_session("Codix 展示").await;
+    h.open_session("Conix 展示").await;
     let t = h.transcript();
     for want in [
         "> ",

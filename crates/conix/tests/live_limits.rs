@@ -1,6 +1,6 @@
 //! LIVE：一轮因为上限而收尾——引擎的 `max_turns`、`budget_exceeded` 在端口上
 //! 是 `StopReason::MaxTurns` / `Budget`。
-//! 上限用实例的 `settings.json` 给，断言只看 Codix 的翻译。
+//! 上限用实例的 `settings.json` 给，断言只看 Conix 的翻译。
 
 mod live;
 

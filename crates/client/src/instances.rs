@@ -1,4 +1,4 @@
-//! 本机实例的目录（architecture §8.1、§8.7）：扫 `instances/*`、拉起 `codix host`、接入、停止。
+//! 本机实例的目录（architecture §8.1、§8.7）：扫 `instances/*`、拉起 `conix host`、接入、停止。
 
 use std::fs;
 use std::os::unix::fs::DirBuilderExt;
@@ -37,7 +37,7 @@ pub struct SocketInstances {
 }
 
 impl SocketInstances {
-    /// `exe` 是拉起实例用的 codix 二进制（通常是 `std::env::current_exe()`）。
+    /// `exe` 是拉起实例用的 conix 二进制（通常是 `std::env::current_exe()`）。
     pub fn new(layout: Layout, exe: impl Into<PathBuf>) -> SocketInstances {
         SocketInstances {
             layout,
@@ -126,7 +126,7 @@ impl SocketInstances {
             .args(["host", "--name", name, "--project"])
             .arg(project)
             // 实例与 TUI 必须认同一个家目录：TUI 的 Layout 不一定来自环境变量（测试、--home）。
-            .env("CODIX_HOME", self.layout.home())
+            .env("CONIX_HOME", self.layout.home())
             // cargo run / cargo test 设的加载器回退路径里有 target/debug/deps：macOS 的 dyld 照着它
             // 逐个目录找系统库，一次 exec 要十几秒。实例也不该带着开发时的加载路径常驻。
             .env_remove("DYLD_FALLBACK_LIBRARY_PATH")
@@ -347,7 +347,7 @@ pub fn derive_name(project: &Path, taken: impl Fn(&str) -> bool) -> String {
         base.push(c);
     }
     let base = base.trim_start_matches(['.', '-']).trim_end_matches('-');
-    let base = if base.is_empty() { "codix" } else { base };
+    let base = if base.is_empty() { "conix" } else { base };
     std::iter::once(base.to_string())
         .chain((2..).map(|i| format!("{base}-{i}")))
         .find(|n| !taken(n))
@@ -383,7 +383,7 @@ mod tests {
         let none = |_: &str| false;
         assert_eq!(derive_name(Path::new("/w/My Project!"), none), "my-project");
         assert_eq!(derive_name(Path::new("/w/.dotfiles"), none), "dotfiles");
-        assert_eq!(derive_name(Path::new("/"), none), "codix");
+        assert_eq!(derive_name(Path::new("/"), none), "conix");
         assert_eq!(derive_name(Path::new("/w/项目"), none), "项目");
         let taken = |n: &str| n == "app" || n == "app-2";
         assert_eq!(derive_name(Path::new("/w/app"), taken), "app-3");

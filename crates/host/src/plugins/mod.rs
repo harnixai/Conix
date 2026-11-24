@@ -1,4 +1,4 @@
-//! 插件（docs/design/plugins.md）：Agix 管装、卸、启停与包里的命令、函数、脚本；Codix 读包里 `[x-codix]`
+//! 插件（docs/design/plugins.md）：Agix 管装、卸、启停与包里的命令、函数、脚本；Conix 读包里 `[x-conix]`
 //! 这一段（Agix 不读 `x-` 段）——流程包在哪、门禁与程序步骤各由哪个插件函数做——并把流程包挂进流程库。
 
 pub mod gates;
@@ -10,9 +10,9 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 use serde_json::Value;
 
-/// 包里 `plugin.toml` 的 `[x-codix]`。
+/// 包里 `plugin.toml` 的 `[x-conix]`。
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
-pub struct CodixSection {
+pub struct ConixSection {
     /// 流程包目录（相对包根），布局同 harnix-flow 的 `DirPacks`。
     #[serde(default)]
     pub flows: Option<String>,
@@ -58,15 +58,15 @@ impl GateTarget {
 
 #[derive(Debug, Deserialize)]
 struct Manifest {
-    #[serde(default, rename = "x-codix")]
-    x_codix: Option<CodixSection>,
+    #[serde(default, rename = "x-conix")]
+    x_conix: Option<ConixSection>,
 }
 
-/// 读包根上 `plugin.toml` 的 `[x-codix]`；没有这一段、读不了的回 `None`（包照样是个 Agix 插件）。
-pub fn codix_section(root: &Path) -> Option<CodixSection> {
+/// 读包根上 `plugin.toml` 的 `[x-conix]`；没有这一段、读不了的回 `None`（包照样是个 Agix 插件）。
+pub fn conix_section(root: &Path) -> Option<ConixSection> {
     let text = std::fs::read_to_string(root.join("plugin.toml")).ok()?;
     match toml::from_str::<Manifest>(&text) {
-        Ok(m) => m.x_codix,
+        Ok(m) => m.x_conix,
         Err(e) => {
             tracing::warn!(root = %root.display(), "plugin.toml: {e}");
             None
@@ -74,12 +74,12 @@ pub fn codix_section(root: &Path) -> Option<CodixSection> {
     }
 }
 
-/// 一个启用着、带 `[x-codix]` 的插件。
+/// 一个启用着、带 `[x-conix]` 的插件。
 #[derive(Debug, Clone, PartialEq)]
 pub struct Mounted {
     pub name: String,
     pub root: PathBuf,
-    pub section: CodixSection,
+    pub section: ConixSection,
 }
 
 impl Mounted {
@@ -219,14 +219,14 @@ pub fn sha256_file(path: &Path) -> std::io::Result<String> {
         .collect())
 }
 
-/// 自带插件目录：`CODIX_PLUGIN_DIRS`（`:` 分隔，开发与测试用）替换 `<exe 所在目录>/../share/codix/plugins/`；
+/// 自带插件目录：`CONIX_PLUGIN_DIRS`（`:` 分隔，开发与测试用）替换 `<exe 所在目录>/../share/conix/plugins/`；
 /// 用户自己放包的 `<家目录>/plugin-store/` 总在后面。
 pub fn package_dirs(home: &Path) -> Vec<PathBuf> {
-    let mut dirs: Vec<PathBuf> = match std::env::var_os("CODIX_PLUGIN_DIRS") {
+    let mut dirs: Vec<PathBuf> = match std::env::var_os("CONIX_PLUGIN_DIRS") {
         Some(v) => std::env::split_paths(&v).collect(),
         None => std::env::current_exe()
             .ok()
-            .and_then(|e| Some(e.parent()?.join("../share/codix/plugins")))
+            .and_then(|e| Some(e.parent()?.join("../share/conix/plugins")))
             .into_iter()
             .collect(),
     };
@@ -234,7 +234,7 @@ pub fn package_dirs(home: &Path) -> Vec<PathBuf> {
     dirs
 }
 
-/// Agix `plugin.install` 回的 `disclosure` 加上 Codix 自己的那份（`[x-codix]` 带来的，Agix 不读）。
+/// Agix `plugin.install` 回的 `disclosure` 加上 Conix 自己的那份（`[x-conix]` 带来的，Agix 不读）。
 pub fn disclosure(agix: &Value, mounted: Option<&Mounted>) -> port::PluginDisclosure {
     let strings = |v: &Value| -> Vec<String> {
         v.as_array()
@@ -258,14 +258,14 @@ pub fn disclosure(agix: &Value, mounted: Option<&Mounted>) -> port::PluginDisclo
         ..Default::default()
     };
     if let Some(m) = mounted {
-        codix_disclosure(m, &mut d);
+        conix_disclosure(m, &mut d);
     }
     d
 }
 
-fn codix_disclosure(m: &Mounted, d: &mut port::PluginDisclosure) {
+fn conix_disclosure(m: &Mounted, d: &mut port::PluginDisclosure) {
     for name in m.flow_names() {
-        d.codix.push(format!("flow `{name}`"));
+        d.conix.push(format!("flow `{name}`"));
     }
     for (gate, t) in &m.section.gates {
         let how = if t.runs_commands() {
@@ -273,18 +273,18 @@ fn codix_disclosure(m: &Mounted, d: &mut port::PluginDisclosure) {
         } else {
             "read-only call"
         };
-        d.codix.push(format!(
+        d.conix.push(format!(
             "host gate `{gate}` → plugin function `{}` ({how})",
             t.function()
         ));
     }
     for (step, f) in &m.section.steps {
-        d.codix.push(format!(
+        d.conix.push(format!(
             "program step `{step}` → plugin function `{f}` (may write)"
         ));
     }
     if m.section.flows.is_some() && m.flows_dir().is_none() {
-        d.codix
+        d.conix
             .push("its flows directory is missing or outside the package: not mounted".into());
     }
     // 流程包里的 skill 与规则在派活时进站的消息，一字不差到达模型。
@@ -310,7 +310,7 @@ fn codix_disclosure(m: &Mounted, d: &mut port::PluginDisclosure) {
                 let (Some(name), Ok(text)) = (name, std::fs::read_to_string(&file)) else {
                     continue;
                 };
-                d.codix_model_visible.push(port::VisibleText {
+                d.conix_model_visible.push(port::VisibleText {
                     origin: format!("flow pack {kind} `{name}`"),
                     text,
                 });
@@ -338,21 +338,21 @@ mod tests {
     }
 
     #[test]
-    fn the_codix_section_is_read_and_flows_stay_in_the_package() {
+    fn the_conix_section_is_read_and_flows_stay_in_the_package() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(
             dir.path().join("plugin.toml"),
-            r#"uses = ["codix"]
+            r#"uses = ["conix"]
 [plugin]
 name = "xf"
 version = "0.1.0"
 api_version = "0.1"
 
-[x-codix]
+[x-conix]
 flows = "flows"
-[x-codix.gates]
+[x-conix.gates]
 xf-structure = "xf.check"
-[x-codix.steps]
+[x-conix.steps]
 xf-open = "xf.open"
 "#,
         )
@@ -369,7 +369,7 @@ xf-open = "xf.open"
             "propose it",
         )
         .unwrap();
-        let section = codix_section(dir.path()).unwrap();
+        let section = conix_section(dir.path()).unwrap();
         assert_eq!(section.gates["xf-structure"].function(), "xf.check");
         let m = Mounted {
             name: "xf".into(),
@@ -380,14 +380,14 @@ xf-open = "xf.open"
         let d = disclosure(&serde_json::json!({"capabilities": ["x"]}), Some(&m));
         assert_eq!(d.capabilities, ["x"]);
         assert!(
-            d.codix
+            d.conix
                 .iter()
                 .any(|l| l.contains("xf-open") && l.contains("xf.open"))
         );
-        assert_eq!(d.codix_model_visible[0].text, "propose it");
+        assert_eq!(d.conix_model_visible[0].text, "propose it");
 
         let out = Mounted {
-            section: CodixSection {
+            section: ConixSection {
                 flows: Some("../elsewhere".into()),
                 ..Default::default()
             },
@@ -401,7 +401,7 @@ xf-open = "xf.open"
         let p = |name: &str| Mounted {
             name: name.into(),
             root: PathBuf::new(),
-            section: CodixSection {
+            section: ConixSection {
                 gates: BTreeMap::from([(
                     "g".to_string(),
                     GateTarget::Full {

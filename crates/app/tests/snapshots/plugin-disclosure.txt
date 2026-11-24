@@ -1,8 +1,8 @@
- [CODIX] dev@ops-01  ~/work/auth                                                                                                                       ● 已连接
+ [CONIX] dev@ops-01  ~/work/auth                                                                                                                       ● 已连接
 ╭─ 会话 › 新会话（输入即开始） ────────────────────────────────────────────────────────────────╮╭─ 会话 ◐ ─ 流程 ─ 作业 ◐ ─────────────────────────────────────╮
 │ ╭──────────────────────────────────────────────────────────╮                                 ││›＋ 新建会话  Enter · 或在输入框里 /new                       │
 │ │ ▄▀▀ ▄▀▄ █▀▄ █ ▀▄▀                                        │                                 ││ ▸ #1 ● 排查内存泄漏                             code  26.2k  │
-│ │ ▀▄▄ ▀▄▀ █▄▀ █ ▄▀▄   Codix x.x.x                          │                                 ││ ▸ #2 ◐ 重构认证模块                             code  41.0k  │
+│ │ ▀▄▄ ▀▄▀ █▄▀ █ ▄▀▄   Conix x.x.x                          │                                 ││ ▸ #2 ◐ 重构认证模块                             code  41.0k  │
 │ │                                                          │                                 ││ ▸ #3 ○ 翻译文档                                 code   5.3k ⑂│
 │ │ 实例 dev@ops-01 · 项目 ~/work/auth                       │                                 ││ ▸ #4 ○ 昨天的调研                               code   8.0k ⑂│
 │ │                      ╭ 插件 xforge 的披露 ────────────────────────────────────────────────────────────────────────────────────────╮           code   2.6k  │
@@ -13,7 +13,7 @@
 │                        │   · adds command `xflow` that may write xforge/** through the file tools; it runs in the session that      │                        │
 │                        │     invokes it                                                                                             │                        │
 │                        │   · exposes function `xforge.check` to the host; writes no files                                           │                        │
-│                        │   · uses host library `codix` (Codix 的流程与作业)                                                         │                        │
+│                        │   · uses host library `conix` (Conix 的流程与作业)                                                         │                        │
 │                        │   · run its own JavaScript at the `tool.around` extension point                                            │                        │
 │                        │  MCP 服务器                                                                                                │                        │
 │                        │   （没有）                                                                                                 │                        │
@@ -25,7 +25,7 @@
 │                        │   command xflow                                                                                            │                        │
 │                        │     按 xforge 流程推进一项变更                                                                             │                        │
 │                        │                                                                                                            │                        │
-│                        │ Codix 的披露                                                                                               │                        │
+│                        │ Conix 的披露                                                                                               │                        │
 │                        │   · 流程 xforge-quick — 快速变更                                                                           │                        │
 │                        │   · 流程 xforge-solid — 常规变更                                                                           │                        │
 │                        │   · 门禁 xforge-structure → xforge.check                                                                   │                        │

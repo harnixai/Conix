@@ -119,7 +119,7 @@ impl Scenario {
         Ok(sc)
     }
 
-    /// 只有种子、没有时间线的场景（`codix --mock <种子名>`）。
+    /// 只有种子、没有时间线的场景（`conix --mock <种子名>`）。
     pub fn seed_only(seed: &str) -> Scenario {
         Scenario {
             name: seed.to_string(),

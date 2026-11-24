@@ -7,7 +7,7 @@ plugins:
   armed: "Press d again to uninstall {name} · any other key cancels"
   disclosure_title: "Disclosure for plugin {name}"
   agix: "Disclosed by Agix"
-  codix: "Disclosed by Codix"
+  conix: "Disclosed by Conix"
   capabilities: "Capabilities"
   mcp: "MCP servers"
   model_visible: "Text that reaches the model"

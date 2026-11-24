@@ -19,7 +19,7 @@
 
 作业页的 `n` `e` `d` 把话头放进输入框。
 
-**定义随项目提交**（`.codix/jobs.json`），团队共用；**启用与否只属于这台机器**：克隆下来的仓库带着作业，
+**定义随项目提交**（`.conix/jobs.json`），团队共用；**启用与否只属于这台机器**：克隆下来的仓库带着作业，
 在你的机器上缺省是停用的，看过再启用。项目受信才读、才写作业定义。
 
 ## 作业标签
@@ -35,7 +35,7 @@
 
 ## 护栏
 
-无人值守的工作跑飞、挂住、叠起来时把它停下。三层上限，下层只能更紧：`codix.yaml` 的缺省与天花板
+无人值守的工作跑飞、挂住、叠起来时把它停下。三层上限，下层只能更紧：`conix.yaml` 的缺省与天花板
 （见 [配置](config.md#jobs)），作业自己写的 `timeout` / `max_tokens` / `overlap` / `disable_after`
 （取与天花板的较小值），以及实例级的每日额度与并发。
 
@@ -61,7 +61,7 @@
 ## 网络
 
 无人值守的会话里，没有 allow 规则的命令要沙箱兜得住、且网络受限才会执行（Agix 0.4 的
-`sandbox.unattended_needs_network_policy`，缺省开）。所以作业有一项 `network`，写在 `codix.yaml` 的 `jobs.defaults` 或作业定义里：
+`sandbox.unattended_needs_network_policy`，缺省开）。所以作业有一项 `network`，写在 `conix.yaml` 的 `jobs.defaults` 或作业定义里：
 
 | 值 | 含义 |
 |---|---|
@@ -69,10 +69,10 @@
 | `allowlist` | 只能到设置里 `web.allowed_domains` 列的域名 |
 | `inherit` | 不管，照设置；网络不受限时，没有 allow 规则的命令会被拒 |
 
-要在 `inherit` 下让某条命令跑，给它写 allow 规则，放项目设置 `.codix/settings.json` 的 `permissions.allow` 里，例如
-`"Bash(git pull:*)"`。`job_validate` 对 `inherit` 会说明这一点，`/doctor` 的 `codix.jobs_network` 在缺省是 `inherit` 时报 degraded。
+要在 `inherit` 下让某条命令跑，给它写 allow 规则，放项目设置 `.conix/settings.json` 的 `permissions.allow` 里，例如
+`"Bash(git pull:*)"`。`job_validate` 对 `inherit` 会说明这一点，`/doctor` 的 `conix.jobs_network` 在缺省是 `inherit` 时报 degraded。
 网络没有天花板：放开它是作业作者与这台机器的用户各自的决定。流程作业起的运行，每个站的会话都带同一个网络，
-并按运行记一次（`state/codix/run-policies.json`），改了作业的护栏不影响已经在跑的运行。
+并按运行记一次（`state/conix/run-policies.json`），改了作业的护栏不影响已经在跑的运行。
 
 ## 审计摘要
 

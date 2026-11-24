@@ -237,7 +237,7 @@ async fn m25_ownership_line_for_every_origin() {
         ("昨天的调研", "分叉自 重构认证模块"),
         (
             "重构认证模块",
-            "[CODIX] dev@ops-01  ~/work/auth  code  claude-sonnet-5-5",
+            "[CONIX] dev@ops-01  ~/work/auth  code  claude-sonnet-5-5",
         ),
         ("老项目会话", "⚠ 被实例 research 占用"),
     ] {

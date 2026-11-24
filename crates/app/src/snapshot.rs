@@ -29,7 +29,7 @@ pub fn render_text(frame: &FrameState, size: Size) -> String {
     out
 }
 
-/// 与 `tests/snapshots/<name>.txt` 比较；`CODIX_UPDATE_SNAPSHOTS=1` 时改写它。
+/// 与 `tests/snapshots/<name>.txt` 比较；`CONIX_UPDATE_SNAPSHOTS=1` 时改写它。
 pub fn assert_snapshot(name: &str, actual: &str) {
     // 欢迎框里的版本每次发布都变：换成等宽的占位，快照不用跟着重写。
     let v = model::short_version();
@@ -37,18 +37,18 @@ pub fn assert_snapshot(name: &str, actual: &str) {
         .chars()
         .map(|c| if c == '.' { '.' } else { 'x' })
         .collect();
-    let actual = actual.replace(&format!("Codix {v}"), &format!("Codix {placeholder}"));
+    let actual = actual.replace(&format!("Conix {v}"), &format!("Conix {placeholder}"));
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests/snapshots")
         .join(format!("{name}.txt"));
-    if std::env::var_os("CODIX_UPDATE_SNAPSHOTS").is_some() {
+    if std::env::var_os("CONIX_UPDATE_SNAPSHOTS").is_some() {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, &actual).unwrap();
         return;
     }
     let expected = std::fs::read_to_string(&path).unwrap_or_else(|_| {
         panic!(
-            "no snapshot at {}; check the screen, then generate it with CODIX_UPDATE_SNAPSHOTS=1\n{actual}",
+            "no snapshot at {}; check the screen, then generate it with CONIX_UPDATE_SNAPSHOTS=1\n{actual}",
             path.display()
         )
     });

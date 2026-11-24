@@ -211,9 +211,9 @@ async fn a_user_session_validates_and_creates_a_flow_once_the_project_is_trusted
     assert_eq!(made.origin, FlowOrigin::Project, "存进项目自己的流程包");
     assert!(
         std::path::Path::new(&lv.project_path())
-            .join(".codix/flows/live-echo.yaml")
+            .join(".conix/flows/live-echo.yaml")
             .exists(),
-        "项目的 .codix/flows/ 里"
+        "项目的 .conix/flows/ 里"
     );
     assert!(
         c.events()
@@ -335,7 +335,7 @@ async fn a_worktree_run_works_under_the_repositorys_wkts() {
         .unwrap();
     let status = String::from_utf8_lossy(&status.stdout);
     assert!(
-        !status.contains(".wkts") && !status.contains(".codix/state"),
+        !status.contains(".wkts") && !status.contains(".conix/state"),
         "主仓库看不到 worktree 和项目状态：{status}"
     );
     assert!(
@@ -453,7 +453,7 @@ async fn our_session_host_passes_the_conformance_suite() {
             "--test-threads=1",
         ])
         .envs(live::credentials())
-        .env("CODIX_CONFORMANCE", "1")
+        .env("CONIX_CONFORMANCE", "1")
         .env_remove("DYLD_FALLBACK_LIBRARY_PATH")
         .status()
         .unwrap();
@@ -463,7 +463,7 @@ async fn our_session_host_passes_the_conformance_suite() {
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "live"]
 async fn conformance_inside() {
-    if std::env::var_os("CODIX_CONFORMANCE").is_none() {
+    if std::env::var_os("CONIX_CONFORMANCE").is_none() {
         return;
     }
     use harnix_flow::conformance::{Subject, run_all};
@@ -736,7 +736,7 @@ async fn run_ops_release_pause_resume_rework_force_and_confirm() {
     .await;
 }
 
-/// 全局流程（`~/.codix/flows/`）列出来来源是 Global；项目里放同名的，列出来的是项目的那份（不再是 Global）；
+/// 全局流程（`~/.conix/flows/`）列出来来源是 Global；项目里放同名的，列出来的是项目的那份（不再是 Global）；
 /// 全局的流程与内置的同名，来源是 Override。
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "live"]
@@ -757,7 +757,7 @@ async fn global_flows_are_marked_and_a_projects_same_named_flow_replaces_them() 
     let g = find(flows(&c).await, "live-echo").expect("全局的流程列得出");
     assert_eq!(g.origin, FlowOrigin::Global, "{g:?}");
 
-    let dir = std::path::Path::new(&lv.project_path()).join(".codix/flows");
+    let dir = std::path::Path::new(&lv.project_path()).join(".conix/flows");
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(
         dir.join("live-echo.yaml"),

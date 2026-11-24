@@ -49,7 +49,7 @@ async fn m17_single_pane_switches_back_and_forth() {
     h.keys("Ctrl+B").await;
     assert_eq!(h.core.state.ui.focus, Focus::Composer);
     assert!(
-        h.find(&format!("Codix {}", model::short_version()))
+        h.find(&format!("Conix {}", model::short_version()))
             .is_some(),
         "欢迎块"
     );

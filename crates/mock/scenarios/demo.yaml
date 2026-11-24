@@ -105,7 +105,7 @@ rules:
       - {"after": 0, "prompt_resolved": {"session": "$session", "id": "pdemo", "resolution": "answered"}}
       - {"after": 60, "tool_started": {"session": "$session", "id": "s7", "name": "Bash"}}
       - {"after": 40, "tool_input": {"session": "$session", "id": "s7", "summary": "git push origin feature/oauth"}}
-      - {"after": 400, "tool_finished": {"session": "$session", "id": "s7", "content": "To github.com:acme/codix-svc.git\n * [new branch]      feature/oauth -> feature/oauth\nbranch 'feature/oauth' set up to track 'origin/feature/oauth'."}}
+      - {"after": 400, "tool_finished": {"session": "$session", "id": "s7", "content": "To github.com:acme/conix-svc.git\n * [new branch]      feature/oauth -> feature/oauth\nbranch 'feature/oauth' set up to track 'origin/feature/oauth'."}}
       - {"after": 60, "text_delta": {"session": "$session", "text": "## 完成\n\n分支已推送，本轮改动如下：\n\n"}}
       - {"after": 60, "text_delta": {"session": "$session", "text": "| 文件 | 改动 |\n|---|---|\n| `src/auth/oauth.rs` | 新增 provider |\n| `src/auth/mod.rs` | 暴露模块 |\n\n"}}
       - {"after": 60, "text_delta": {"session": "$session", "text": "接下来可以改写 **登录与回调路由**。"}}
@@ -136,7 +136,7 @@ scripts:
     - {"after": 40, "tool_input": {"session": "$session", "id": "s3", "summary": "cargo test auth"}}
     - {"after": 100, "tool_progress": {"session": "$session", "id": "s3", "message": "编译中……"}}
     - {"after": 100, "tool_progress": {"session": "$session", "id": "s3", "message": "运行 12 个测试"}}
-    - {"after": 80, "tool_finished": {"session": "$session", "id": "s3", "content": "   Compiling codix-svc v0.3.0 (/work/codix)\n    Finished test target(s) in 3.12s\n     Running unittests src/lib.rs\n\nrunning 12 tests\ntest auth::tests::empty_token ... ok\ntest auth::tests::bad_signature ... ok\ntest auth::tests::expired ... ok\ntest auth::oauth::tests::introspect_ok ... ok\ntest auth::oauth::tests::pkce_verifier ... ok\ntest session::tests::new ... ok\ntest session::tests::expire ... ok\ntest api::tests::callback_ok ... ok\n\ntest result: ok. 12 passed; 0 failed"}}
+    - {"after": 80, "tool_finished": {"session": "$session", "id": "s3", "content": "   Compiling conix-svc v0.3.0 (/work/conix)\n    Finished test target(s) in 3.12s\n     Running unittests src/lib.rs\n\nrunning 12 tests\ntest auth::tests::empty_token ... ok\ntest auth::tests::bad_signature ... ok\ntest auth::tests::expired ... ok\ntest auth::oauth::tests::introspect_ok ... ok\ntest auth::oauth::tests::pkce_verifier ... ok\ntest session::tests::new ... ok\ntest session::tests::expire ... ok\ntest api::tests::callback_ok ... ok\n\ntest result: ok. 12 passed; 0 failed"}}
     - {"after": 80, "tool_started": {"session": "$session", "id": "s4", "name": "Edit"}}
     - {"after": 40, "tool_input": {"session": "$session", "id": "s4", "summary": "src/auth/mod.rs"}}
     - {"after": 100, "tool_finished": {"session": "$session", "id": "s4", "content": "ok", "file_changes": [{"path": "src/auth/mod.rs", "kind": "modified", "diff": "--- a/src/auth/mod.rs\n+++ b/src/auth/mod.rs\n@@ -1,4 +1,7 @@\n use std::time::{Duration, SystemTime};\n+\n+mod oauth;\n+pub use oauth::OAuthProvider;\n \n pub enum AuthError {\n     Expired,\n"}]}}

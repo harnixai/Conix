@@ -1,6 +1,6 @@
 [package]
 name = "tui"
-description = "Codix 的纯渲染层：FrameState → 画面"
+description = "Conix 的纯渲染层：FrameState → 画面"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

@@ -1,4 +1,4 @@
-//! `codix host`：实例进程的入口（architecture §8.7）。由 `codix new` / `start` 拉起，stdout 与
+//! `conix host`：实例进程的入口（architecture §8.7）。由 `conix new` / `start` 拉起，stdout 与
 //! stderr 已接到 `host.log`。认领项目状态 → 认领实例目录 → 起引擎 → 起会话代理 → 监听 socket →
 //! 写发现文件 → 服务到被停 → 依次收尾。
 
@@ -47,7 +47,7 @@ pub async fn run(name: String, project: PathBuf) -> Result<()> {
         project: project.clone(),
         groups_file: layout.groups(&name),
         settings: host::hub::cli_settings(),
-        // 引擎自带 `anthropic` 的模型，只在设置里没定义 `providers` 时用：codix.yaml 的 engine.model，CODIX_MODEL 覆盖。
+        // 引擎自带 `anthropic` 的模型，只在设置里没定义 `providers` 时用：conix.yaml 的 engine.model，CONIX_MODEL 覆盖。
         model: cfg.engine_model(),
         host_lib: host_lib.clone(),
     })
@@ -84,13 +84,13 @@ pub async fn run(name: String, project: PathBuf) -> Result<()> {
         log: state.dir().join("notify.jsonl"),
     };
     crate::instance_config::apply(&hub, &cfg, &notify);
-    // 会话里配置自己（architecture §8.11）：codix.yaml 经同一套解析改，切换 provider 前的备份放在家目录下。
-    hub.set_codix_config(crate::instance_config::store(layout.home(), notify));
+    // 会话里配置自己（architecture §8.11）：conix.yaml 经同一套解析改，切换 provider 前的备份放在家目录下。
+    hub.set_conix_config(crate::instance_config::store(layout.home(), notify));
     hub.set_config_home(layout.home().to_path_buf());
     if let Some(q) = project_claim.quarantined() {
         tracing::warn!(to = %q.display(), "project state not written on this machine; quarantined");
         let text = format!(
-            "Codix state in this project was not written on this machine: moved to {}, starting empty",
+            "Conix state in this project was not written on this machine: moved to {}, starting empty",
             q.display()
         );
         hub.alert(
@@ -173,8 +173,8 @@ pub async fn run(name: String, project: PathBuf) -> Result<()> {
 
     let mut opts = ServeOptions::new(stop_rx);
     opts.idle_timeout_ms = settings.idle_timeout_ms;
-    // 只给 LIVE 测试用：不缩短的话，测心跳超时断开就得干等 35 秒。不进 codix.yaml，用户不该调它。
-    if let Some(ms) = std::env::var("CODIX_TEST_HEARTBEAT_TIMEOUT_MS")
+    // 只给 LIVE 测试用：不缩短的话，测心跳超时断开就得干等 35 秒。不进 conix.yaml，用户不该调它。
+    if let Some(ms) = std::env::var("CONIX_TEST_HEARTBEAT_TIMEOUT_MS")
         .ok()
         .and_then(|v| v.parse::<u64>().ok())
     {

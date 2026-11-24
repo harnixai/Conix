@@ -1,5 +1,5 @@
-//! LIVE：会话里配置自己的另外几个工具与引擎换 provider 的提示——`config_show` 看生效配置、`codix_config_set`
-//! 改 `codix.yaml`（校验、备份、jobs 当场生效）；排在前面的 provider 连不上时引擎换到下一个，实例把
+//! LIVE：会话里配置自己的另外几个工具与引擎换 provider 的提示——`config_show` 看生效配置、`conix_config_set`
+//! 改 `conix.yaml`（校验、备份、jobs 当场生效）；排在前面的 provider 连不上时引擎换到下一个，实例把
 //! `provider_switched` 推给界面。provider 的加、测、切、退在 `live_config.rs`。
 
 mod live;
@@ -9,9 +9,9 @@ use port::{Command, Event, HealthStatus, Reply};
 
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "live"]
-async fn a_session_shows_the_config_and_sets_a_codix_yaml_value() {
+async fn a_session_shows_the_config_and_sets_a_conix_yaml_value() {
     let lv = Live::with(Opts {
-        codix_yaml: Some("jobs:\n  defaults:\n    timeout: 5m\n".into()),
+        conix_yaml: Some("jobs:\n  defaults:\n    timeout: 5m\n".into()),
         ..Default::default()
     });
     let mut c = lv.start_trusted().await;
@@ -41,11 +41,11 @@ async fn a_session_shows_the_config_and_sets_a_codix_yaml_value() {
     }
 
     // 校验不过的不写：路径对、值读不懂。
-    let before = std::fs::read_to_string(lv.home.path().join("codix.yaml")).unwrap();
+    let before = std::fs::read_to_string(lv.home.path().join("conix.yaml")).unwrap();
     let t = c
         .turn(
             &s,
-            "Call codix_config_set once with path \"jobs.defaults.network\" and value \"nonsense\". Do not \
+            "Call conix_config_set once with path \"jobs.defaults.network\" and value \"nonsense\". Do not \
              ask me to confirm. Then reply with only the word TRIED.",
         )
         .await;
@@ -56,7 +56,7 @@ async fn a_session_shows_the_config_and_sets_a_codix_yaml_value() {
         t.results
     );
     assert_eq!(
-        std::fs::read_to_string(lv.home.path().join("codix.yaml")).unwrap(),
+        std::fs::read_to_string(lv.home.path().join("conix.yaml")).unwrap(),
         before,
         "没写"
     );
@@ -65,7 +65,7 @@ async fn a_session_shows_the_config_and_sets_a_codix_yaml_value() {
     let t = c
         .turn(
             &s,
-            "Call codix_config_set once with path \"jobs.defaults.network\" and value \"inherit\". Do not \
+            "Call conix_config_set once with path \"jobs.defaults.network\" and value \"inherit\". Do not \
              ask me to confirm. Then reply with only the word SET.",
         )
         .await;
@@ -75,7 +75,7 @@ async fn a_session_shows_the_config_and_sets_a_codix_yaml_value() {
         "写成了：{:?}",
         t.results
     );
-    let yaml = std::fs::read_to_string(lv.home.path().join("codix.yaml")).unwrap();
+    let yaml = std::fs::read_to_string(lv.home.path().join("conix.yaml")).unwrap();
     assert!(
         yaml.contains("inherit") && yaml.contains("timeout"),
         "{yaml}"
@@ -89,7 +89,7 @@ async fn a_session_shows_the_config_and_sets_a_codix_yaml_value() {
     };
     let check = checks
         .into_iter()
-        .find(|x| x.name == "codix.jobs_network")
+        .find(|x| x.name == "conix.jobs_network")
         .unwrap();
     assert_eq!(
         check.status,

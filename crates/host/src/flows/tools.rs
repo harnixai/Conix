@@ -1,5 +1,5 @@
 //! `flow_*` 宿主工具（architecture §8.5）：流程库的编写与运行工具（`harnix_flow::author`），
-//! 声明与执行都是库的。Codix 在外面加三样：目标可以写 `#n`（换成名字再交给库）、按发起调用的会话
+//! 声明与执行都是库的。Conix 在外面加三样：目标可以写 `#n`（换成名字再交给库）、按发起调用的会话
 //! 限作用域、流程还有没结束的运行时不许改不许删。运行里的会话自己的三个工具（`flow_state`、
 //! `flow_submit`、`flow_propose`）是派工器的，原样转给它。
 
@@ -52,7 +52,7 @@ fn str_of(input: &Value, k: &str) -> Option<String> {
     input.get(k).and_then(Value::as_str).map(str::to_string)
 }
 
-/// 这个会话能不能用这个工具。运行工具没写 `run` 的，库按会话自己的运行补（[`CodixAuthorHost::current_run`]）。
+/// 这个会话能不能用这个工具。运行工具没写 `run` 的，库按会话自己的运行补（[`ConixAuthorHost::current_run`]）。
 fn allowed(scope: &Scope, name: &str, read_only: bool, input: &Value) -> Result<(), String> {
     if read_only {
         return Ok(());
@@ -147,13 +147,13 @@ async fn unlocked(f: &Flows, flow: &str) -> Result<(), String> {
 }
 
 /// 库要宿主答的：会话在哪个项目里、它的"当前流程"与"当前运行"、改了什么要告诉界面。
-/// Codix 没有选中即当前这回事：会话刚建的流程算它的当前流程，运行里的会话的当前运行是它自己的。
-pub(crate) struct CodixAuthorHost {
+/// Conix 没有选中即当前这回事：会话刚建的流程算它的当前流程，运行里的会话的当前运行是它自己的。
+pub(crate) struct ConixAuthorHost {
     pub(crate) flows: Weak<Flows>,
     created: Mutex<HashMap<SessionId, String>>,
 }
 
-impl CodixAuthorHost {
+impl ConixAuthorHost {
     pub(crate) fn new(flows: Weak<Flows>) -> Self {
         Self {
             flows,
@@ -171,7 +171,7 @@ impl CodixAuthorHost {
 }
 
 #[async_trait]
-impl AuthorHost for CodixAuthorHost {
+impl AuthorHost for ConixAuthorHost {
     async fn current(&self, session: &SessionId) -> Option<String> {
         if let Some(run) = self.run_of(session) {
             let f = self.flows.upgrade()?;

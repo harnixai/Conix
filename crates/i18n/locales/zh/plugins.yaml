@@ -7,7 +7,7 @@ plugins:
   armed: "再按一次 d 卸载 {name} · 其他键放弃"
   disclosure_title: "插件 {name} 的披露"
   agix: "Agix 的披露"
-  codix: "Codix 的披露"
+  conix: "Conix 的披露"
   capabilities: "能力"
   mcp: "MCP 服务器"
   model_visible: "会到达模型的文字"

@@ -19,7 +19,7 @@ mod supervise;
 
 /// 跑在终端里的 agent 工作台
 #[derive(Parser)]
-#[command(name = "codix", version)]
+#[command(name = "conix", version)]
 struct Cli {
     /// 用 mock 后端，不接真实实例：不给值打开演示 `demo`，也可以给场景名或场景文件。
     #[arg(long, global = true, num_args = 0..=1, default_missing_value = "demo")]
@@ -98,7 +98,7 @@ fn now_ms() -> u64 {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // 先读配置、定语言：`codix list` 的输出、启动错误、`--help` 都要按语言显示。
+    // 先读配置、定语言：`conix list` 的输出、启动错误、`--help` 都要按语言显示。
     let (cfg, mut problems) = config::load();
     problems.extend(i18n::init(
         &config::language(&cfg),
@@ -202,7 +202,7 @@ async fn main() -> Result<()> {
                 .cloned()
                 .collect();
             let cwd = std::env::current_dir()?.canonicalize()?;
-            // 在项目目录里运行 codix 就接入这个项目的实例（需求 §1 项目级）；停着的就拉起来，
+            // 在项目目录里运行 conix 就接入这个项目的实例（需求 §1 项目级）；停着的就拉起来，
             // 不另建一个——会话归属、作业都记在原来那个实例的目录里。
             match (mock_mode, client::for_project(&all, &cwd)) {
                 (false, Some(i)) if i.state == port::InstanceState::Running => {

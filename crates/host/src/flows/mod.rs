@@ -29,20 +29,20 @@ use serde_json::Value;
 use tokio::sync::broadcast;
 
 use crate::hub::{FlowPort, Hub, tools::Scope};
-use session_host::CodixSessionHost;
+use session_host::ConixSessionHost;
 
-/// 运行的 worktree 分支：`codix/flow/<运行>`，与引擎自己的 worktree 分开。
-const BRANCH_PREFIX: &str = "codix/flow";
+/// 运行的 worktree 分支：`conix/flow/<运行>`，与引擎自己的 worktree 分开。
+const BRANCH_PREFIX: &str = "conix/flow";
 
-/// 项目层目录（`.codix`）里引擎的沙箱让任务会话写的子目录：Agix 0.3.20 起只有 `state/` 下这两个
+/// 项目层目录（`.conix`）里引擎的沙箱让任务会话写的子目录：Agix 0.3.20 起只有 `state/` 下这两个
 /// （Agix#93），其余归应用。
 const AGENT_DIRS: [&str; 2] = ["state/scratchpad", "state/memory"];
 
-/// 运行的过程目录（相对 `.codix`）：放进 Codix 的 `state/codix/`，跟着 `state/` 不进 git，也跟着认领
-/// 一起进 quarantine；不用库缺省的 `runs/`——那要往随仓库提交的 `.codix/.gitignore` 里加一行（Harnix#69）。
-const RUNS_DIR: &str = "state/codix/runs";
+/// 运行的过程目录（相对 `.conix`）：放进 Conix 的 `state/conix/`，跟着 `state/` 不进 git，也跟着认领
+/// 一起进 quarantine；不用库缺省的 `runs/`——那要往随仓库提交的 `.conix/.gitignore` 里加一行（Harnix#69）。
+const RUNS_DIR: &str = "state/conix/runs";
 
-/// 定义里写的场景就是 Agix 的场景名；Codix 只开 `code`。
+/// 定义里写的场景就是 Agix 的场景名；Conix 只开 `code`。
 const SCENE: &str = "code";
 
 /// 引擎放 worktree 的目录名（Agix 的 `worktree_dir` 缺省值）：在仓库根，Agix 认得它下面第一层是
@@ -50,15 +50,15 @@ const SCENE: &str = "code";
 pub const WORKTREES_DIR: &str = ".wkts";
 
 pub struct FlowsConfig {
-    /// 全局流程包（可写层）：`~/.codix/flows/`。
+    /// 全局流程包（可写层）：`~/.conix/flows/`。
     pub flows_dir: PathBuf,
-    /// 运行记录：`.codix/state/codix/flow-runs/`。
+    /// 运行记录：`.conix/state/conix/flow-runs/`。
     pub runs_dir: PathBuf,
     /// 运行的 worktree：[`worktrees_root`]。
     pub worktrees_dir: PathBuf,
     /// 没有项目的运行在这里各有一个目录。
     pub workspaces_dir: PathBuf,
-    /// 作业起的运行在会话上多出的限制：`state/codix/run-policies.json`（[`policy`]）。
+    /// 作业起的运行在会话上多出的限制：`state/conix/run-policies.json`（[`policy`]）。
     pub policies_file: Option<PathBuf>,
 }
 
@@ -101,7 +101,7 @@ pub struct Flows {
     project: String,
     /// 流程库的编写与运行工具；派工器起来之后才有。
     author: std::sync::OnceLock<AuthorTools>,
-    author_host: Arc<tools::CodixAuthorHost>,
+    author_host: Arc<tools::ConixAuthorHost>,
     /// 推给过界面的流程名：流程包变了时据此推 `FlowRemoved`。
     published: std::sync::Mutex<BTreeSet<String>>,
     /// 已结束的运行的摘要：第一次要时把运行记录扫一遍，之后跟着派工器的变化更新，
@@ -116,7 +116,7 @@ pub struct Flows {
     shadowed: std::sync::Mutex<Vec<harnix_flow::Shadowing>>,
 }
 
-/// 全局流程包：可写层 `~/.codix/flows/` > 插件（按名字）> 库自带的示例包。插件带来的门禁与步骤名进目录，
+/// 全局流程包：可写层 `~/.conix/flows/` > 插件（按名字）> 库自带的示例包。插件带来的门禁与步骤名进目录，
 /// 流程只能用目录里有的名字。
 fn build_packs(
     flows_dir: &Path,
@@ -138,7 +138,7 @@ fn build_packs(
 
 /// 派工器看到的会话宿主，单独拿出来给一致性套件查（`live_flows.rs`）。
 pub fn session_host(hub: &Hub) -> Arc<dyn harnix_flow::runner::SessionHost> {
-    CodixSessionHost::new(hub.downgrade(), Arc::new(policy::RunPolicies::in_memory()))
+    ConixSessionHost::new(hub.downgrade(), Arc::new(policy::RunPolicies::in_memory()))
 }
 
 /// 装好流程、接到 Hub 上、起派工器（它把上次没做完的活接着做）。
@@ -148,7 +148,7 @@ pub async fn start(hub: &Hub, cfg: FlowsConfig) -> anyhow::Result<Arc<Flows>> {
         submit_profiles: BTreeSet::from([SCENE.to_string()]),
         main_profile: Some(SCENE.into()),
         project_profiles: BTreeSet::from([SCENE.to_string()]),
-        hook_headers: "X-Codix".into(),
+        hook_headers: "X-Conix".into(),
         ..RunnerConfig::default()
     };
     let mounted = hub.mounted_plugins().await;
@@ -166,7 +166,7 @@ pub async fn start(hub: &Hub, cfg: FlowsConfig) -> anyhow::Result<Arc<Flows>> {
         ..rcfg
     };
     prepare_worktrees_dir(&cfg.worktrees_dir);
-    let layout = ProjectLayout::new(".codix", cfg.worktrees_dir, BRANCH_PREFIX)
+    let layout = ProjectLayout::new(".conix", cfg.worktrees_dir, BRANCH_PREFIX)
         .with_agent_dirs(AGENT_DIRS)
         .with_runs_dir(RUNS_DIR);
     let packs = Arc::new(CatalogPacks::over(&rcfg, vec![], swap.clone()));
@@ -190,7 +190,7 @@ pub async fn start(hub: &Hub, cfg: FlowsConfig) -> anyhow::Result<Arc<Flows>> {
         Some(p) => policy::RunPolicies::open(p),
         None => policy::RunPolicies::in_memory(),
     });
-    let host = CodixSessionHost::new(hub.downgrade(), policies);
+    let host = ConixSessionHost::new(hub.downgrade(), policies);
     let _ = host.engine.set(engine.clone());
     let _ = calls.engine.set(engine.clone());
     let sandbox = Arc::new(Sandbox::new(
@@ -210,7 +210,7 @@ pub async fn start(hub: &Hub, cfg: FlowsConfig) -> anyhow::Result<Arc<Flows>> {
         author: std::sync::OnceLock::new(),
         published: Default::default(),
         ended: Default::default(),
-        author_host: Arc::new(tools::CodixAuthorHost::new(me.clone())),
+        author_host: Arc::new(tools::ConixAuthorHost::new(me.clone())),
         swap,
         flows_dir: cfg.flows_dir.clone(),
         plugin_map,
@@ -243,7 +243,7 @@ impl Flows {
     }
 
     fn by() -> Actor {
-        Actor::device("codix")
+        Actor::device("conix")
     }
 
     pub(crate) async fn summaries(&self) -> Vec<port::FlowSummary> {
@@ -391,11 +391,11 @@ impl Flows {
         let r = match &op {
             RunOp::Pause => e.pause(run, by).await,
             RunOp::Resume => e.resume(run, by).await,
-            RunOp::Cancel => e.cancel(run, "cancelled from Codix", by).await,
+            RunOp::Cancel => e.cancel(run, "cancelled from Conix", by).await,
             RunOp::Confirm { station } => e.confirm(run, &station.0, true, None, by).await,
             RunOp::Release { station } => e.release(run, &station.0, by).await,
             RunOp::Force { station, reason } => e.force(run, &station.0, reason, by).await,
-            RunOp::Rework { to } => e.rework(run, &to.0, None, "rework from Codix", by).await,
+            RunOp::Rework { to } => e.rework(run, &to.0, None, "rework from Conix", by).await,
             RunOp::Retry { station } => {
                 let rec = e.record(run).await.map_err(flow_err)?;
                 let task = rec

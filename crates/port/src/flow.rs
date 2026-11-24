@@ -19,14 +19,14 @@ pub struct FlowSummary {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FlowOrigin {
-    /// 随 Codix 发布的（全局）。
+    /// 随 Conix 发布的（全局）。
     Builtin,
-    /// 用户的全局流程（`~/.codix/flows/`）。
+    /// 用户的全局流程（`~/.conix/flows/`）。
     Global,
     /// 这个项目的流程。
     #[serde(alias = "user")]
     Project,
-    /// 全局可写层（`~/.codix/flows/`）里存了一份与内置或插件同名的：删掉就回到那一份（harnix-flow 的
+    /// 全局可写层（`~/.conix/flows/`）里存了一份与内置或插件同名的：删掉就回到那一份（harnix-flow 的
     /// `Origin::Override`）。项目自己的同名流程报 `Project`，不是这个。
     Override,
     /// 插件带来的（只读，全局）。

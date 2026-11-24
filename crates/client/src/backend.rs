@@ -168,7 +168,7 @@ impl Inner {
     }
 
     /// 发现文件里的 pid 已经不在：实例崩了或被杀了，没必要再等。发现文件不在不算——
-    /// 正常退出会先推 `InstanceStopped`，走不到这里；`codix start` 重写之前也可能短暂没有。
+    /// 正常退出会先推 `InstanceStopped`，走不到这里；`conix start` 重写之前也可能短暂没有。
     fn instance_gone(&self) -> bool {
         self.discovery
             .as_deref()

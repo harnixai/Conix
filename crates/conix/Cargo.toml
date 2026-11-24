@@ -1,6 +1,6 @@
 [package]
-name = "codix"
-description = "codix 二进制：TUI（codix …）与实例进程（codix host）的入口"
+name = "conix"
+description = "conix 二进制：TUI（conix …）与实例进程（conix host）的入口"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -11,7 +11,7 @@ publish.workspace = true
 workspace = true
 
 [[bin]]
-name = "codix"
+name = "conix"
 path = "src/main.rs"
 
 [dependencies]

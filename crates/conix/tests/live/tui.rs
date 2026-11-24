@@ -25,7 +25,7 @@ pub struct Tui {
 }
 
 impl Tui {
-    /// 像 `codix new lv` 那样：经界面新建实例 `lv`（项目是这个用例的示例项目）并接入。
+    /// 像 `conix new lv` 那样：经界面新建实例 `lv`（项目是这个用例的示例项目）并接入。
     pub async fn create(lv: &Live) -> Tui {
         Tui::start(
             lv,
@@ -37,7 +37,7 @@ impl Tui {
         .await
     }
 
-    /// 像 `codix attach lv` 那样接入已有的实例。
+    /// 像 `conix attach lv` 那样接入已有的实例。
     pub async fn attach(lv: &Live) -> Tui {
         Tui::start(
             lv,

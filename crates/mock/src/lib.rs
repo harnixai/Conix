@@ -1,4 +1,4 @@
-//! Codix 的 mock 后端（docs/design/testing.md §3）：种子数据给出初始状态，场景脚本按时间
+//! Conix 的 mock 后端（docs/design/testing.md §3）：种子数据给出初始状态，场景脚本按时间
 //! 推事件、按规则回应命令。不依赖 Agix、Harnix 或网络；时钟走 tokio，测试里用暂停时钟即可确定。
 
 mod backend;

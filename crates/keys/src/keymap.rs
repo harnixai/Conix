@@ -113,7 +113,7 @@ pub struct Keymap {
     problems: Vec<String>,
 }
 
-/// `~/.codix/keybindings.json` 的一条：把某个上下文里的一个键（或和弦，空格隔开）绑到一个动作；
+/// `~/.conix/keybindings.json` 的一条：把某个上下文里的一个键（或和弦，空格隔开）绑到一个动作；
 /// `action` 为 `null` 是解绑。
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct Override {

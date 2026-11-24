@@ -1,6 +1,6 @@
 [package]
 name = "model"
-description = "Codix 的 view-model：State、update、view"
+description = "Conix 的 view-model：State、update、view"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

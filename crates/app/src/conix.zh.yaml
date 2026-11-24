@@ -1,9 +1,9 @@
-# Codix 的配置。删掉这个文件，下次启动会按缺省重新生成。
-# 模型、provider、权限这些沿用 Agix 的 settings.json（同一目录），这里只放 Codix 自己的。
+# Conix 的配置。删掉这个文件，下次启动会按缺省重新生成。
+# 模型、provider、权限这些沿用 Agix 的 settings.json（同一目录），这里只放 Conix 自己的。
 
 ui:
-  # 界面语言：zh、en，或 auto（照 LANG 环境变量）。也可以用 CODIX_LANG 临时指定。
-  # 自己的语言资源放在 ~/.codix/locales/<语言>/*.yaml，格式照 zh 的写（见 crates/i18n/locales）。
+  # 界面语言：zh、en，或 auto（照 LANG 环境变量）。也可以用 CONIX_LANG 临时指定。
+  # 自己的语言资源放在 ~/.conix/locales/<语言>/*.yaml，格式照 zh 的写（见 crates/i18n/locales）。
   language: zh
   # 启动时请求终端调整到这个尺寸（列x行）；终端不响应就按实际尺寸。写 off 不请求。
   initial_size: 160x45
@@ -52,13 +52,13 @@ jobs:
 #   min_level: warn       # info | warn | error
 #   sinks:
 #     - name: desktop
-#       command: ["terminal-notifier", "-title", "Codix {instance}", "-message", "{title}"]
+#       command: ["terminal-notifier", "-title", "Conix {instance}", "-message", "{title}"]
 #     - name: phone
-#       command: ["sh", "-c", "curl -s -d @- https://ntfy.sh/$CODIX_NTFY_TOPIC"]
+#       command: ["sh", "-c", "curl -s -d @- https://ntfy.sh/$CONIX_NTFY_TOPIC"]
 #       stdin: json       # 整条通知以 JSON 写进 stdin
 #       min_level: error
 
 # 引擎自带 anthropic 的模型（相当于 agixd --model）。只在 settings.json 没定义 providers 时用；
-# CODIX_MODEL 环境变量优先。不写就用 Agix 的缺省。
+# CONIX_MODEL 环境变量优先。不写就用 Agix 的缺省。
 # engine:
 #   model: claude-sonnet-4-6

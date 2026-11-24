@@ -1,4 +1,4 @@
-//! 宿主库 `codix.*` 的处理者（plugins.md §5.1）：插件命令与插件函数在引擎的 QuickJS 里调它，
+//! 宿主库 `conix.*` 的处理者（plugins.md §5.1）：插件命令与插件函数在引擎的 QuickJS 里调它，
 //! 执行走 Hub 和端口命令同一套流程代码，界面照常收到事件。
 //!
 //! 谁能调按调用上下文定，不按包名（包名是包自报的）：
@@ -159,7 +159,7 @@ pub async fn handle(hub: Hub, call: HostLibCall) -> Result<Value, HostLibError> 
         "plugin.call" => plugin_call(&hub, &call).await,
         other => Err(HostLibError::new(
             "unknown",
-            format!("codix.{other} is not a function"),
+            format!("conix.{other} is not a function"),
         )),
     }
 }

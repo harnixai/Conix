@@ -1,22 +1,22 @@
-//! LIVE：命令行子命令对着真实实例（需求 I-03、I-04、L-09、L-11）——`codix list` 的纯文本、`codix stop`、
+//! LIVE：命令行子命令对着真实实例（需求 I-03、I-04、L-09、L-11）——`conix list` 的纯文本、`conix stop`、
 //! `list --all`；首次运行写出带注释的缺省配置，`list` 的行按语言显示。不调模型。
 
 mod live;
 
 use live::Live;
 
-/// 跑一次 `codix <args>`，返回 stdout。`CODIX_LANG` 指定语言，其余走用例自己的 `CODIX_HOME`。
+/// 跑一次 `conix <args>`，返回 stdout。`CONIX_LANG` 指定语言，其余走用例自己的 `CONIX_HOME`。
 fn cli(home: &std::path::Path, lang: &str, args: &[&str]) -> String {
-    let out = std::process::Command::new(env!("CARGO_BIN_EXE_codix"))
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_conix"))
         .args(args)
-        .env("CODIX_HOME", home)
-        .env("CODIX_LANG", lang)
+        .env("CONIX_HOME", home)
+        .env("CONIX_LANG", lang)
         .env_remove("DYLD_FALLBACK_LIBRARY_PATH")
         .output()
         .unwrap();
     assert!(
         out.status.success(),
-        "codix {args:?}：{}",
+        "conix {args:?}：{}",
         String::from_utf8_lossy(&out.stderr)
     );
     String::from_utf8_lossy(&out.stdout).into_owned()
@@ -59,7 +59,7 @@ async fn list_and_stop_work_from_the_command_line() {
     }
     assert!(!shown.contains("attached:"), "{shown}");
 
-    // `codix stop`：实例进程没了，`list` 不再列，`list --all` 还列着（状态是停止）。
+    // `conix stop`：实例进程没了，`list` 不再列，`list --all` 还列着（状态是停止）。
     let said = cli(home, "en", &["stop", live::NAME]);
     assert!(
         said.contains("Stopped") && said.contains(live::NAME),
@@ -86,7 +86,7 @@ fn the_first_run_writes_a_commented_default_config_in_the_chosen_language() {
     for lang in ["en", "zh"] {
         let home = tempfile::tempdir().unwrap();
         cli(home.path(), lang, &["list"]);
-        let yaml = std::fs::read_to_string(home.path().join("codix.yaml"))
+        let yaml = std::fs::read_to_string(home.path().join("conix.yaml"))
             .unwrap_or_else(|e| panic!("{lang}：{e}"));
         assert!(yaml.contains('#'), "带注释：{yaml}");
         assert!(yaml.contains("ui:") && yaml.contains("instance:"), "{yaml}");

@@ -1,6 +1,6 @@
 [package]
 name = "i18n"
-description = "Codix 界面文字的多语言资源：locales/<语言>/*.yaml，t! 取文字"
+description = "Conix 界面文字的多语言资源：locales/<语言>/*.yaml，t! 取文字"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

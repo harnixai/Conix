@@ -1,4 +1,4 @@
-//! 通知出口（architecture §8.10）：用户在全局 `codix.yaml` 里配的命令。Codix 不内建网络客户端：
+//! 通知出口（architecture §8.10）：用户在全局 `conix.yaml` 里配的命令。Conix 不内建网络客户端：
 //! 桌面、ntfy、webhook、邮件都是一条命令，凭据留在用户自己的环境里。只认全局配置——项目里的
 //! 文件来自仓库，不能让一个仓库在别人的机器上执行命令、把数据往外发。
 
@@ -119,7 +119,7 @@ impl Notifier {
             Level::Error => "error",
         };
         let attach = format!(
-            "ssh {} -t codix attach {}",
+            "ssh {} -t conix attach {}",
             self.origin.host, self.origin.instance
         );
         let vars = [
@@ -298,7 +298,7 @@ mod tests {
         );
         assert_eq!(
             std::fs::read_to_string(&args).unwrap(),
-            "job \"x\" failed|ssh box -t codix attach app"
+            "job \"x\" failed|ssh box -t conix attach app"
         );
         let v: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&body).unwrap()).unwrap();

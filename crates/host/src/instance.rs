@@ -95,7 +95,7 @@ impl Claim {
         write_json_atomic(&self.layout.discovery(&self.name), f)
     }
 
-    /// 正常退出的收尾。发现文件最后删：`codix stop` 以它消失作为"停好了"。
+    /// 正常退出的收尾。发现文件最后删：`conix stop` 以它消失作为"停好了"。
     pub fn release(self) -> io::Result<()> {
         let _ = fs::remove_file(self.layout.socket(&self.name));
         let meta_path = self.layout.meta(&self.name);

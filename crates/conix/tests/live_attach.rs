@@ -130,7 +130,7 @@ async fn an_idle_client_is_detached_and_told_so() {
 #[ignore = "live"]
 async fn a_silent_client_is_dropped_after_the_heartbeat_timeout_and_reconnects() {
     let lv = Live::with(Opts {
-        env: vec![("CODIX_TEST_HEARTBEAT_TIMEOUT_MS".into(), "2000".into())],
+        env: vec![("CONIX_TEST_HEARTBEAT_TIMEOUT_MS".into(), "2000".into())],
         ..Default::default()
     });
     let mut a = lv.start().await;
@@ -183,7 +183,7 @@ async fn the_stop_instance_command_shuts_the_instance_down() {
 #[ignore = "live"]
 async fn what_happened_while_detached_is_pushed_once_on_the_next_attach() {
     let lv = Live::with(Opts {
-        codix_yaml: Some("jobs:\n  defaults:\n    timeout: 2s\n".into()),
+        conix_yaml: Some("jobs:\n  defaults:\n    timeout: 2s\n".into()),
         ..Default::default()
     });
     let c = lv.start_trusted().await;

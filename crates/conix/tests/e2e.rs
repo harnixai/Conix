@@ -1,4 +1,4 @@
-//! 端到端：真实的 `codix host` 进程（嵌入的 Agix）+ `SocketInstances` + 无终端的 `Core`。
+//! 端到端：真实的 `conix host` 进程（嵌入的 Agix）+ `SocketInstances` + 无终端的 `Core`。
 //! 新建实例、接入、在输入框里说一句话，这一轮要有结局显示在转录里；再接入一次被占用、
 //! 强制接入把前一个踢掉，最后停掉实例。没有凭据时那一轮以 no_credentials 结束，所以离线可跑。
 
@@ -54,14 +54,14 @@ async fn until(core: &mut Core, want: impl Fn(&str) -> bool, what: &str) -> Stri
     }
 }
 
-/// 用例中途失败也要停掉实例：否则留下一个常驻的 `codix host` 进程。
+/// 用例中途失败也要停掉实例：否则留下一个常驻的 `conix host` 进程。
 struct StopOnDrop(std::path::PathBuf);
 
 impl Drop for StopOnDrop {
     fn drop(&mut self) {
-        let _ = std::process::Command::new(env!("CARGO_BIN_EXE_codix"))
+        let _ = std::process::Command::new(env!("CARGO_BIN_EXE_conix"))
             .args(["stop", "e2e"])
-            .env("CODIX_HOME", &self.0)
+            .env("CONIX_HOME", &self.0)
             .output();
     }
 }
@@ -90,13 +90,13 @@ async fn create_attach_talk_kick_and_stop_a_real_instance() {
     let project = tempfile::tempdir().unwrap();
     let project_path = project.path().canonicalize().unwrap();
     // 刚链接出的二进制第一次执行要被 macOS 扫描，先跑一次，免得算进实例的启动时间。
-    std::process::Command::new(env!("CARGO_BIN_EXE_codix"))
+    std::process::Command::new(env!("CARGO_BIN_EXE_conix"))
         .arg("--version")
         .output()
         .unwrap();
     let instances = Arc::new(SocketInstances::new(
         Layout::new(home.path()),
-        env!("CARGO_BIN_EXE_codix"),
+        env!("CARGO_BIN_EXE_conix"),
     ));
 
     let mut a = core(
@@ -107,7 +107,7 @@ async fn create_attach_talk_kick_and_stop_a_real_instance() {
         }),
     )
     .await;
-    until(&mut a, |t| t.contains("[CODIX] e2e"), "接入新实例").await;
+    until(&mut a, |t| t.contains("[CONIX] e2e"), "接入新实例").await;
 
     type_text(&mut a, "Reply with the single word: pong");
     keys(&mut a, "Enter");
@@ -138,7 +138,7 @@ async fn create_attach_talk_kick_and_stop_a_real_instance() {
         }),
     )
     .await;
-    until(&mut b, |t| t.contains("[CODIX] e2e"), "强制接入").await;
+    until(&mut b, |t| t.contains("[CONIX] e2e"), "强制接入").await;
     until(
         &mut a,
         |t| t.contains("踢") || t.contains("强制接入"),

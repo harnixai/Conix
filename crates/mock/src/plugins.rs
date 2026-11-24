@@ -39,7 +39,7 @@ fn disclosure_of(name: &str) -> PluginDisclosure {
             "adds command `xflow` that may write xforge/** through the file tools; it runs in the session that invokes it"
                 .into(),
             format!("exposes function `{name}.check` to the host; writes no files"),
-            "uses host library `codix` (Codix 的流程与作业)".into(),
+            "uses host library `conix` (Conix 的流程与作业)".into(),
             "run its own JavaScript at the `tool.around` extension point".into(),
         ],
         mcp_servers: vec![],
@@ -51,13 +51,13 @@ fn disclosure_of(name: &str) -> PluginDisclosure {
             ),
             v("command xflow", "按 xforge 流程推进一项变更"),
         ],
-        codix: vec![
+        conix: vec![
             "流程 xforge-quick — 快速变更".into(),
             "流程 xforge-solid — 常规变更".into(),
             "门禁 xforge-structure → xforge.check".into(),
             "步骤 xforge-open → xforge.open".into(),
         ],
-        codix_model_visible: vec![v(
+        conix_model_visible: vec![v(
             "xforge-solid / 站 design / skill",
             "先列出受影响的模块与接口，再写设计；设计必须说明为什么不选更简单的做法……",
         )],

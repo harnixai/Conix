@@ -2,7 +2,7 @@
 //! 拼起来的 `模块.名字`；代码里用 `t!("panel.collapse")`、`t!("flows.progress", done = 3)`
 //! 取当前语言的文字，`{名字}` 换成参数。
 //!
-//! - 内置语言编进二进制（`build.rs` 扫 `locales/` 下的目录）；`$CODIX_HOME/locales/<语言>/`
+//! - 内置语言编进二进制（`build.rs` 扫 `locales/` 下的目录）；`$CONIX_HOME/locales/<语言>/`
 //!   里的文件在启动时叠加上去，所以加一种语言、改个别说法都只要放一个资源文件。
 //! - `zh` 是参照：每个键都必须有；别的语言缺了某个键就退回中文，再缺就显示键名。
 //! - 没调用 `init` 时是中文（测试与快照都按中文写）。
@@ -57,7 +57,7 @@ pub fn builtin(lang: &str) -> Result<HashMap<String, String>, String> {
     Ok(out)
 }
 
-/// 切换语言。`extra` 是用户的资源目录（`$CODIX_HOME/locales`），其中 `<lang>/*.yaml` 叠加在
+/// 切换语言。`extra` 是用户的资源目录（`$CONIX_HOME/locales`），其中 `<lang>/*.yaml` 叠加在
 /// 内置的之上；内置里没有、用户目录里有的语言也可以用。返回加载时遇到的问题（不致命）。
 pub fn init(lang: &str, extra: Option<&Path>) -> Vec<String> {
     let mut problems = vec![];

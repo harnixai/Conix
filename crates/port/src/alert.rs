@@ -54,7 +54,7 @@ pub struct SinkResult {
     pub detail: String,
 }
 
-/// `/doctor` 的一项检查（Agix 的 `daemon.doctor` 加上 Codix 自己的几项）。
+/// `/doctor` 的一项检查（Agix 的 `daemon.doctor` 加上 Conix 自己的几项）。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HealthCheck {
     pub name: String,

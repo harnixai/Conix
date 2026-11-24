@@ -1,4 +1,4 @@
-//! 在会话里配置自己（architecture §8.11）：换 provider 分"加、测、切、退"四步，改 `codix.yaml` 先校验再写。
+//! 在会话里配置自己（architecture §8.11）：换 provider 分"加、测、切、退"四步，改 `conix.yaml` 先校验再写。
 //!
 //! 为什么拆成四步而不是一次"改配置"：改了就生效的话，新的 provider 不通，会话当场没有模型可用，也就没法
 //! 再把它改回来。所以加的时候不动路由（`model.order`），在旁边测通了才切，切完立刻再测一次，不通自动退回。
@@ -14,9 +14,9 @@ const PROBE_TIMEOUT: Duration = Duration::from_secs(90);
 const PROBE_BUDGET: u64 = 20_000;
 const PROBE_PROMPT: &str = "Reply with exactly the word OK.";
 
-/// 实例对 `codix.yaml` 的读写（由 `codix` crate 给：解析与启动时同一个，`app::config`）。
+/// 实例对 `conix.yaml` 的读写（由 `conix` crate 给：解析与启动时同一个，`app::config`）。
 #[async_trait]
-pub trait CodixConfigStore: Send + Sync {
+pub trait ConixConfigStore: Send + Sync {
     /// 文件现在的文字。
     fn read(&self) -> Result<String, String>;
     /// 把点分路径上的值换成 `value`（YAML 的值）后，按启动时的解析校验；不写。回新的全文。
@@ -55,8 +55,8 @@ impl Probe {
 }
 
 impl Hub {
-    pub fn set_codix_config(&self, store: Arc<dyn CodixConfigStore>) {
-        let _ = self.0.codix_config.set(store);
+    pub fn set_conix_config(&self, store: Arc<dyn ConixConfigStore>) {
+        let _ = self.0.conix_config.set(store);
     }
 
     pub fn set_config_home(&self, home: PathBuf) {
@@ -357,9 +357,9 @@ impl Hub {
                             .unwrap_or_else(|| " (built in)".into()),
                     ));
                 }
-                if let Some(s) = self.0.codix_config.get() {
+                if let Some(s) = self.0.conix_config.get() {
                     lines.push(String::new());
-                    lines.push("codix.yaml:".into());
+                    lines.push("conix.yaml:".into());
                     lines.push(s.read()?);
                 }
                 Ok(lines.join("\n"))
@@ -485,13 +485,13 @@ impl Hub {
                     after.text()
                 ))
             }
-            tools::CODIX_CONFIG_SET => {
+            tools::CONIX_CONFIG_SET => {
                 let store = self
                     .0
-                    .codix_config
+                    .conix_config
                     .get()
                     .cloned()
-                    .ok_or("codix.yaml is not managed by this instance")?;
+                    .ok_or("conix.yaml is not managed by this instance")?;
                 let path = input["path"]
                     .as_str()
                     .filter(|s| !s.is_empty())
@@ -503,7 +503,7 @@ impl Hub {
                 }
                 let (backup, restart) = store.apply(self, &text).await?;
                 Ok(format!(
-                    "codix.yaml written (backup {}).{}",
+                    "conix.yaml written (backup {}).{}",
                     backup.display(),
                     if restart.is_empty() {
                         " In effect now.".to_string()

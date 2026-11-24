@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use port::ClientInfo;
 use serde::{Deserialize, Serialize};
 
-/// `~/.codix`（或 `CODIX_HOME`）下的路径。
+/// `~/.conix`（或 `CONIX_HOME`）下的路径。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Layout {
     home: PathBuf,
@@ -67,7 +67,7 @@ pub struct InstanceFile {
     pub supervisor_pid: Option<u32>,
 }
 
-/// 实例自己的设定（`instance.json` 删掉之后也留着），`codix start` 照它重新拉起。
+/// 实例自己的设定（`instance.json` 删掉之后也留着），`conix start` 照它重新拉起。
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct InstanceMeta {
     pub name: String,
@@ -106,9 +106,9 @@ impl Layout {
 }
 
 /// 项目层目录，与引擎的同一个（`EmbedConfig.project_dir`）。
-pub const PROJECT_DIR: &str = ".codix";
+pub const PROJECT_DIR: &str = ".conix";
 
-/// 一个项目里 Codix 的东西：定义在项目层目录下随项目提交，本机状态在 `state/codix/`——Agix 给嵌入方的
+/// 一个项目里 Conix 的东西：定义在项目层目录下随项目提交，本机状态在 `state/conix/`——Agix 给嵌入方的
 /// `state/<产品名小写>/`（`Layout::host_state_dir`），引擎不写它、按配置目录保护它。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProjectState {
@@ -130,9 +130,9 @@ impl ProjectState {
         self.project.join(PROJECT_DIR)
     }
 
-    /// `state/codix/`。
+    /// `state/conix/`。
     pub fn dir(&self) -> PathBuf {
-        self.data_dir().join("state").join("codix")
+        self.data_dir().join("state").join("conix")
     }
 
     pub fn owner(&self) -> PathBuf {

@@ -358,13 +358,13 @@ pub(crate) fn disclosure_view(
         Tone::Dim,
     ));
     visible(&mut all, &d.model_visible);
-    section(&mut all, i18n::t!("plugins.codix"));
-    bullets(&mut all, &d.codix);
+    section(&mut all, i18n::t!("plugins.conix"));
+    bullets(&mut all, &d.conix);
     all.push(Line::toned(
         format!(" {}", i18n::t!("plugins.model_visible")),
         Tone::Dim,
     ));
-    visible(&mut all, &d.codix_model_visible);
+    visible(&mut all, &d.conix_model_visible);
 
     let height = (all.len() as u16 + 4)
         .min(s.ui.size.rows.saturating_sub(4))

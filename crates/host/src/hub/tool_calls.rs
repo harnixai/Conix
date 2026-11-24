@@ -26,7 +26,7 @@ impl Hub {
             tools::scope_of(st.sessions.get(rpc).map(|s| &s.origin))
         };
         if scope == tools::Scope::None {
-            return Err("this session is not one of this Codix instance's sessions".into());
+            return Err("this session is not one of this Conix instance's sessions".into());
         }
         if let Some(f) = self.flows()
             && let Some(r) = f.tool(rpc, &scope, name, input).await
@@ -35,9 +35,9 @@ impl Hub {
         }
         let port_err = |e: PortError| e.to_string();
         if tools::CONFIG_TOOLS.contains(&name) {
-            // 改的是这台机器上整个 Codix 的配置：作业与流程里的会话不给。
+            // 改的是这台机器上整个 Conix 的配置：作业与流程里的会话不给。
             if scope != tools::Scope::Full {
-                return Err("configuring Codix is only for a person's own sessions".into());
+                return Err("configuring Conix is only for a person's own sessions".into());
             }
             return self.config_tool(name, input).await;
         }

@@ -1,6 +1,6 @@
 [package]
 name = "app"
-description = "Codix 的 TUI：终端、事件循环核心、配置（二进制在 codix crate）"
+description = "Conix 的 TUI：终端、事件循环核心、配置（二进制在 conix crate）"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

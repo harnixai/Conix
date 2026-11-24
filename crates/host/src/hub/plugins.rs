@@ -1,5 +1,5 @@
-//! `/plugin` 的端口命令（docs/design/plugins.md §3）：装、卸、启停交给 Agix（`plugin.*`），Codix 读包里的
-//! `[x-codix]`，把启用着的插件的流程包挂进流程库、门禁与步骤接到插件函数上。
+//! `/plugin` 的端口命令（docs/design/plugins.md §3）：装、卸、启停交给 Agix（`plugin.*`），Conix 读包里的
+//! `[x-conix]`，把启用着的插件的流程包挂进流程库、门禁与步骤接到插件函数上。
 
 use std::path::{Path, PathBuf};
 
@@ -16,7 +16,7 @@ impl Hub {
         Ok(r["plugins"].as_array().cloned().unwrap_or_default())
     }
 
-    /// 启用着、带 `[x-codix]` 的插件。问不到（插件关着、旧引擎）就当没有：流程照常，只是没有插件的。
+    /// 启用着、带 `[x-conix]` 的插件。问不到（插件关着、旧引擎）就当没有：流程照常，只是没有插件的。
     pub(crate) async fn mounted_plugins(&self) -> Vec<Mounted> {
         let list = match self.plugin_list().await {
             Ok(l) => l,
@@ -188,10 +188,10 @@ impl Hub {
     }
 }
 
-/// `plugin.list` 的一项 → 带 `[x-codix]` 的就是 Codix 要挂的（启用与否由调用方看）。
+/// `plugin.list` 的一项 → 带 `[x-conix]` 的就是 Conix 要挂的（启用与否由调用方看）。
 fn mounted_of(p: &Value) -> Option<Mounted> {
     let root = PathBuf::from(p["root"].as_str()?);
-    let section = plugins::codix_section(Path::new(&root))?;
+    let section = plugins::conix_section(Path::new(&root))?;
     Some(Mounted {
         name: p["name"].as_str()?.to_string(),
         root,

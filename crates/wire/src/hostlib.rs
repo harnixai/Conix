@@ -1,4 +1,4 @@
-//! 给插件代码的宿主 JS 库 `codix.*`（docs/design/plugins.md §5.1）的一次调用。
+//! 给插件代码的宿主 JS 库 `conix.*`（docs/design/plugins.md §5.1）的一次调用。
 //!
 //! `engine` 在 `EmbedConfig.js_libs` 里登记函数表（启动时引擎就要），实例的 `Hub` 起来之后才接上处理者；
 //! 两边都依赖 `wire`，所以调用的形状放在这里，engine 不必依赖 host。
@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use serde_json::Value;
 
-/// `codix.*` 的函数（点分路径，命名空间之下）。
+/// `conix.*` 的函数（点分路径，命名空间之下）。
 pub const FUNCTIONS: [&str; 6] = [
     "flow.defs",
     "flow.runs",
@@ -27,7 +27,7 @@ pub struct HostLibCall {
     pub input: Value,
     /// 包自报的名字：谁都能装一个叫 `xforge` 的包，不拿它当授权。
     pub plugin: String,
-    /// 包从哪来：宿主自带的包为 true（Codix 现在没有）。
+    /// 包从哪来：宿主自带的包为 true（Conix 现在没有）。
     pub host_package: bool,
     /// 命令名或函数名。
     pub entry: String,

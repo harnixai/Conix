@@ -1,4 +1,4 @@
-uses = ["codix"]
+uses = ["conix"]
 
 [plugin]
 name = "xforge"
@@ -67,10 +67,10 @@ prompt = "agents/xforge-executor.md"
 point = "tool.around"
 entry = "scripts/guard.js:around"
 
-[x-codix]
+[x-conix]
 flows = "flows"
 
-[x-codix.gates]
+[x-conix.gates]
 xforge-structure    = "xforge.check"
 xforge-spec-delta   = "xforge.check"
 xforge-constitution = "xforge.check"
@@ -79,7 +79,7 @@ xforge-integrated   = "xforge.check"
 xforge-unclaimed    = "xforge.check"
 xforge-unit-tests   = { function = "xforge.check", runs_commands = true }
 
-[x-codix.steps]
+[x-conix.steps]
 xforge-open     = "xforge.open"
 xforge-packages = "xforge.packages"
 xforge-archive  = "xforge.close"

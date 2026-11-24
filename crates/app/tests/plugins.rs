@@ -42,7 +42,7 @@ async fn install_review_enable_then_disable_and_uninstall() {
     let t = h.text();
     for want in [
         "Agix 的披露",
-        "Codix 的披露",
+        "Conix 的披露",
         "xforge.check",
         "流程 xforge-quick",
         "y / Enter 启用",

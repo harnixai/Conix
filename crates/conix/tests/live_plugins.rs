@@ -1,4 +1,4 @@
-//! LIVE：插件（docs/design/plugins.md）经真实的实例进程——可装的包从 `CODIX_PLUGIN_DIRS` 列出、装完停用、
+//! LIVE：插件（docs/design/plugins.md）经真实的实例进程——可装的包从 `CONIX_PLUGIN_DIRS` 列出、装完停用、
 //! 两份披露、启用后流程挂进来、运行里的程序步骤与 host 门禁调插件函数。测试插件是 engine 的 fixture，
 //! 不调模型。
 
@@ -36,7 +36,7 @@ async fn a_plugin_from_the_package_dirs_is_installed_enabled_and_its_flow_runs()
     pack(store.path());
     let lv = Live::with(Opts {
         env: vec![(
-            "CODIX_PLUGIN_DIRS".into(),
+            "CONIX_PLUGIN_DIRS".into(),
             store.path().to_string_lossy().into_owned(),
         )],
         ..Opts::default()
@@ -64,7 +64,7 @@ async fn a_plugin_from_the_package_dirs_is_installed_enabled_and_its_flow_runs()
     };
     assert!(!plugin.enabled, "装完不自动启用");
     assert!(
-        disclosure.codix.iter().any(|l| l.contains("demo-open")),
+        disclosure.conix.iter().any(|l| l.contains("demo-open")),
         "{disclosure:?}"
     );
 
@@ -146,7 +146,7 @@ fn built_plugins() -> PathBuf {
 async fn xforge_quick_goes_from_open_to_archive_with_a_real_model() {
     let lv = Live::with(Opts {
         env: vec![(
-            "CODIX_PLUGIN_DIRS".into(),
+            "CONIX_PLUGIN_DIRS".into(),
             built_plugins().to_string_lossy().into_owned(),
         )],
         ..Opts::default()

@@ -92,7 +92,7 @@ view:
   exit:
     current_instance: "this instance"
     background: "Run in background"
-    background_desc: "Instance {name} keeps running; reattach later with codix attach {name}"
+    background_desc: "Instance {name} keeps running; reattach later with conix attach {name}"
     quit: "Quit"
     quit_desc: "Stop instance {name}; its sessions, flows and jobs will all stop"
     back: "Back"
@@ -112,7 +112,7 @@ view:
     stopped: "Stopped · Enter to start"
     stale: "Stale (process gone) · Enter to restart"
     listing: "Listing local instances …"
-    title: "Codix · Select instance · host {host}"
+    title: "Conix · Select instance · host {host}"
   detached:
     title: "Detached from instance {name}"
     kicked: "Force-attached by {by} ({ago} ago)"

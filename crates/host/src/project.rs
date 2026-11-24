@@ -1,5 +1,5 @@
-//! 项目状态的认领（architecture §8.9）：`state/codix/` 的项目锁、认领凭证，认不出的挪进
-//! `quarantine/`。一个仓库可以把 `.codix/state/` 提交进去，克隆下来里面的作业状态、没结束的运行
+//! 项目状态的认领（architecture §8.9）：`state/conix/` 的项目锁、认领凭证，认不出的挪进
+//! `quarantine/`。一个仓库可以把 `.conix/state/` 提交进去，克隆下来里面的作业状态、没结束的运行
 //! 会被当成自己的接着跑，所以只认这台机器在 `known-projects.json` 里登记过的。
 
 use std::fs::{self, File, OpenOptions};
@@ -92,8 +92,8 @@ fn real_dir(dir: &Path) -> Result<(), ProjectError> {
     }
 }
 
-/// `.codix/.gitignore` 里要有 `state/`。引擎也维护这一行，但要等它第一次往项目里写本机数据；实例一起来
-/// 就建了 `state/codix/`，中间那段 `git status` 会看到它。只补缺的这一行，别的不动；`.gitignore` 是
+/// `.conix/.gitignore` 里要有 `state/`。引擎也维护这一行，但要等它第一次往项目里写本机数据；实例一起来
+/// 就建了 `state/conix/`，中间那段 `git status` 会看到它。只补缺的这一行，别的不动；`.gitignore` 是
 /// 符号链接时不动它，也不动它指向的文件（与引擎的做法一样）。
 fn ensure_ignored(data_dir: &Path) {
     const LINE: &str = "state/";

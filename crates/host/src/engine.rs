@@ -6,20 +6,20 @@ use serde_json::{Value, json};
 
 pub use wire::{Notification, RpcError};
 
-/// Codix 说的 Agix 协议版本：0.4.0 起是 5。版本号不同就是不同的协议（会话选项、设置键都变过），
-/// 不按"大于等于"放过——0.4 对旧写法一律拒，反过来新版本也不会认 Codix 写的旧东西。
+/// Conix 说的 Agix 协议版本：0.4.0 起是 5。版本号不同就是不同的协议（会话选项、设置键都变过），
+/// 不按"大于等于"放过——0.4 对旧写法一律拒，反过来新版本也不会认 Conix 写的旧东西。
 pub const PROTOCOL_VERSION: u64 = 5;
 
-/// Codix 用到、且版本号推不出的能力位（协议：能力位单独查，不靠版本号推）。
+/// Conix 用到、且版本号推不出的能力位（协议：能力位单独查，不靠版本号推）。
 pub const REQUIRED_CAPABILITIES: [&str; 2] = ["session_settings", "config_explain"];
 
-/// `daemon.ping` 的结果是不是 Codix 认得的引擎；不是就给一句能照着做的错。
+/// `daemon.ping` 的结果是不是 Conix 认得的引擎；不是就给一句能照着做的错。
 pub fn check_engine(ping: &Value) -> Result<(), RpcError> {
     let version = ping["version"].as_str().unwrap_or("?");
     let wrong = |why: String| RpcError::Remote {
         code: -32603,
         message: format!(
-            "Agix {version}: {why}; Codix needs Agix 0.4 (protocol {PROTOCOL_VERSION})"
+            "Agix {version}: {why}; Conix needs Agix 0.4 (protocol {PROTOCOL_VERSION})"
         ),
         data: json!({"kind": "engine_mismatch"}),
     };

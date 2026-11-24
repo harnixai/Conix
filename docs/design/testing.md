@@ -1,4 +1,4 @@
-# Codix 测试方案
+# Conix 测试方案
 
 阶段 2 的目标是：只用 mock 后端，把 `interaction.md` 里的每一条交互都验证到。阶段 3 接缝时，这一套测试保持不动，再加上针对真实后端的用例。
 
@@ -44,7 +44,7 @@ assert_eq!(h.backend().calls().last(), Some(&Command::Answer { .. }));
 
 快照只记字符，不记样式。样式（高亮、颜色）需要验证时，在 L1 里断言 `FrameState` 上对应的字段。
 
-快照的尺寸固定为三档：`80×24`、`120×40`、`200×50`。设置环境变量 `CODIX_UPDATE_SNAPSHOTS=1` 时重写快照；重写后的 diff 必须在提交里人工看过。
+快照的尺寸固定为三档：`80×24`、`120×40`、`200×50`。设置环境变量 `CONIX_UPDATE_SNAPSHOTS=1` 时重写快照；重写后的 diff 必须在提交里人工看过。
 
 ## 3. mock 后端
 
@@ -97,10 +97,10 @@ scripts:                        # 可以复用的事件片段
 ### 3.3 交互运行
 
 ```sh
-codix                                # 阶段 2 直接打开演示 demo（一个场景里什么都有）
-codix --mock m11-flow-run            # 用某个测试场景启动真实终端界面
-codix --mock m11-flow-run --speed 4  # 时间线加速 4 倍
-codix --mock default                 # 只加载种子，不跑时间线
+conix                                # 阶段 2 直接打开演示 demo（一个场景里什么都有）
+conix --mock m11-flow-run            # 用某个测试场景启动真实终端界面
+conix --mock m11-flow-run --speed 4  # 时间线加速 4 倍
+conix --mock default                 # 只加载种子，不跑时间线
 ```
 
 只有 mock 模式下，`/events` 才会打开**事件日志浮层**：滚动显示后端推来的每个事件和发出的每条命令，人工验收时用来对照"界面是不是如实反映了后端"。
@@ -153,7 +153,7 @@ codix --mock default                 # 只加载种子，不跑时间线
 1. `interaction.md` 里所有的 P0 交互都能在 mock 下操作出来。
 2. 上面 25 个场景的 L3 用例全部通过；`cargo fmt --check`、`cargo clippy --workspace --all-targets -- -D warnings`、`cargo test --workspace` 全部通过。
 3. `docs/manual-smoke-checklist.md` 已经写好，并在至少四种环境里逐项过完：一个 macOS 终端（尺寸协商、鼠标）、tmux（剪贴板、鼠标）、ssh 到 Linux、Linux 物理控制台或固定尺寸的终端（单栏切换、底栏保底提示）。
-4. 维护者本人用 `codix --mock …` 亲手试过，确认交互没有问题。
+4. 维护者本人用 `conix --mock …` 亲手试过，确认交互没有问题。
 
 四条都满足才进入阶段 3。
 
@@ -174,16 +174,16 @@ mock 那一套不动，真实后端按层另加用例，全部离线、不调模
 
 ## 8. LIVE：真实实例 + 真实模型
 
-§7 的各层都是离线的，各自替掉了相邻的一层。LIVE 把整条路接起来：真实的 `codix host` 进程、嵌在里面
+§7 的各层都是离线的，各自替掉了相邻的一层。LIVE 把整条路接起来：真实的 `conix host` 进程、嵌在里面
 的 Agix、真实的模型，从 TUI 走的那条路接入——`SocketInstances` 拉起与接入，`SocketBackend` 收发
 `port` 的命令与事件。断言大多落在端口上（回复、事件）和实例目录里的文件上；`live_tui.rs` 再往上一层，
 用真的 `app::Core`（键位、model、视图）接真实实例，按键、看界面状态与屏幕。
 
-**只测 Codix 自己做的事。** Agix 的特性（工具怎么跑、权限怎么判、goal 怎么推进、压缩……）由 Agix
-自己的 LIVE 测，这里不重复。这里测的是 Codix 加在它外面的那一层：实例的锁、发现文件与 `meta.json`、
+**只测 Conix 自己做的事。** Agix 的特性（工具怎么跑、权限怎么判、goal 怎么推进、压缩……）由 Agix
+自己的 LIVE 测，这里不重复。这里测的是 Conix 加在它外面的那一层：实例的锁、发现文件与 `meta.json`、
 单一接入与心跳、帧到领域事件的翻译与路由、会话归属与名字（`sessions.json`）、作业的调度与触发记录、
 宿主工具。用例要靠模型做某件事时，话说得短而确定（"只回复 OK"），并且点名引擎真有的工具（Agix 的 Bash
-只在前台跑，后台命令要点名 Monitor），断言只看 Codix 的翻译：任务作为没有会话的任务出现、输出取得到、
+只在前台跑，后台命令要点名 Monitor），断言只看 Conix 的翻译：任务作为没有会话的任务出现、输出取得到、
 停得掉，这一轮怎么收尾是模型的事。
 
 | 文件 | 覆盖 |
@@ -192,33 +192,33 @@ mock 那一套不动，真实后端按层另加用例，全部离线、不调模
 | `live_attach.rs` | `Hello` 与能力位、被占用、强制接入踢人、脱离放开接入、空闲脱离、心跳超时断开后重连、实例被停与 `StopInstance`、脱离期间的事在下一次接入时推一次 `AwaySummary` |
 | `live_sessions.rs` | 只列本项目的会话、受信项目的会话放在项目里（不受信的在全局，都跨重启列得出）、第一句话做名字、改名与关闭跨重启保留、换模型、命令表、Watch 快照的历史与 todo、拒绝逐轮权限模式、建会话带模型与模式、已关闭的会话（列、看、重开、删）、重启后的累计用量 |
 | `live_turns.rs` | 文字与用量、忙时退回、插话送达、排队、中断、权限与模型提问的作答、侧问分叉、goal 的事件与快照、后台任务的输出与停止、子 Agent 的侧链会话与给它发消息 |
-| `live_jobs.rs` | 增删改与启停（定义进 `.codix/jobs.json`、启停进本机的 `jobs-state.json`）、立即运行触发的会话与结局、触发记录落盘、重启后没跑完的那次记为中断、错过的触发只补一次、停下正在跑的那一次记成手动停下、codix.yaml 给的超时到了被打断记成超时、停实例与崩溃留下的那次记成"实例停了"、一次失败的触发经配置的命令出口送出（TestNotify 回每个出口的结果）。作业定义要项目受信才读写，用例用 `start_trusted` |
-| `live_flows.rs` | 流程：内置示例流程；项目没受信时 `flow_create` 存不进去、`/trust` 之后存进项目自己的流程包；用户会话经 `flow_validate` / `flow_create` 写流程；一次运行从头跑到尾、主会话的归属；`workspace: worktree` 的运行在仓库根的 `.wkts/<运行>/`、主仓库看不到它与项目状态；有运行时 `flow_update` 被拒并列出运行，取消后才能改；运行操作经端口落到派工器（搁置的站放行、暂停与恢复、返工、强制放行、确认）；运行里的会话动不了别的流程；流程作业触发一次运行；用户会话用 `job_validate` / `job_save` / `job_run` 在对话里建出流程作业并换主题跑一次；库的一致性套件对着 Codix 的 `SessionHost`（带凭据把测试进程再起一遍，引擎嵌在里面） |
+| `live_jobs.rs` | 增删改与启停（定义进 `.conix/jobs.json`、启停进本机的 `jobs-state.json`）、立即运行触发的会话与结局、触发记录落盘、重启后没跑完的那次记为中断、错过的触发只补一次、停下正在跑的那一次记成手动停下、conix.yaml 给的超时到了被打断记成超时、停实例与崩溃留下的那次记成"实例停了"、一次失败的触发经配置的命令出口送出（TestNotify 回每个出口的结果）。作业定义要项目受信才读写，用例用 `start_trusted` |
+| `live_flows.rs` | 流程：内置示例流程；项目没受信时 `flow_create` 存不进去、`/trust` 之后存进项目自己的流程包；用户会话经 `flow_validate` / `flow_create` 写流程；一次运行从头跑到尾、主会话的归属；`workspace: worktree` 的运行在仓库根的 `.wkts/<运行>/`、主仓库看不到它与项目状态；有运行时 `flow_update` 被拒并列出运行，取消后才能改；运行操作经端口落到派工器（搁置的站放行、暂停与恢复、返工、强制放行、确认）；运行里的会话动不了别的流程；流程作业触发一次运行；用户会话用 `job_validate` / `job_save` / `job_run` 在对话里建出流程作业并换主题跑一次；库的一致性套件对着 Conix 的 `SessionHost`（带凭据把测试进程再起一遍，引擎嵌在里面） |
 | `live_tui.rs` | 界面经真实实例：经界面新建并接入、底栏那几项；^N 轮换标签（流程标签里是实例给的示例流程）、^G 一圈三格、单栏时换栏；^T、^H；`/trust` 的回复；^X 后台运行后实例还在、再接回来。草稿上第一句话建出会话并跑完一轮，^O 看转录，^G 到右上选中的就是它，`/rename` 经实例改名。真实的权限询问：^G 走开、^R 找回、转回左边进提问框、Enter 批准后工具真的跑了 |
 | `live_tools.rs` | 宿主工具：用户会话经 `job_*` 增改停删作业、`session_rename` 改自己的名；查看不问、改东西经权限询问；`#n` 与 ID；作业触发的会话动不了别的作业 |
-| `live_cli.rs` | 命令行子命令对着真实实例：`codix list` 的一行、`--all`、`codix stop`；首次运行写出的缺省配置按 `CODIX_LANG` |
+| `live_cli.rs` | 命令行子命令对着真实实例：`conix list` 的一行、`--all`、`conix stop`；首次运行写出的缺省配置按 `CONIX_LANG` |
 | `live_diagnostics.rs` | 真实实例的 `/doctor`（引擎自检加实例自己的几项）、`@` 补全的文件列表、`/model` 的模型列表 |
 | `live_prompts.rs` | 权限的拒绝与本会话总是允许、提问超时被引擎撤回、改文件的 `file_changes` 与 diff |
 | `live_limits.rs` | 一轮因 `turn.max_model_calls` 以 `MaxTurns` 收尾、因预算以 `Budget` 收尾 |
-| `live_config.rs` / `live_config_codix.rs` | 会话里配置自己：provider 的加、测、切、退；`config_show`、`codix_config_set`（校验、备份、jobs 当场生效）；排在前面的 provider 连不上时引擎换到下一个并推 `ProviderSwitched` |
+| `live_config.rs` / `live_config_conix.rs` | 会话里配置自己：provider 的加、测、切、退；`config_show`、`conix_config_set`（校验、备份、jobs 当场生效）；排在前面的 provider 连不上时引擎换到下一个并推 `ProviderSwitched` |
 | `live_plugins.rs` | 插件：包装进去、启用、插件的流程能跑；xforge 从 open 到 archive |
 
 **怎么跑**：`scripts/live.sh`（全部）、`scripts/live.sh live_jobs`（一个文件）、`scripts/live.sh live_jobs
-catch_up`（再按名字过滤）。凭据取仓库根的 `.env`（worktree 里往上找；`CODIX_LIVE_ENV` 可指定），要有
+catch_up`（再按名字过滤）。凭据取仓库根的 `.env`（worktree 里往上找；`CONIX_LIVE_ENV` 可指定），要有
 `ANTHROPIC_AUTH_TOKEN`（或 `ANTHROPIC_API_KEY`）与 `ANTHROPIC_MODEL`，读不到就失败并说明。凭据只交给
 实例进程的环境（`SocketInstances::with_env`），不进测试进程、不打印。同时起的实例数用 `LIVE_THREADS`
 控制（缺省 4）；跑全部时流程的一致性套件不进并发，最后单独串行跑（它自己就要跑十几轮模型，挤在并发里会撞上单轮
 超时）。用例全标 `#[ignore = "live"]`，`./scripts/check.sh` 只编译不跑。
 
-`port::FlowOrigin::Override` 是全局可写层（`~/.codix/flows/`）覆盖了内置或插件的那份（标「全局 · 覆盖内置」）；项目里的
+`port::FlowOrigin::Override` 是全局可写层（`~/.conix/flows/`）覆盖了内置或插件的那份（标「全局 · 覆盖内置」）；项目里的
 同名流程列出来是 `Project`。`live_flows.rs` 照此断言。
 
-**harness**（`crates/codix/tests/live/mod.rs`）：
+**harness**（`crates/conix/tests/live/mod.rs`）：
 
-- `Live`：一个用例的世界——/tmp 下短路径的 `CODIX_HOME`（socket 路径有 104 字节的上限）、一个 git
-  示例项目、写好模型名的 Agix `settings.json`、可选的 `codix.yaml` 与只给实例的环境变量。`start`、
+- `Live`：一个用例的世界——/tmp 下短路径的 `CONIX_HOME`（socket 路径有 104 字节的上限）、一个 git
+  示例项目、写好模型名的 Agix `settings.json`、可选的 `conix.yaml` 与只给实例的环境变量。`start`、
   `attach`、`stop`、`restart`、`start_again`；`read("meta.json")` 读实例目录的文件、`read_state("sessions.json")`
-  读项目状态 `state/codix/` 里的；`Drop` 时
+  读项目状态 `state/conix/` 里的；`Drop` 时
   不论成败停掉它起的所有实例。
 - `tui::Tui`（`live/tui.rs`）：真的界面接真实实例。`Tui::create` / `Tui::attach` 经界面新建或接入；
   `keys("^G ^N")`、`type_str`、`say`（打字加回车）；`until(说明, 超时, |t| …)` 用墙上时间等，一边收实例的
@@ -231,22 +231,22 @@ catch_up`（再按名字过滤）。凭据取仓库根的 `.env`（worktree 里�
 
 **加用例**：功能归哪个文件就加在哪个文件，或新开一个 `live_<功能>.rs`（`mod live;` 引入 harness，
 `scripts/live.sh` 自动带上）。等事件，不比时长；跑不稳先找原因，不放宽断言。为可测性给实例加的
-开关只走环境变量，名字以 `CODIX_TEST_` 开头（现有 `CODIX_TEST_HEARTBEAT_TIMEOUT_MS`），不进 `codix.yaml`。
+开关只走环境变量，名字以 `CONIX_TEST_` 开头（现有 `CONIX_TEST_HEARTBEAT_TIMEOUT_MS`），不进 `conix.yaml`。
 
 ### 需求与用例的对照
 
-每条需求（`docs/reqs/codix-requirements.md`）一行，再加需求文档之后做的几项。**层**：LIVE（`crates/codix/tests/live_*.rs`，
+每条需求（`docs/reqs/conix-requirements.md`）一行，再加需求文档之后做的几项。**层**：LIVE（`crates/conix/tests/live_*.rs`，
 真实实例 + 真实模型）、mock 场景（`crates/app/tests/*.rs`，TUI 接 mock 后端）、真实引擎离线（`crates/engine/tests/`、
-`crates/codix/tests/e2e.rs`、`crates/host/tests/`）、单测。纯界面的需求（排版、键位、鼠标）只在 mock 场景里验；
+`crates/conix/tests/e2e.rs`、`crates/host/tests/`）、单测。纯界面的需求（排版、键位、鼠标）只在 mock 场景里验；
 行为取决于真实的实例、引擎、模型、进程生命周期、磁盘上的文件或 socket 的，必须有 LIVE 行，没有的标 `缺`
-（用例写完就把 `缺` 换成用例名）。`app/` 前缀的文件在 `crates/app/tests/`；`live_*` 在 `crates/codix/tests/`。
+（用例写完就把 `缺` 换成用例名）。`app/` 前缀的文件在 `crates/app/tests/`；`live_*` 在 `crates/conix/tests/`。
 
 | id | 一句话 | 覆盖它的用例 | 层 |
 |---|---|---|---|
-| I-01 | 无参数 `codix`：有实例弹选择列表，没有就新建 | app/instances::m21_picker_lists_every_state、m21_attach_occupied_from_command_line_falls_back_to_picker（选择逻辑在终端里，进程级要 tty） | mock 场景 |
-| I-02 | `codix new` 新建并接入 | live_instance::a_new_instance_is_listed_with_its_discovery_file_meta_and_private_socket；codix/e2e::create_attach_talk_kick_and_stop_a_real_instance | LIVE |
-| I-03 | `codix list [--all]` 的纯文本输出 | app/instances::m21_picker_lists_every_state（选择列表）；live_cli::list_and_stop_work_from_the_command_line（纯文本一行：名字、pid、项目、接入者；`--all` 列出已停的） | LIVE |
-| I-04 | `attach` / `start` / `stop` | live_attach::{hello_reports…, detaching_releases…}；live_instance::a_stopped_instance_is_started_again_from_its_meta；live_attach::the_stop_instance_command_shuts_the_instance_down；live_cli::list_and_stop_work_from_the_command_line（`codix stop`） | LIVE |
+| I-01 | 无参数 `conix`：有实例弹选择列表，没有就新建 | app/instances::m21_picker_lists_every_state、m21_attach_occupied_from_command_line_falls_back_to_picker（选择逻辑在终端里，进程级要 tty） | mock 场景 |
+| I-02 | `conix new` 新建并接入 | live_instance::a_new_instance_is_listed_with_its_discovery_file_meta_and_private_socket；conix/e2e::create_attach_talk_kick_and_stop_a_real_instance | LIVE |
+| I-03 | `conix list [--all]` 的纯文本输出 | app/instances::m21_picker_lists_every_state（选择列表）；live_cli::list_and_stop_work_from_the_command_line（纯文本一行：名字、pid、项目、接入者；`--all` 列出已停的） | LIVE |
+| I-04 | `attach` / `start` / `stop` | live_attach::{hello_reports…, detaching_releases…}；live_instance::a_stopped_instance_is_started_again_from_its_meta；live_attach::the_stop_instance_command_shuts_the_instance_down；live_cli::list_and_stop_work_from_the_command_line（`conix stop`） | LIVE |
 | I-05 | 退出是脱离，`/stop` 才停实例（二次确认） | live_tui::the_keys_walk_the_workbench_of_a_real_instance（^X 后台运行后实例还在）；app/workbench::ctrl_x_exit_dialog_background_stop_or_back、ctrl_c_twice_detaches_and_mouse_command_releases_the_mouse；app/instances::m21_stop_needs_confirmation | LIVE + mock 场景 |
 | I-06 | 单一接入、被占用显示占用者、强制接入、被踢者看到谁踢的 | live_attach::a_second_client_is_refused_until_it_forces_and_then_the_first_is_kicked；host/server::second_client_is_told_who_holds_it、force_kicks_the_old_client；app/instances::m21_occupied_needs_confirmed_force、m21_kicked_goes_to_detached_then_back_to_picker | LIVE |
 | I-07 | 只走 unix socket，0600/0700，校验对端 uid，不监听网络 | live_instance::a_new_instance_is_listed_with_its_discovery_file_meta_and_private_socket（权限）；对端 uid 校验在 `host/src/server.rs`，换一个 uid 接入造不出来，只能靠代码审阅 | LIVE（uid 校验无用例） |
@@ -262,9 +262,9 @@ catch_up`（再按名字过滤）。凭据取仓库根的 `.env`（worktree 里�
 | L-06 | 启动时请求终端尺寸 | 终端行为，人工（manual-smoke-checklist） | 无（L5） |
 | L-07 | 底栏保底几个键 | app/keys::the_basics_are_always_at_the_right_of_the_footer；app/workbench::m17_too_small_still_has_footer；live_tui（底栏那几项） | mock 场景 + LIVE |
 | L-08 | 退出要问一句 | app/workbench::ctrl_x_exit_dialog_background_stop_or_back；live_tui::the_keys_walk_the_workbench_of_a_real_instance | mock 场景 + LIVE |
-| L-09 | 配色可配；`codix.yaml` 不存在时生成带注释的缺省配置 | 配色：app 快照；生成文件：live_cli::the_first_run_writes_a_commented_default_config_in_the_chosen_language；app/src/config.rs 的单测 | LIVE + mock 场景 |
+| L-09 | 配色可配；`conix.yaml` 不存在时生成带注释的缺省配置 | 配色：app 快照；生成文件：live_cli::the_first_run_writes_a_commented_default_config_in_the_chosen_language；app/src/config.rs 的单测 | LIVE + mock 场景 |
 | L-10 | 滚动统一 | app/crosscut::scroll_keys_act_on_the_focused_area、m19_long_lists_scroll_and_filter；app/sessions::a_long_panel_scrolls_under_the_wheel_and_never_takes_the_focus | mock 场景 |
-| L-11 | 多语言：界面、命令行帮助、配置模板 | app/i18n_en::{cli_help_resources_are_english, tui_footer_and_header_are_english}、app/i18n_guard::no_hardcoded_chinese_in_ui_code；codix/cli::cli_help_is_english；live_cli::list_and_stop_work_from_the_command_line（`list` 的行按语言）、the_first_run_writes_a_commented_default_config_in_the_chosen_language（配置模板按语言） | LIVE + mock 场景 |
+| L-11 | 多语言：界面、命令行帮助、配置模板 | app/i18n_en::{cli_help_resources_are_english, tui_footer_and_header_are_english}、app/i18n_guard::no_hardcoded_chinese_in_ui_code；conix/cli::cli_help_is_english；live_cli::list_and_stop_work_from_the_command_line（`list` 的行按语言）、the_first_run_writes_a_commented_default_config_in_the_chosen_language（配置模板按语言） | LIVE + mock 场景 |
 | L-12 | 命令键只用 Ctrl+字母 | app/keys::{the_rare_ones_are_slash_commands, the_terminals_own_editing_keys_still_work}（键位守卫） | mock 场景 |
 | M-01 | 点击切换焦点 | app/workbench::side_selection_by_keys_click_and_wheel；app/guards::mouse_only_hit_tests_and_drags | mock 场景 |
 | M-02 | 点击标签、列表项、展开 | app/crosscut::m22_mouse_on_picker_exit_dialog_tabs_and_ask；app/workbench::side_selection_by_keys_click_and_wheel | mock 场景 |
@@ -319,7 +319,7 @@ catch_up`（再按名字过滤）。凭据取仓库根的 `.env`（worktree 里�
 | F-06 | 启动一次运行（用户会话里说） | live_flows::a_run_goes_from_start_to_finish；live_flows::a_user_session_creates_and_runs_a_flow_job_with_the_job_tools | LIVE |
 | F-07 | 流程设计图；会话里设计、校验、保存；有运行时不许改 | live_flows::a_user_session_validates_and_creates_a_flow_once_the_project_is_trusted、a_flow_with_runs_not_finished_cannot_be_changed_until_they_are_cancelled；app/flows_jobs::m12_change_the_flow_by_talking_and_the_design_updates | LIVE |
 | F-08 | 看 YAML 与每站配置 | live_flows::the_builtin_example_flow_is_offered（`yaml`、站的 `needs`）；app/flows_jobs::a_station_of_a_definition_opens_its_config_in_an_overlay | LIVE + mock 场景 |
-| F-09a | 全局流程与项目流程区分（`◎`）；项目里的转全局 | 来源标记：app/flows_jobs::global_flows_are_marked_and_flow_jobs_jump_to_their_flow；live_flows::global_flows_are_marked_and_a_projects_same_named_flow_replaces_them（`~/.codix/flows/` 的为 Global，全局覆盖内置的为 Override，项目里同名的取代全局的；项目覆盖全局或内置时来源标的是 Project）；「项目里的转全局」没有用例（P1，未做） | LIVE |
+| F-09a | 全局流程与项目流程区分（`◎`）；项目里的转全局 | 来源标记：app/flows_jobs::global_flows_are_marked_and_flow_jobs_jump_to_their_flow；live_flows::global_flows_are_marked_and_a_projects_same_named_flow_replaces_them（`~/.conix/flows/` 的为 Global，全局覆盖内置的为 Override，项目里同名的取代全局的；项目覆盖全局或内置时来源标的是 Project）；「项目里的转全局」没有用例（P1，未做） | LIVE |
 | F-09b | 流程格式与 Harnix 兼容 | live_flows::our_session_host_passes_the_conformance_suite | LIVE |
 | J-01 | 列作业：触发规则、类型、启用、下次、上次结果 | live_jobs::jobs_are_saved_listed_toggled_and_deleted；app/flows_jobs::jobs_list_details_history_and_follow | LIVE |
 | J-02 | 触发历史，跳到那一次的会话 / 运行 | live_jobs::run_now_fires_a_job_session_and_records_the_outcome；app/flows_jobs::jobs_list_details_history_and_follow | LIVE |
@@ -330,7 +330,7 @@ catch_up`（再按名字过滤）。凭据取仓库根的 `.env`（worktree 里�
 | D-01 | `/doctor`：生效配置与引擎自检 | host/hub::doctor_reports_the_engines_checks_and_the_instances_own（离线、假引擎）；live_diagnostics::doctor_reports_the_engines_checks_and_the_instances_own（真实实例的每一项）、doctor_flags_an_inherited_job_network_and_an_unreadable_config | LIVE |
 | D-02 | 键位覆盖、冲突启动时报出 | keys 单测（`crates/keys`）；app/keys::*；app/guards | 单测 + mock 场景 |
 | D-03 | 一键帮助 | app/keys::the_help_lists_the_focused_context_with_shared_keys_on_one_line、ctrl_h_erases_while_typing_and_is_help_otherwise | mock 场景 |
-| D-04 | 数据放 `~/.codix`（`CODIX_HOME`），Agix 数据同处 | 每个 LIVE 用例都用 `CODIX_HOME`（harness 的 `Live::new`）；live_sessions::a_trusted_projects_sessions_are_kept_in_the_project；live_config::a_provider_is_added_tested_switched_to_and_rolled_back_from_a_session（`settings.json` 在 `CODIX_HOME`） | LIVE |
+| D-04 | 数据放 `~/.conix`（`CONIX_HOME`），Agix 数据同处 | 每个 LIVE 用例都用 `CONIX_HOME`（harness 的 `Live::new`）；live_sessions::a_trusted_projects_sessions_are_kept_in_the_project；live_config::a_provider_is_added_tested_switched_to_and_rolled_back_from_a_session（`settings.json` 在 `CONIX_HOME`） | LIVE |
 | N-01 | 80×24 可用，120 列并排 | app/workbench::m17_too_small_still_has_footer、m17_wide_shows_both_panes | mock 场景 |
 | N-02 | 流式开销与转录长度无关 | app/chat::m16_storm_relayouts_one_block_per_delta | mock 场景 |
 | N-03 | IO 不阻塞界面 | host/server::slow_command_does_not_block_heartbeats；app/crosscut::m15_reconnect_shows_state_and_refreshes | 真实引擎离线 + mock 场景 |
@@ -346,14 +346,14 @@ catch_up`（再按名字过滤）。凭据取仓库根的 `.env`（worktree 里�
 | 插件 | 装、披露、启用、停用、卸载，插件带来的流程能跑 | live_plugins::a_plugin_from_the_package_dirs_is_installed_enabled_and_its_flow_runs；engine/plugins::a_plugin_is_installed_enabled_and_its_flow_runs_on_its_functions；app/plugins::*（`/plugin` 的界面） | LIVE |
 | xforge | 内置的 xforge 流程从 open 到 archive | live_plugins::xforge_quick_goes_from_open_to_archive_with_a_real_model；engine/xforge::xforge_installs_offers_both_flows_and_carries_a_change_from_open_to_archive | LIVE |
 | 会话里配置：provider | 加、测、切、退 provider | live_config::a_provider_is_added_tested_switched_to_and_rolled_back_from_a_session；engine/config::an_unreachable_provider_is_added_tested_and_not_switched_to | LIVE |
-| 会话里配置：`config_show` 与 `codix_config_set` | 看生效配置；改 `codix.yaml`（jobs / notify 当场重读） | live_config_codix::a_session_shows_the_config_and_sets_a_codix_yaml_value | LIVE |
-| provider_switched 通知 | 引擎换了 provider，转录里出一条提示 | model/chat（`ProviderSwitched` 的排版）；live_config_codix::a_dead_first_provider_falls_over_and_the_switch_is_pushed（排在前面的连不上，引擎换到下一个） | LIVE |
+| 会话里配置：`config_show` 与 `conix_config_set` | 看生效配置；改 `conix.yaml`（jobs / notify 当场重读） | live_config_conix::a_session_shows_the_config_and_sets_a_conix_yaml_value | LIVE |
+| provider_switched 通知 | 引擎换了 provider，转录里出一条提示 | model/chat（`ProviderSwitched` 的排版）；live_config_conix::a_dead_first_provider_falls_over_and_the_switch_is_pushed（排在前面的连不上，引擎换到下一个） | LIVE |
 | 作业网络 | `jobs.defaults.network` 与作业的 `network` 下发到会话沙箱 | live_jobs::a_job_with_no_network_still_runs_local_commands | LIVE |
 | 作业预算 | `max_tokens` 下发为会话预算，那次记成被预算停下 | live_jobs::a_job_over_its_token_budget_is_stopped_by_the_engine | LIVE |
 | CronCreate | 作业会话里模型不能自建定时任务 | live_jobs::a_job_session_cannot_create_scheduled_tasks | LIVE |
 | `budget_exceeded` | 引擎因预算收尾，端口上是 `StopReason::Budget` | live_jobs::a_job_over_its_token_budget_is_stopped_by_the_engine（作业侧）；live_limits::a_turn_over_the_token_budget_ends_as_budget（普通会话里的 `TurnEnded { stop: Budget }`） | LIVE |
 | `max_turns` | 一轮里调用次数到顶，端口上是 `StopReason::MaxTurns` | host/src/hub/state.rs 的 `stop_reason_of` 单测；app 的 model/chat 单测；live_limits::a_turn_over_the_model_call_limit_ends_as_max_turns（`turn.max_model_calls`） | LIVE |
-| `/doctor`：`codix.session_loosen` | 部署方关了放宽时报降级 | host/hub::doctor_reports_the_engines_checks_and_the_instances_own；live_sessions::the_permission_mode_is_the_sessions_and_takes_effect_at_once（放宽生效）；engine/settings::the_cli_layer_lets_a_session_loosen_its_mode；live_diagnostics::doctor_reports_the_engines_checks_and_the_instances_own（真实实例里是 ok） | LIVE |
-| `/doctor`：`codix.jobs_network` | `inherit` 时报降级 | host/hub::doctor_reports_the_engines_checks_and_the_instances_own；live_diagnostics::doctor_flags_an_inherited_job_network_and_an_unreadable_config | LIVE |
+| `/doctor`：`conix.session_loosen` | 部署方关了放宽时报降级 | host/hub::doctor_reports_the_engines_checks_and_the_instances_own；live_sessions::the_permission_mode_is_the_sessions_and_takes_effect_at_once（放宽生效）；engine/settings::the_cli_layer_lets_a_session_loosen_its_mode；live_diagnostics::doctor_reports_the_engines_checks_and_the_instances_own（真实实例里是 ok） | LIVE |
+| `/doctor`：`conix.jobs_network` | `inherit` 时报降级 | host/hub::doctor_reports_the_engines_checks_and_the_instances_own；live_diagnostics::doctor_flags_an_inherited_job_network_and_an_unreadable_config | LIVE |
 | 会话累计用量 | 重启后会话摘要的 usage 来自引擎的 `session.get` 累计 | host/hub::a_watched_sessions_usage_is_what_the_engine_reports；live_sessions::a_sessions_cumulative_usage_survives_a_restart | LIVE |
 | 离开期间摘要 | 脱离期间作业失败等，再接入时推一次 `AwaySummary` | host/hub::what_happened_while_detached_is_shown_on_attach；app/flows_jobs::the_away_summary_lists_what_happened_and_enter_goes_there；live_attach::what_happened_while_detached_is_pushed_once_on_the_next_attach | LIVE |

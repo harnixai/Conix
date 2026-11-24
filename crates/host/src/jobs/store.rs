@@ -1,6 +1,6 @@
-//! 作业的存取（architecture §8.5）：定义在 `.codix/jobs.json`，随项目提交，项目受信才读、才写；
-//! 启用与否、调度基线在 `state/codix/jobs-state.json`，只属于这台机器；触发记录是
-//! `state/codix/jobs/<id>.jsonl`。
+//! 作业的存取（architecture §8.5）：定义在 `.conix/jobs.json`，随项目提交，项目受信才读、才写；
+//! 启用与否、调度基线在 `state/conix/jobs-state.json`，只属于这台机器；触发记录是
+//! `state/conix/jobs/<id>.jsonl`。
 
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
@@ -106,7 +106,7 @@ impl JobStore {
         history_dir: impl Into<PathBuf>,
     ) -> JobStore {
         let state_path: PathBuf = state_path.into();
-        // 用量账与本机状态放在一起：`state/codix/usage/`。
+        // 用量账与本机状态放在一起：`state/conix/usage/`。
         let usage = state_path
             .parent()
             .map(|p| p.join("usage"))

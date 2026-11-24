@@ -1,4 +1,4 @@
-//! 编进二进制的种子与场景：`codix --mock <名字>` 不依赖工作目录。
+//! 编进二进制的种子与场景：`conix --mock <名字>` 不依赖工作目录。
 
 const SEEDS: &[(&str, &str)] = &[
     ("empty", include_str!("../seeds/empty.yaml")),

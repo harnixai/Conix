@@ -1,7 +1,7 @@
-//! Codix 的 cli 层设置在真实的 Agix 上的效果。单独一个测试文件：一个进程只能嵌入一份引擎
+//! Conix 的 cli 层设置在真实的 Agix 上的效果。单独一个测试文件：一个进程只能嵌入一份引擎
 //! （进程组的登记只有一份），和 `embedded.rs` 放一起会互相挡。
 
-/// Codix 的 cli 层（`host::hub::cli_settings`）在真实的 Agix 0.4 上生效：开了 `client_may_loosen`，
+/// Conix 的 cli 层（`host::hub::cli_settings`）在真实的 Agix 0.4 上生效：开了 `client_may_loosen`，
 /// 流程站要的 `acceptEdits` 不被夹回；只读与流程工具的 allow 落在 cli 层。不调模型，离线可跑。
 #[tokio::test]
 async fn the_cli_layer_lets_a_session_loosen_its_mode() {

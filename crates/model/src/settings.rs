@@ -1,4 +1,4 @@
-//! 界面可调的部分（`~/.codix/codix.yaml` 的 `ui`、`instance`，由 app 读出来交给 model）。
+//! 界面可调的部分（`~/.conix/conix.yaml` 的 `ui`、`instance`，由 app 读出来交给 model）。
 
 use crate::state::DEFAULT_IDLE_TIMEOUT_MS;
 

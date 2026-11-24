@@ -1,4 +1,4 @@
-//! `~/.codix/codix.yaml`（CODIX_HOME 指定时以它为准）。只放 Codix 自己的配置：模型、provider、
+//! `~/.conix/conix.yaml`（CONIX_HOME 指定时以它为准）。只放 Conix 自己的配置：模型、provider、
 //! 权限沿用 Agix 的 settings.json（architecture §8.1）。文件不存在时写一份带注释的缺省配置。
 
 use std::collections::BTreeMap;
@@ -7,12 +7,12 @@ use std::path::PathBuf;
 use serde::Deserialize;
 use tui::Size;
 
-pub const FILE: &str = "codix.yaml";
+pub const FILE: &str = "conix.yaml";
 
-/// 首次启动写到 `~/.codix/codix.yaml` 的内容：每一项都写出来并注释，用户照着改。
+/// 首次启动写到 `~/.conix/conix.yaml` 的内容：每一项都写出来并注释，用户照着改。
 /// 模板放在单独的文件里，中英文各一份，不挤进代码。
-pub const DEFAULT_YAML_ZH: &str = include_str!("codix.zh.yaml");
-pub const DEFAULT_YAML_EN: &str = include_str!("codix.en.yaml");
+pub const DEFAULT_YAML_ZH: &str = include_str!("conix.zh.yaml");
+pub const DEFAULT_YAML_EN: &str = include_str!("conix.en.yaml");
 
 /// 缺省配置按语言选模板；没有对应语言的模板用英文。
 pub fn default_yaml(lang: &str) -> &'static str {
@@ -34,7 +34,7 @@ pub struct Config {
     pub engine: EngineSection,
 }
 
-/// 引擎的进程参数（architecture §8.11）：不是 Agix 的设置键，所以放在 `codix.yaml` 而不是 settings.json。
+/// 引擎的进程参数（architecture §8.11）：不是 Agix 的设置键，所以放在 `conix.yaml` 而不是 settings.json。
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
 pub struct EngineSection {
@@ -149,9 +149,9 @@ impl UiConfig {
 }
 
 impl Config {
-    /// 引擎自带 `anthropic` 的模型：`CODIX_MODEL` 优先，其次 `engine.model`；空串当没写。
+    /// 引擎自带 `anthropic` 的模型：`CONIX_MODEL` 优先，其次 `engine.model`；空串当没写。
     pub fn engine_model(&self) -> Option<String> {
-        self.engine_model_with(std::env::var("CODIX_MODEL").ok())
+        self.engine_model_with(std::env::var("CONIX_MODEL").ok())
     }
 
     /// 环境变量的值由调用方给，测试才不用去改进程环境。
@@ -222,10 +222,10 @@ pub fn parse_duration_ms(s: &str) -> Option<u64> {
     Some(n * per)
 }
 
-/// 界面语言：`CODIX_LANG` 优先，其次配置的 `ui.language`；`auto` 照 `LC_ALL` / `LC_MESSAGES` /
+/// 界面语言：`CONIX_LANG` 优先，其次配置的 `ui.language`；`auto` 照 `LC_ALL` / `LC_MESSAGES` /
 /// `LANG`，都没有就用中文。
 pub fn language(cfg: &Config) -> String {
-    let want = std::env::var("CODIX_LANG").unwrap_or_else(|_| cfg.ui.language.clone());
+    let want = std::env::var("CONIX_LANG").unwrap_or_else(|_| cfg.ui.language.clone());
     if want.trim() != "auto" {
         return i18n::normalize(want.trim());
     }
@@ -239,13 +239,13 @@ pub fn language(cfg: &Config) -> String {
 }
 
 pub fn home() -> PathBuf {
-    if let Some(h) = std::env::var_os("CODIX_HOME") {
+    if let Some(h) = std::env::var_os("CONIX_HOME") {
         return PathBuf::from(h);
     }
     std::env::var_os("HOME")
         .map(PathBuf::from)
         .unwrap_or_default()
-        .join(".codix")
+        .join(".conix")
 }
 
 /// 读配置；文件不存在就写一份缺省的。读不出来时用缺省值并把原因交给调用方显示：
@@ -260,9 +260,9 @@ pub fn load_from(dir: &std::path::Path) -> (Config, Vec<String>) {
         Ok(t) => t,
         Err(_) => {
             let _ = std::fs::create_dir_all(dir);
-            // 模板只看 CODIX_LANG，不看 LANG：macOS 上中文用户的 LANG 常是 en_US，照它会一上来
+            // 模板只看 CONIX_LANG，不看 LANG：macOS 上中文用户的 LANG 常是 en_US，照它会一上来
             // 就是英文界面。缺省中文，写出后用户可以改 ui.language。
-            let lang = std::env::var("CODIX_LANG")
+            let lang = std::env::var("CONIX_LANG")
                 .map(|l| i18n::normalize(&l))
                 .unwrap_or_else(|_| i18n::REFERENCE.to_string());
             let template = default_yaml(&lang);

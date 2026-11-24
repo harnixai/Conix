@@ -379,12 +379,12 @@ async fn a_running_firing_is_stopped_and_recorded_as_stopped() {
     );
 }
 
-/// 护栏在真实实例上：`codix.yaml` 给的超时到了，那一次被打断、记成超时；作业的护栏显示的是这台机器的值。
+/// 护栏在真实实例上：`conix.yaml` 给的超时到了，那一次被打断、记成超时；作业的护栏显示的是这台机器的值。
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "live"]
 async fn a_firing_past_the_configured_timeout_is_stopped() {
     let lv = Live::with(live::Opts {
-        codix_yaml: Some("jobs:\n  defaults:\n    timeout: 2s\n".into()),
+        conix_yaml: Some("jobs:\n  defaults:\n    timeout: 2s\n".into()),
         ..Default::default()
     });
     let mut c = lv.start_trusted().await;
@@ -401,7 +401,7 @@ async fn a_firing_past_the_configured_timeout_is_stopped() {
     assert_eq!(
         j.effective_guard.as_ref().and_then(|g| g.timeout_ms),
         Some(2_000),
-        "生效的超时取自 codix.yaml"
+        "生效的超时取自 conix.yaml"
     );
     c.ok(Command::RunJobNow {
         job: j.id.clone(),
@@ -434,8 +434,8 @@ async fn a_failed_firing_reaches_the_configured_notification_command() {
         file.display()
     );
     let lv = Live::with(live::Opts {
-        codix_yaml: Some(yaml),
-        env: vec![("CODIX_TEST_NOTIFY_WINDOW_MS".into(), "300".into())],
+        conix_yaml: Some(yaml),
+        env: vec![("CONIX_TEST_NOTIFY_WINDOW_MS".into(), "300".into())],
     });
     let c = lv.start_trusted().await;
     let Reply::Notified(results) = c.ok(Command::TestNotify).await else {
@@ -464,7 +464,7 @@ async fn a_failed_firing_reaches_the_configured_notification_command() {
         serde_json::from_str(&std::fs::read_to_string(&file).expect("出口收到了通知")).unwrap();
     assert_eq!(v["alerts"][0]["kind"], "job_failed", "{v}");
     assert!(
-        v["attach"].as_str().unwrap().contains("codix attach"),
+        v["attach"].as_str().unwrap().contains("conix attach"),
         "{v}"
     );
 }

@@ -237,7 +237,7 @@ impl Hub {
         let run = self.0.job_runs.locked().remove(session);
         let audit = self.meter_take(session);
         if let (Some((job, fired, started)), Ok(sched)) = (run, self.scheduler()) {
-            // 引擎按会话预算（作业的 max_tokens）停下的，和 Codix 自己数到超额停下的是一回事。
+            // 引擎按会话预算（作业的 max_tokens）停下的，和 Conix 自己数到超额停下的是一回事。
             let stopped = self
                 .0
                 .stop_causes

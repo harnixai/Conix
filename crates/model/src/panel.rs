@@ -538,7 +538,7 @@ fn pad(k: &str, w: usize) -> String {
     format!("{}{k}{sep}", " ".repeat(w.saturating_sub(display_width(k))))
 }
 
-/// 时刻显示用的本地时区偏移（秒）。和语言一样是进程级的：启动时设一次（`codix` 取本机时区），
+/// 时刻显示用的本地时区偏移（秒）。和语言一样是进程级的：启动时设一次（`conix` 取本机时区），
 /// 不设是 UTC，所以测试与快照照旧确定。
 static UTC_OFFSET_S: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
 

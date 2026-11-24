@@ -29,30 +29,30 @@ async fn doctor_reports_the_engines_checks_and_the_instances_own() {
     let names: Vec<&str> = v.iter().map(|c| c.name.as_str()).collect();
     // 引擎自己的检查（daemon.doctor）与实例自己的几项都在。
     assert!(
-        names.iter().any(|n| !n.starts_with("codix.")),
+        names.iter().any(|n| !n.starts_with("conix.")),
         "没有引擎的检查：{names:?}"
     );
     for own in [
-        "codix.project_state",
-        "codix.gitignore",
-        "codix.config",
-        "codix.notify",
-        "codix.session_loosen",
-        "codix.jobs_network",
-        "codix.flows",
+        "conix.project_state",
+        "conix.gitignore",
+        "conix.config",
+        "conix.notify",
+        "conix.session_loosen",
+        "conix.jobs_network",
+        "conix.flows",
     ] {
         assert!(names.contains(&own), "缺 {own}：{names:?}");
     }
-    assert_eq!(status(&v, "codix.flows"), HealthStatus::Ok, "流程在跑");
-    assert_eq!(status(&v, "codix.config"), HealthStatus::Ok);
-    // Codix 自己在 cli 层开了放宽，没有 managed 层压它；作业缺省 deny_all。
+    assert_eq!(status(&v, "conix.flows"), HealthStatus::Ok, "流程在跑");
+    assert_eq!(status(&v, "conix.config"), HealthStatus::Ok);
+    // Conix 自己在 cli 层开了放宽，没有 managed 层压它；作业缺省 deny_all。
     assert_eq!(
-        status(&v, "codix.session_loosen"),
+        status(&v, "conix.session_loosen"),
         HealthStatus::Ok,
         "{v:?}"
     );
-    assert_eq!(status(&v, "codix.jobs_network"), HealthStatus::Ok, "{v:?}");
-    let state = v.iter().find(|c| c.name == "codix.project_state").unwrap();
+    assert_eq!(status(&v, "conix.jobs_network"), HealthStatus::Ok, "{v:?}");
+    let state = v.iter().find(|c| c.name == "conix.project_state").unwrap();
     assert!(
         state.summary.contains(&lv.project_path()),
         "项目状态目录在项目里：{state:?}"
@@ -60,23 +60,23 @@ async fn doctor_reports_the_engines_checks_and_the_instances_own() {
 }
 
 /// `jobs.defaults.network: inherit` 时无人值守的命令会被 Agix 拒：自检要报降级；
-/// `codix.yaml` 读不懂的项也在 `codix.config` 里报出来。
+/// `conix.yaml` 读不懂的项也在 `conix.config` 里报出来。
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "live"]
 async fn doctor_flags_an_inherited_job_network_and_an_unreadable_config() {
     let lv = Live::with(live::Opts {
-        codix_yaml: Some("jobs:\n  defaults:\n    network: inherit\n    timeout: soon\n".into()),
+        conix_yaml: Some("jobs:\n  defaults:\n    network: inherit\n    timeout: soon\n".into()),
         ..Default::default()
     });
     let c = lv.start().await;
     let v = doctor(&c).await;
     assert_eq!(
-        status(&v, "codix.jobs_network"),
+        status(&v, "conix.jobs_network"),
         HealthStatus::Degraded,
         "{v:?}"
     );
-    assert_eq!(status(&v, "codix.config"), HealthStatus::Degraded, "{v:?}");
-    let cfg = v.iter().find(|c| c.name == "codix.config").unwrap();
+    assert_eq!(status(&v, "conix.config"), HealthStatus::Degraded, "{v:?}");
+    let cfg = v.iter().find(|c| c.name == "conix.config").unwrap();
     assert!(cfg.summary.contains("timeout"), "{cfg:?}");
 }
 

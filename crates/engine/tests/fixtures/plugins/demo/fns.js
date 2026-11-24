@@ -12,9 +12,9 @@ async function open(input, ctx) {
 }
 
 async function defs(input, ctx) {
-  return await codix.flow.defs();
+  return await conix.flow.defs();
 }
 
 async function start(input, ctx) {
-  return await codix.flow.start({ flow: "demo-flow", subject: "from a gate" });
+  return await conix.flow.start({ flow: "demo-flow", subject: "from a gate" });
 }

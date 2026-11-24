@@ -1,4 +1,4 @@
-//! `session.event` 与 `daemon.event` 的载荷（协议 §7、§8），以及几个方法的结果。只放 Codix
+//! `session.event` 与 `daemon.event` 的载荷（协议 §7、§8），以及几个方法的结果。只放 Conix
 //! 读的字段；每个字段都有缺省，载荷里不认识的 `kind` 落到 `Unknown`。
 
 use serde::Deserialize;

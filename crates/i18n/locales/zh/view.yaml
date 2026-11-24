@@ -92,7 +92,7 @@ view:
   exit:
     current_instance: "当前实例"
     background: "后台运行"
-    background_desc: "实例 {name} 继续运行，之后用 codix attach {name} 接回"
+    background_desc: "实例 {name} 继续运行，之后用 conix attach {name} 接回"
     quit: "直接退出"
     quit_desc: "停止实例 {name}，里面的会话、流程、作业都会停下"
     back: "返回"
@@ -112,7 +112,7 @@ view:
     stopped: "已停止 · Enter 启动"
     stale: "残留（进程已不在）· Enter 重新启动"
     listing: "正在列出本机的实例 …"
-    title: "Codix · 选择实例 · 主机 {host}"
+    title: "Conix · 选择实例 · 主机 {host}"
   detached:
     title: "已脱离实例 {name}"
     kicked: "被 {by} 强制接入（{ago} 之前）"

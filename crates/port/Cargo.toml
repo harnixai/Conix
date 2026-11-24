@@ -1,6 +1,6 @@
 [package]
 name = "port"
-description = "Codix 的后端端口：Instances / Backend 两个 trait 与领域消息"
+description = "Conix 的后端端口：Instances / Backend 两个 trait 与领域消息"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

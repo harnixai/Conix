@@ -27,7 +27,7 @@ pub const CONFIG_PROVIDER_ADD: &str = "config_provider_add";
 pub const CONFIG_PROVIDER_TEST: &str = "config_provider_test";
 pub const CONFIG_SWITCH: &str = "config_switch";
 pub const CONFIG_ROLLBACK: &str = "config_rollback";
-pub const CODIX_CONFIG_SET: &str = "codix_config_set";
+pub const CONIX_CONFIG_SET: &str = "conix_config_set";
 
 /// 配置自己的那几个（architecture §8.11）：只给人开的会话。
 pub const CONFIG_TOOLS: [&str; 6] = [
@@ -36,7 +36,7 @@ pub const CONFIG_TOOLS: [&str; 6] = [
     CONFIG_PROVIDER_TEST,
     CONFIG_SWITCH,
     CONFIG_ROLLBACK,
-    CODIX_CONFIG_SET,
+    CONIX_CONFIG_SET,
 ];
 
 /// 只读的几个：建会话时给它们 allow 规则，查看不用每次问人。
@@ -123,7 +123,7 @@ pub fn declarations() -> Value {
     json!([
         tool(
             SESSION_LIST,
-            "List the sessions of this Codix instance's project: the user's sessions, numbered as in the sessions list (#1 is the newest). With all=true, also the sessions started by scheduled jobs and flow runs, and the closed ones (not numbered).",
+            "List the sessions of this Conix instance's project: the user's sessions, numbered as in the sessions list (#1 is the newest). With all=true, also the sessions started by scheduled jobs and flow runs, and the closed ones (not numbered).",
             json!({"all": {"type": "boolean", "default": false}}),
             &[]
         ),
@@ -219,7 +219,7 @@ pub fn declarations() -> Value {
         ),
         tool(
             CONFIG_SHOW,
-            "Show how this Codix instance is configured: the default model, the routing (model.order), every provider (endpoint, which env var holds its key and whether that key is present, tiers, where it is defined) and codix.yaml. Read this before changing anything.",
+            "Show how this Conix instance is configured: the default model, the routing (model.order), every provider (endpoint, which env var holds its key and whether that key is present, tiers, where it is defined) and conix.yaml. Read this before changing anything.",
             json!({}),
             &[]
         ),
@@ -229,7 +229,7 @@ pub fn declarations() -> Value {
             json!({
                 "provider_id": {"type": "string", "description": "Lower-case letters, digits, - and _."},
                 "config": {"type": "object", "description": "The provider's fields, merged into its definition: vendor (anthropic|openai|deepseek|qwen|vllm|sglang|generic), api (anthropic|openai_chat|openai_responses), base_url, api_key_env, models, tiers {strong, balanced, fast}, quota. Not order."},
-                "tier": {"type": "string", "enum": ["global", "project"], "default": "global", "description": "global: ~/.codix/settings.json, for every project; project: this project's .codix/settings.json."}
+                "tier": {"type": "string", "enum": ["global", "project"], "default": "global", "description": "global: ~/.conix/settings.json, for every project; project: this project's .conix/settings.json."}
             }),
             &["provider_id", "config"]
         ),
@@ -255,8 +255,8 @@ pub fn declarations() -> Value {
             &[]
         ),
         tool(
-            CODIX_CONFIG_SET,
-            "Change one value in ~/.codix/codix.yaml (Codix's own settings: ui, instance, jobs, notify, engine), e.g. path jobs.defaults.network, value \"allowlist\". Checked with the same parser the instance uses at start; the old file is backed up. jobs and notify take effect at once; ui, instance and engine at the next start. With dry_run only checks. Comments in the file are not kept (the backup has them).",
+            CONIX_CONFIG_SET,
+            "Change one value in ~/.conix/conix.yaml (Conix's own settings: ui, instance, jobs, notify, engine), e.g. path jobs.defaults.network, value \"allowlist\". Checked with the same parser the instance uses at start; the old file is backed up. jobs and notify take effect at once; ui, instance and engine at the next start. With dry_run only checks. Comments in the file are not kept (the backup has them).",
             json!({
                 "path": {"type": "string", "description": "Dot-separated, e.g. jobs.limits.max_tokens"},
                 "value": {"description": "The new value (null removes the key)."},

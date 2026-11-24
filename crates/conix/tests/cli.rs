@@ -7,10 +7,10 @@ fn has_cjk(s: &str) -> bool {
 }
 
 fn help_of(args: &[&str]) -> String {
-    let out = std::process::Command::new(env!("CARGO_BIN_EXE_codix"))
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_conix"))
         .args(args)
-        .env("CODIX_LANG", "en")
-        .env("CODIX_HOME", tempfile::tempdir().unwrap().path())
+        .env("CONIX_LANG", "en")
+        .env("CONIX_HOME", tempfile::tempdir().unwrap().path())
         .output()
         .unwrap();
     String::from_utf8_lossy(&out.stdout).into_owned()

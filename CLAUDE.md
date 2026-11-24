@@ -1,6 +1,6 @@
-# Codix
+# Conix
 
-Codix 是跑在终端里的 agent 工作台，引擎是 [Agix](https://github.com/harnixai/Agix)。可以在本地用，也可以远程用，不限定于编程场景。
+Conix（Console + *nix）是 Agent native 的 console shell：跑在终端里的 agent 工作台，引擎是 [Agix](https://github.com/harnixai/Agix)。可以在本地用，也可以远程用，不限定于编程场景。
 
 - 左边是对话区。
 - 右边是三个标签：
@@ -8,7 +8,7 @@ Codix 是跑在终端里的 agent 工作台，引擎是 [Agix](https://github.co
   - **流程**：流程定义，以及它的运行实例
   - **作业**：定时任务
 
-Codix 不跟 Claude Code 这类聊天式编程 CLI 拼打磨。它的位置是 Agix 的参考宿主，把 Agix 独有的能力摆到用户面前：一个进程跑多个会话、无人值守、子 Agent 与任务可观测、按流程执行。
+Conix 不跟 Claude Code 这类聊天式编程 CLI 拼打磨。它的位置是 Agix 的参考宿主，把 Agix 独有的能力摆到用户面前：一个进程跑多个会话、无人值守、子 Agent 与任务可观测、按流程执行。
 
 需求见 `docs/reqs/`，架构见 `docs/design/`。阶段 1 产出这两份，之后以它们为准。
 
@@ -23,10 +23,10 @@ Codix 不跟 Claude Code 这类聊天式编程 CLI 拼打磨。它的位置是 A
 
 ## 已定的边界
 
-- **常驻实例 + 可接入的 TUI。** 实例是本机上一个常驻的 `codix host` 进程，引擎、流程、作业都跑在里面。TUI 通过本机 unix socket 接入实例，退出 TUI 就是脱离。**一个实例同时只允许一个 TUI 接入**：可以强制接入（踢掉对方），空闲超时会自动脱离。可以用 `codix list` 查看实例、`codix attach` 接入。
-- **不监听任何网络端口。** 远程使用就是 ssh 登录到那台机器后运行 `codix`，安全交给 ssh 和操作系统。
-- **引擎只走 Agix 的 JSON-RPC 协议**（`agix/docs/daemon_rpc_protocol.md`）：实例进程内部用 `agix::embed` 嵌入引擎，通过 duplex 通信。不使用 `agix::pool` 这一层 Rust 门面，因为它不承诺兼容。唯一的例外是启动时的装配：`EmbedConfig` 本来就是 Rust 的，cli 层设置与给插件的宿主 JS 库（`codix.*`，`js_libs`）在这里登记（`docs/design/plugins.md` §5.1）。
-- **项目级的放项目，全局的放全局。** 会话、流程、作业都是项目的，放在项目的 `.codix/`（Agix 的项目层目录）里：定义（流程、作业）进 git，本机数据与过程数据在 `.codix/state/` 下、不进 git，Codix 自己的在 `state/codix/`。全局目录是 `~/.codix`（可以用 `CODIX_HOME` 改），Agix 的 `data_root` 也指向这里，不使用 `~/.agix`；它只放用户级的配置（`codix.yaml`、`flows/` 等）和实例的运行时文件（`instances/`），不往 Agix 的 `settings.json` 里写东西。布局见 `docs/design/architecture.md` §8.1。
+- **常驻实例 + 可接入的 TUI。** 实例是本机上一个常驻的 `conix host` 进程，引擎、流程、作业都跑在里面。TUI 通过本机 unix socket 接入实例，退出 TUI 就是脱离。**一个实例同时只允许一个 TUI 接入**：可以强制接入（踢掉对方），空闲超时会自动脱离。可以用 `conix list` 查看实例、`conix attach` 接入。
+- **不监听任何网络端口。** 远程使用就是 ssh 登录到那台机器后运行 `conix`，安全交给 ssh 和操作系统。
+- **引擎只走 Agix 的 JSON-RPC 协议**（`agix/docs/daemon_rpc_protocol.md`）：实例进程内部用 `agix::embed` 嵌入引擎，通过 duplex 通信。不使用 `agix::pool` 这一层 Rust 门面，因为它不承诺兼容。唯一的例外是启动时的装配：`EmbedConfig` 本来就是 Rust 的，cli 层设置与给插件的宿主 JS 库（`conix.*`，`js_libs`）在这里登记（`docs/design/plugins.md` §5.1）。
+- **项目级的放项目，全局的放全局。** 会话、流程、作业都是项目的，放在项目的 `.conix/`（Agix 的项目层目录）里：定义（流程、作业）进 git，本机数据与过程数据在 `.conix/state/` 下、不进 git，Conix 自己的在 `state/conix/`。全局目录是 `~/.conix`（可以用 `CONIX_HOME` 改），Agix 的 `data_root` 也指向这里，不使用 `~/.agix`；它只放用户级的配置（`conix.yaml`、`flows/` 等）和实例的运行时文件（`instances/`），不往 Agix 的 `settings.json` 里写东西。布局见 `docs/design/architecture.md` §8.1。
 - **TUI 与后端之间只有一个端口**：`Instances` 和 `Backend` 两个 trait 加上领域事件，定义见 `docs/design/architecture.md` §3。mock 与真实实现走的是同一个端口；端口的消息序列化之后就是 TUI 与实例之间的协议。
 - **流程来自 Harnix**：拷贝，不引用，见下面的 `3rds/`。流程格式与 Harnix 兼容。流程不放进 Agix。
 - **不做**：ACP（已作为需求提给 Agix：harnixai/Agix#74）、Web 界面。
@@ -69,13 +69,13 @@ archive/       旧实现 AttaCode 的本地副本，不入库，只作参考
 ## 版本与提交
 
 - **每次推送到远程就是一次发布，必须带版本标签**（与 Agix 一致）。
-- 版本标签：`Codix-v<x.y.z>-<YYYYMMDD><NN>`。每次发布 `z` 加 1；`NN` 是当天第几次发布，从 `01` 开始，
-  用 `git tag -l 'Codix-v*-<YYYYMMDD>*'` 查当天已有的取最大加 1。
+- 版本标签：`Conix-v<x.y.z>-<YYYYMMDD><NN>`。每次发布 `z` 加 1；`NN` 是当天第几次发布，从 `01` 开始，
+  用 `git tag -l 'Conix-v*-<YYYYMMDD>*'` 查当天已有的取最大加 1。
 - `Cargo.toml` 的 `[workspace.package] version` 写成 `x.y.z-YYYYMMDDNN`，不带程序名前缀。界面上只显示 `x.y.z`。
 - 发布步骤：改版本号并 `cargo update -w` 同步 `Cargo.lock`；`scripts/check.sh` 全过（发布前跑一遍 `scripts/live.sh`）；
   版本号改动单独一个提交；推送 `main`，再打附注标签（标签消息写本次发布的要点）并推送标签。
-- 提交前缀：`Codix:`。小步提交，每一步都要能构建。
-- 子模块更新单独提交，消息为 `Codix: bump Agix to <sha>`。
+- 提交前缀：`Conix:`。小步提交，每一步都要能构建。
+- 子模块更新单独提交，消息为 `Conix: bump Agix to <sha>`。
 
 ## 代码风格
 

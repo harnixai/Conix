@@ -26,14 +26,14 @@ impl Hub {
                 let guard = self.guard_config().effective(&job.guard).0;
                 let settings = SessionSettings {
                     // 引擎在每次调用前按剩余预算拦（含子 Agent、旁路调用），不会像事后数帧那样冲过头；
-                    // Codix 的计数仍在，管每日额度与界面（`meter_frame`）。一次触发就是一个新会话，
+                    // Conix 的计数仍在，管每日额度与界面（`meter_frame`）。一次触发就是一个新会话，
                     // 所以会话预算就是这次触发的预算。
                     token_budget: guard.max_tokens,
                     network: guard
                         .network
                         .and_then(port::Network::sandbox_mode)
                         .map(Into::into),
-                    // 无人值守的会话里模型再自建定时任务，就在 Codix 的作业与护栏之外了。
+                    // 无人值守的会话里模型再自建定时任务，就在 Conix 的作业与护栏之外了。
                     deny: vec!["CronCreate".into()],
                     prompt_append: (!skills.is_empty()).then(|| {
                         format!(

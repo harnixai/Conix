@@ -103,7 +103,7 @@ async fn m20_first_run_has_guiding_empty_states() {
     let mut h = Harness::new("m20-first-run", SIZE).await;
     let text = h.text();
     assert!(
-        text.contains(&format!("Codix {}", model::short_version())),
+        text.contains(&format!("Conix {}", model::short_version())),
         "欢迎块"
     );
     assert!(
@@ -222,7 +222,7 @@ async fn the_one_demo_plays_through_every_tab() {
     h.tab(model::Tab::Jobs).await;
     h.settle().await;
     assert!(h.text().contains("依赖巡检"));
-    h.select_session("Codix 展示").await;
+    h.select_session("Conix 展示").await;
     h.keys("Enter").await;
     h.type_str("看看效果").await;
     h.keys("Enter").await;
@@ -283,7 +283,7 @@ async fn tabs_with_waiting_items_get_a_mark_not_the_selected_color() {
 #[tokio::test(start_paused = true)]
 async fn scroll_keys_act_on_the_focused_area() {
     let mut h = Harness::new("demo", Size::new(160, 30)).await;
-    h.open_session("Codix 展示").await;
+    h.open_session("Conix 展示").await;
     for i in 0..20 {
         h.type_str(&format!("第 {i} 行")).await;
         h.keys("Shift+Enter").await;

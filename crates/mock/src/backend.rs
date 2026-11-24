@@ -21,7 +21,7 @@ pub type CallLog = Arc<Mutex<Vec<Command>>>;
 
 #[derive(Debug, Clone, Copy)]
 pub struct MockOptions {
-    /// 时间线加速倍数（`codix --mock … --speed 4`）。
+    /// 时间线加速倍数（`conix --mock … --speed 4`）。
     pub speed: f64,
     /// 场景里写的毫秒数以这个时刻为"墙上时间"的零点，用于填 `*_ms` 字段。
     pub epoch_ms: Millis,

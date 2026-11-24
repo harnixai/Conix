@@ -1,7 +1,7 @@
 //! 给演示用的真实实例灌一批数据（由 `scripts/demo.sh` 调用）：用真实模型跑几个会话，让
 //! todo、子 Agent、后台任务、goal、待答的提问、作业与触发记录、宿主工具、一次停在待确认的流程运行都有东西可看。
 //!
-//! 用法：`CODIX_HOME=<demo/home> demo_seed <codix 二进制> <示例项目目录>`，凭据从环境变量来。
+//! 用法：`CONIX_HOME=<demo/home> demo_seed <conix 二进制> <示例项目目录>`，凭据从环境变量来。
 
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -39,9 +39,9 @@ const TALKS: &[(&str, bool)] = &[
 ];
 
 fn home() -> PathBuf {
-    std::env::var_os("CODIX_HOME")
+    std::env::var_os("CONIX_HOME")
         .map(PathBuf::from)
-        .expect("set CODIX_HOME to the demo home")
+        .expect("set CONIX_HOME to the demo home")
 }
 
 async fn call(b: &Arc<dyn Backend>, cmd: Command) -> Reply {
@@ -101,7 +101,7 @@ fn job(name: &str, cron: &str, prompt: &str, enabled: bool) -> Job {
 #[tokio::main]
 async fn main() {
     let mut args = std::env::args().skip(1);
-    let exe = PathBuf::from(args.next().expect("codix binary"));
+    let exe = PathBuf::from(args.next().expect("conix binary"));
     let project = PathBuf::from(args.next().expect("project dir"))
         .canonicalize()
         .expect("project dir exists");

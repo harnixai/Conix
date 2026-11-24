@@ -1,5 +1,5 @@
 //! 插件的接缝（docs/design/plugins.md）在真实嵌入的 Agix 上：装 zip、看两份披露、启用后流程包挂进来、
-//! 运行里的程序步骤与 host 门禁经 `plugin.call` 调插件函数、插件函数里的 `codix.*` 宿主库。不调模型。
+//! 运行里的程序步骤与 host 门禁经 `plugin.call` 调插件函数、插件函数里的 `conix.*` 宿主库。不调模型。
 //! 单独一个测试文件：一个进程只能嵌入一份引擎。
 
 use std::path::{Path, PathBuf};
@@ -126,12 +126,12 @@ async fn a_plugin_is_installed_enabled_and_its_flow_runs_on_its_functions() {
         disclosure
             .capabilities
             .iter()
-            .any(|c| c.contains("host library `codix`")),
+            .any(|c| c.contains("host library `conix`")),
         "{disclosure:?}"
     );
     assert!(
         disclosure
-            .codix
+            .conix
             .iter()
             .any(|c| c.contains("demo-check") && c.contains("demo.check")),
         "{disclosure:?}"

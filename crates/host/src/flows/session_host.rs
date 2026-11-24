@@ -1,4 +1,4 @@
-//! Codix 的 `SessionHost`：流程派工器的会话，经 Hub 开在嵌入的 Agix 上（Hub 仍是引擎唯一的
+//! Conix 的 `SessionHost`：流程派工器的会话，经 Hub 开在嵌入的 Agix 上（Hub 仍是引擎唯一的
 //! 客户端）。会话 id 由派工器的键算出（Agix 的 `session.create` 认 `session_id`），所以同一个键
 //! 开两次——实例重启之后也一样——是同一个会话。
 
@@ -28,7 +28,7 @@ const SESSION_NOT_FOUND: i64 = -32000;
 const SCENE_NOT_FOUND: i64 = -32004;
 const INVALID_PARAMS: i64 = -32602;
 
-pub(crate) struct CodixSessionHost {
+pub(crate) struct ConixSessionHost {
     hub: WeakHub,
     /// 运行的记录（会话的归属要写流程名、主题、站名）；派工器建好后填上。
     pub(crate) engine: OnceLock<Arc<Engine>>,
@@ -38,7 +38,7 @@ pub(crate) struct CodixSessionHost {
     policies: Arc<RunPolicies>,
 }
 
-impl CodixSessionHost {
+impl ConixSessionHost {
     pub(crate) fn new(hub: WeakHub, policies: Arc<RunPolicies>) -> Arc<Self> {
         Arc::new(Self {
             hub,
@@ -134,7 +134,7 @@ pub(crate) fn station_of(key: &str) -> (String, bool) {
 
 /// 一个键开出来的会话 id：键的 v5 UUID，照引擎写 id 的样子写成 BASE58。
 pub(crate) fn session_id_of(key: &str) -> String {
-    let ns = uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_DNS, b"flow.codix");
+    let ns = uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_DNS, b"flow.conix");
     base58(uuid::Uuid::new_v5(&ns, key.as_bytes()).as_bytes())
 }
 
@@ -219,7 +219,7 @@ fn host_error(e: RpcError) -> HostError {
 }
 
 #[async_trait::async_trait]
-impl SessionHost for CodixSessionHost {
+impl SessionHost for ConixSessionHost {
     async fn open(&self, spec: OpenSpec) -> Result<Opened, HostError> {
         if let Some(had) = self.opened.locked().get(&spec.key)
             && *had != spec
@@ -232,7 +232,7 @@ impl SessionHost for CodixSessionHost {
         let p = &spec.placement;
         if p.instance.is_some() || p.template.is_some() || p.space.is_some() {
             return Err(HostError::Refused(
-                "Codix runs every session in this instance: instance, template and space are not supported"
+                "Conix runs every session in this instance: instance, template and space are not supported"
                     .into(),
             ));
         }

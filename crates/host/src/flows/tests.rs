@@ -9,7 +9,7 @@ use harnix_flow::runner::{Frame, OpenSpec, SessionHost, TurnEnd};
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
 
-use super::session_host::{CodixSessionHost, session_id_of};
+use super::session_host::{ConixSessionHost, session_id_of};
 use crate::engine::{Engine, Notification, RpcError};
 use crate::hub::{Hub, HubConfig, Registry};
 
@@ -127,7 +127,7 @@ fn spec(key: &str) -> OpenSpec {
 #[tokio::test]
 async fn a_key_opens_the_same_session_and_another_spec_for_it_is_refused() {
     let r = rig().await;
-    let host = CodixSessionHost::new(
+    let host = ConixSessionHost::new(
         r.hub.downgrade(),
         std::sync::Arc::new(super::policy::RunPolicies::in_memory()),
     );
@@ -156,7 +156,7 @@ async fn a_key_opens_the_same_session_and_another_spec_for_it_is_refused() {
 #[tokio::test]
 async fn frames_reach_the_runner_with_the_text_that_started_the_turn() {
     let r = rig().await;
-    let host = CodixSessionHost::new(
+    let host = ConixSessionHost::new(
         r.hub.downgrade(),
         std::sync::Arc::new(super::policy::RunPolicies::in_memory()),
     );
@@ -213,7 +213,7 @@ async fn frames_reach_the_runner_with_the_text_that_started_the_turn() {
 #[tokio::test]
 async fn a_closed_session_is_gone_and_its_stream_ends() {
     let r = rig().await;
-    let host = CodixSessionHost::new(
+    let host = ConixSessionHost::new(
         r.hub.downgrade(),
         std::sync::Arc::new(super::policy::RunPolicies::in_memory()),
     );

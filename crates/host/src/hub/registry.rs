@@ -1,4 +1,4 @@
-//! Codix 自己记的会话归属（architecture §8.4，`sessions.json`）。Agix 不知道一个会话是作业
+//! Conix 自己记的会话归属（architecture §8.4，`sessions.json`）。Agix 不知道一个会话是作业
 //! 触发的、哪个会话分叉来的，冷会话的名字它也不报，所以这些由实例记下来。
 
 use std::collections::BTreeMap;
@@ -23,7 +23,7 @@ pub struct Record {
     /// 实例建这个会话的时刻（会话列表的顺序、`#n` 按它）；0 是没记，用引擎报的。
     #[serde(default)]
     pub created_ms: u64,
-    /// 在 Codix 里关掉的：Agix 的列表里还有它（transcript 在），会话标签里不再列，在「已关闭」里。
+    /// 在 Conix 里关掉的：Agix 的列表里还有它（transcript 在），会话标签里不再列，在「已关闭」里。
     #[serde(default)]
     pub closed: bool,
     /// 关掉的时刻：「已关闭」按它新的在前。

@@ -1,6 +1,6 @@
 [package]
 name = "host"
-description = "Codix 实例进程：会话代理（经 Engine 用 Agix）、作业调度、socket 服务与单一接入"
+description = "Conix 实例进程：会话代理（经 Engine 用 Agix）、作业调度、socket 服务与单一接入"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

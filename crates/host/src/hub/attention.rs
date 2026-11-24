@@ -267,7 +267,7 @@ impl Hub {
         let a = Alert {
             kind: AlertKind::Test,
             level: NoticeLevel::Error,
-            title: "Codix test notification".into(),
+            title: "Conix test notification".into(),
             text: format!("from instance {} in {}", self.0.instance, self.0.project),
             at_ms: self.now(),
             target: None,
@@ -277,7 +277,7 @@ impl Hub {
 }
 
 impl Hub {
-    /// Codix 在 cli 层开了 `permissions.client_may_loosen`（流程站要 `acceptEdits`）；部署方的 managed 层
+    /// Conix 在 cli 层开了 `permissions.client_may_loosen`（流程站要 `acceptEdits`）；部署方的 managed 层
     /// 可以把它关掉，这时流程站的模式会被夹回去。按引擎实际的判定报（`config.explain`），不按我们写了什么。
     async fn loosen_check(&self) -> port::HealthCheck {
         use port::{HealthCheck, HealthStatus as H};
@@ -291,7 +291,7 @@ impl Hub {
         let (status, summary) = match r {
             Ok(v) if v["keys"][0]["value"] == true => (
                 H::Ok,
-                "Codix lets sessions ask for looser settings than the project's (flow stations run acceptEdits); managed settings still cap it".to_string(),
+                "Conix lets sessions ask for looser settings than the project's (flow stations run acceptEdits); managed settings still cap it".to_string(),
             ),
             Ok(v) => (
                 H::Degraded,
@@ -303,7 +303,7 @@ impl Hub {
             Err(e) => (H::Degraded, format!("config.explain: {e}")),
         };
         HealthCheck {
-            name: "codix.session_loosen".into(),
+            name: "conix.session_loosen".into(),
             status,
             summary,
         }
@@ -331,39 +331,39 @@ impl Hub {
             ),
             Err(e) => out.push(check("agix", H::Failing, e.to_string())),
         }
-        let data = std::path::Path::new(&self.0.project).join(".codix");
+        let data = std::path::Path::new(&self.0.project).join(".conix");
         let ignored = std::fs::read_to_string(data.join(".gitignore"))
             .is_ok_and(|t| t.lines().any(|l| l.trim() == "state/"));
         out.push(check(
-            "codix.project_state",
+            "conix.project_state",
             H::Ok,
             format!(
                 "{} (locked by this instance)",
-                data.join("state/codix").display()
+                data.join("state/conix").display()
             ),
         ));
         out.push(if ignored {
             check(
-                "codix.gitignore",
+                "conix.gitignore",
                 H::Ok,
-                ".codix/.gitignore keeps state/ out of git".into(),
+                ".conix/.gitignore keeps state/ out of git".into(),
             )
         } else {
             check(
-                "codix.gitignore",
+                "conix.gitignore",
                 H::Degraded,
-                ".codix/.gitignore does not name state/: local state may end up in git".into(),
+                ".conix/.gitignore does not name state/: local state may end up in git".into(),
             )
         });
         let problems = self.0.config_problems.locked().clone();
         out.push(if problems.is_empty() {
             check(
-                "codix.config",
+                "conix.config",
                 H::Ok,
-                "codix.yaml jobs and notify parse".into(),
+                "conix.yaml jobs and notify parse".into(),
             )
         } else {
-            check("codix.config", H::Degraded, problems.join("; "))
+            check("conix.config", H::Degraded, problems.join("; "))
         });
         let sinks = self
             .0
@@ -372,7 +372,7 @@ impl Hub {
             .as_ref()
             .map_or(0, |n| n.cfg.sinks.len());
         out.push(check(
-            "codix.notify",
+            "conix.notify",
             H::Ok,
             if sinks == 0 {
                 "no notification sinks: what needs you waits until you attach".into()
@@ -384,12 +384,12 @@ impl Hub {
         let network = self.guard_config().defaults.network.unwrap_or_default();
         out.push(match network {
             port::Network::Inherit => check(
-                "codix.jobs_network",
+                "conix.jobs_network",
                 H::Degraded,
                 "jobs.defaults.network is inherit: unattended, Agix refuses a job's shell commands that have no allow rule unless the network is restricted (see sandbox.unattended_network)".into(),
             ),
             n => check(
-                "codix.jobs_network",
+                "conix.jobs_network",
                 H::Ok,
                 format!(
                     "jobs' shell commands run with network {} unless a job says otherwise",
@@ -398,10 +398,10 @@ impl Hub {
             ),
         });
         out.push(if self.flows().is_some() {
-            check("codix.flows", H::Ok, "flows are running".into())
+            check("conix.flows", H::Ok, "flows are running".into())
         } else {
             check(
-                "codix.flows",
+                "conix.flows",
                 H::Failing,
                 "flows are not available (see host.log)".into(),
             )

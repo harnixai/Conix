@@ -1,4 +1,4 @@
-//! 无人值守的用量账（architecture §8.5 每日额度）：`state/codix/usage/<YYYYMMDD>.json`，按作业记当天
+//! 无人值守的用量账（architecture §8.5 每日额度）：`state/conix/usage/<YYYYMMDD>.json`，按作业记当天
 //! 用了多少 token。日期按本地时区：额度是"今天"的，人看的也是本地的今天。
 
 use std::collections::BTreeMap;

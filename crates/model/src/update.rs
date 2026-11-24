@@ -973,7 +973,7 @@ fn read_transcript(s: &mut State) {
 pub(crate) fn toggle_mouse(s: &mut State) -> Vec<Effect> {
     s.ui.mouse_captured = !s.ui.mouse_captured;
     let text = if s.ui.mouse_captured {
-        i18n::t!("update.mouse_codix")
+        i18n::t!("update.mouse_conix")
     } else {
         i18n::t!("update.mouse_terminal")
     };

@@ -119,10 +119,10 @@ pub fn view(s: &State) -> FrameState {
     }
 }
 
-/// 顶栏：`[CODIX] 实例@主机  项目目录  场景  模型`。实例与项目是全局的；场景、模型取当前
+/// 顶栏：`[CONIX] 实例@主机  项目目录  场景  模型`。实例与项目是全局的；场景、模型取当前
 /// 对话区的会话（没有会话时不写）。
 fn header(s: &State) -> Header {
-    let mut left = Line::toned("[CODIX]", Tone::Accent);
+    let mut left = Line::toned("[CONIX]", Tone::Accent);
     if let Some(i) = &s.domain.instance {
         left = left
             .push(format!(" {}@{}", i.name, i.host), Tone::Strong)

@@ -40,7 +40,7 @@ pub(crate) fn bindings() -> Vec<Binding> {
         b(C::Composer, "Enter", A::Submit),
         b(C::Composer, "Shift+Enter", A::Newline),
         // Alt+Enter、Alt+←→、Alt+B/F、Ctrl+←→ 只为兼容留着，不进底栏和文档：它们是各家终端按
-        // Option+← 之类时自己发出来的编辑键（macOS 终端发的是 Esc b / Esc f），不是 Codix 的快捷键。
+        // Option+← 之类时自己发出来的编辑键（macOS 终端发的是 Esc b / Esc f），不是 Conix 的快捷键。
         b(C::Composer, "Alt+Enter", A::Newline),
         b(C::Composer, "Ctrl+J", A::Newline),
         b(C::Composer, "Tab", A::Complete),

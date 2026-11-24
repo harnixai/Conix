@@ -15,7 +15,7 @@ pub enum Command {
         client: ClientInfo,
         #[serde(default)]
         force: bool,
-        /// 这一次接入的空闲超时（`codix attach --idle-timeout`）；`None` 用实例自己配置的。
+        /// 这一次接入的空闲超时（`conix attach --idle-timeout`）；`None` 用实例自己配置的。
         #[serde(default)]
         idle_timeout_ms: Option<u64>,
     },
@@ -131,7 +131,7 @@ pub enum Command {
         from_byte: u64,
     },
 
-    /// 在 Codix 里关掉的会话（转录还在），关掉的时刻新的在前（交互 §5.2「已关闭」）。
+    /// 在 Conix 里关掉的会话（转录还在），关掉的时刻新的在前（交互 §5.2「已关闭」）。
     ListClosedSessions,
     /// 已关闭的会话放回会话列表。
     ReopenSession {

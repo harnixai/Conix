@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-/// 可装的包：自带目录与 `~/.codix/plugin-store/` 里的 zip，只按文件名 `<名>-<版本>.zip` 列，不解包。
+/// 可装的包：自带目录与 `~/.conix/plugin-store/` 里的 zip，只按文件名 `<名>-<版本>.zip` 列，不解包。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PluginPackage {
     pub name: String,
@@ -25,7 +25,7 @@ pub struct PluginInfo {
     /// 启用了却不会加载的原因（Agix 报的，如用了宿主没提供的库）。
     #[serde(default)]
     pub disabled_reason: Option<String>,
-    /// 它带来的流程（`[x-codix]`）。
+    /// 它带来的流程（`[x-conix]`）。
     #[serde(default)]
     pub flows: Vec<String>,
     /// 它带来的 host 门禁与程序步骤名。
@@ -51,7 +51,7 @@ pub struct VisibleText {
     pub text: String,
 }
 
-/// 安装时摆给人看的：Agix 的一份（它读得懂的部分），Codix 的一份（`[x-codix]` 带来的，Agix 不读）。
+/// 安装时摆给人看的：Agix 的一份（它读得懂的部分），Conix 的一份（`[x-conix]` 带来的，Agix 不读）。
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PluginDisclosure {
     /// 能力：命令能写什么、函数、脚本点、用了哪个宿主库……
@@ -61,10 +61,10 @@ pub struct PluginDisclosure {
     pub mcp_servers: Vec<String>,
     #[serde(default)]
     pub model_visible: Vec<VisibleText>,
-    /// Codix 的：流程（名字 — 标题）、门禁与步骤各对应哪个插件函数、是否要 command 门禁。
+    /// Conix 的：流程（名字 — 标题）、门禁与步骤各对应哪个插件函数、是否要 command 门禁。
     #[serde(default)]
-    pub codix: Vec<String>,
-    /// Codix 的：流程包里站的 skill 正文等，会到达模型。
+    pub conix: Vec<String>,
+    /// Conix 的：流程包里站的 skill 正文等，会到达模型。
     #[serde(default)]
-    pub codix_model_visible: Vec<VisibleText>,
+    pub conix_model_visible: Vec<VisibleText>,
 }

@@ -1,4 +1,4 @@
-//! 配色（需求：主题可配置，`~/.codix/codix.yaml` 的 `ui.theme`）。渲染端的每一种颜色都从
+//! 配色（需求：主题可配置，`~/.conix/conix.yaml` 的 `ui.theme`）。渲染端的每一种颜色都从
 //! 这里取，不在别处写死。预设 `claude`（橙）与 `aqua`（水蓝），其余颜色两者相同。
 
 use ratatui::style::Color;

@@ -1,4 +1,4 @@
-//! 开场欢迎块（需求 C-18，交互 §4.2）：Codix logo、版本、实例、项目、场景、模型、常用键。
+//! 开场欢迎块（需求 C-18，交互 §4.2）：Conix logo、版本、实例、项目、场景、模型、常用键。
 
 use port::SessionSummary;
 use tui::{Line, Tone, display_width, truncate_to_width};
@@ -51,7 +51,7 @@ fn boxed(width: usize, info: Vec<String>) -> Vec<Line> {
     let w = width.min(BOX_MAX);
     if w < 24 {
         return vec![Line::toned(
-            format!("Codix {}", short_version()),
+            format!("Conix {}", short_version()),
             Tone::Accent,
         )];
     }
@@ -59,7 +59,7 @@ fn boxed(width: usize, info: Vec<String>) -> Vec<Line> {
     let mut body: Vec<Line> = vec![
         Line::toned(LOGO[0], Tone::Accent),
         Line::toned(LOGO[1], Tone::Accent)
-            .push(format!("   Codix {}", short_version()), Tone::Strong),
+            .push(format!("   Conix {}", short_version()), Tone::Strong),
         Line::default(),
     ];
     body.extend(info.into_iter().map(|t| Line::toned(t, Tone::Dim)));

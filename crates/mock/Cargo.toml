@@ -1,6 +1,6 @@
 [package]
 name = "mock"
-description = "Codix 的 mock 后端：种子数据 + 脚本化场景"
+description = "Conix 的 mock 后端：种子数据 + 脚本化场景"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

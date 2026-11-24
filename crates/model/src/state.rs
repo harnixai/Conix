@@ -197,7 +197,7 @@ pub struct Domain {
     pub run_views: Map<port::RunId, port::RunView>,
     /// 项目里的文件（`@` 提及的补全）；`None` 是还没取。
     pub project_files: Option<Vec<String>>,
-    /// 在 Codix 里关掉的会话（会话标签末尾的「已关闭」）。
+    /// 在 Conix 里关掉的会话（会话标签末尾的「已关闭」）。
     pub closed_sessions: Vec<SessionSummary>,
     pub closed_loaded: bool,
     /// 已结束的运行，不分流程，结束时刻新的在前（流程标签末尾的「已结束」，交互 §5.3）。

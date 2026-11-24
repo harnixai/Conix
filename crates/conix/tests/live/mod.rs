@@ -1,8 +1,8 @@
-//! LIVE 测试的共用部分（testing.md §8）：真实的 `codix host` 进程、真实的 Agix 与模型，
+//! LIVE 测试的共用部分（testing.md §8）：真实的 `conix host` 进程、真实的 Agix 与模型，
 //! 从 TUI 走的那条路接入——`SocketInstances` 拉起与接入，`SocketBackend` 收发 `port` 的命令与
-//! 事件。只测 Codix 自己做的事（实例、接入、会话代理、作业……），Agix 的特性它自己测。
+//! 事件。只测 Conix 自己做的事（实例、接入、会话代理、作业……），Agix 的特性它自己测。
 //!
-//! 每个用例一个 [`Live`]：独立的 `CODIX_HOME`（放在 /tmp 下的短路径，socket 路径有 104 字节的
+//! 每个用例一个 [`Live`]：独立的 `CONIX_HOME`（放在 /tmp 下的短路径，socket 路径有 104 字节的
 //! 上限）、一个 git 示例项目、写好提问超时的 Agix `settings.json`。凭据从仓库根的 `.env` 读，只交给
 //! 实例进程的环境，不进测试进程、不打印。用例结束不论成败都停掉它起的实例。
 
@@ -28,12 +28,12 @@ pub const TURN: Duration = Duration::from_secs(180);
 /// 等不靠模型的事件（列表变化、连接事件）的上限。
 pub const QUICK: Duration = Duration::from_secs(30);
 
-/// 仓库根 `.env` 里的变量（`CODIX_LIVE_ENV` 可指定别的文件）。worktree 里没有 `.env` 时往上找，
+/// 仓库根 `.env` 里的变量（`CONIX_LIVE_ENV` 可指定别的文件）。worktree 里没有 `.env` 时往上找，
 /// 所以 `.claude/worktrees/*` 里也能跑。
 pub fn credentials() -> &'static BTreeMap<String, String> {
     static ENV: OnceLock<BTreeMap<String, String>> = OnceLock::new();
     ENV.get_or_init(|| {
-        let path = std::env::var_os("CODIX_LIVE_ENV")
+        let path = std::env::var_os("CONIX_LIVE_ENV")
             .map(PathBuf::from)
             .or_else(|| {
                 Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -42,7 +42,7 @@ pub fn credentials() -> &'static BTreeMap<String, String> {
                     .find(|p| p.is_file())
             })
             .unwrap_or_else(|| {
-                panic!("LIVE 测试要凭据：仓库根放一个 .env（或用 CODIX_LIVE_ENV 指定文件）")
+                panic!("LIVE 测试要凭据：仓库根放一个 .env（或用 CONIX_LIVE_ENV 指定文件）")
             });
         let text = std::fs::read_to_string(&path)
             .unwrap_or_else(|e| panic!("读不了 {}：{e}", path.display()));
@@ -74,15 +74,15 @@ pub fn model() -> String {
     credentials()["ANTHROPIC_MODEL"].clone()
 }
 
-fn codix() -> &'static str {
-    env!("CARGO_BIN_EXE_codix")
+fn conix() -> &'static str {
+    env!("CARGO_BIN_EXE_conix")
 }
 
 /// 刚链接出的二进制第一次执行要被 macOS 扫描，先跑一次，免得算进实例的启动时间。
 fn prewarm() {
     static DONE: OnceLock<()> = OnceLock::new();
     DONE.get_or_init(|| {
-        let _ = std::process::Command::new(codix())
+        let _ = std::process::Command::new(conix())
             .arg("--version")
             .output();
     });
@@ -102,8 +102,8 @@ pub struct Live {
 
 #[derive(Default)]
 pub struct Opts {
-    /// 写进 `codix.yaml` 的内容（实例的配置，比如空闲超时）。
-    pub codix_yaml: Option<String>,
+    /// 写进 `conix.yaml` 的内容（实例的配置，比如空闲超时）。
+    pub conix_yaml: Option<String>,
     /// 只给实例进程的额外环境变量（比如缩短心跳超时）。
     pub env: Vec<(String, String)>,
 }
@@ -120,7 +120,7 @@ impl Live {
             .tempdir_in("/tmp")
             .unwrap();
         // 提问超时放长，等人回答的不会自己撤掉。模型不写设置：0.4 里没定义 providers 时，
-        // 自带的 anthropic 用进程参数取模型，由 CODIX_MODEL 交给实例进程（见下面的 env）。
+        // 自带的 anthropic 用进程参数取模型，由 CONIX_MODEL 交给实例进程（见下面的 env）。
         std::fs::write(
             home.path().join("settings.json"),
             serde_json::to_string_pretty(&serde_json::json!({
@@ -129,18 +129,18 @@ impl Live {
             .unwrap(),
         )
         .unwrap();
-        if let Some(y) = &opts.codix_yaml {
-            std::fs::write(home.path().join("codix.yaml"), y).unwrap();
+        if let Some(y) = &opts.conix_yaml {
+            std::fs::write(home.path().join("conix.yaml"), y).unwrap();
         }
         let project = new_project("app");
         let mut env: Vec<(String, String)> = credentials()
             .iter()
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
-        env.push(("CODIX_MODEL".to_string(), model()));
+        env.push(("CONIX_MODEL".to_string(), model()));
         env.extend(opts.env.iter().cloned());
         let instances =
-            Arc::new(SocketInstances::new(Layout::new(home.path()), codix()).with_env(env.clone()));
+            Arc::new(SocketInstances::new(Layout::new(home.path()), conix()).with_env(env.clone()));
         Live {
             home,
             project,
@@ -200,7 +200,7 @@ impl Live {
         self.instances.stop(NAME).await.expect("停实例");
     }
 
-    /// 停掉再照 `meta.json` 拉起（`codix start`），返回新的接入。
+    /// 停掉再照 `meta.json` 拉起（`conix start`），返回新的接入。
     pub async fn restart(&self) -> Client {
         self.stop().await;
         self.start_again().await
@@ -215,7 +215,7 @@ impl Live {
         self.layout().instance(NAME)
     }
 
-    /// 项目里 Codix 的东西：`state/codix/`、`.codix/jobs.json`。
+    /// 项目里 Conix 的东西：`state/conix/`、`.conix/jobs.json`。
     pub fn state(&self) -> ProjectState {
         ProjectState::new(self.project_path())
     }
@@ -230,7 +230,7 @@ impl Live {
         read_json_file(&self.state().dir().join(file))
     }
 
-    /// 作业定义：`.codix/jobs.json`。
+    /// 作业定义：`.conix/jobs.json`。
     pub fn read_jobs(&self) -> serde_json::Value {
         read_json_file(&self.state().jobs())
     }
@@ -314,16 +314,16 @@ impl Live {
         std::fs::read_to_string(self.layout().log(NAME)).unwrap_or_default()
     }
 
-    /// 直接跑 `codix host`（不经 `SocketInstances`）：测项目锁。
+    /// 直接跑 `conix host`（不经 `SocketInstances`）：测项目锁。
     pub fn run_host_directly(&self, name: &str) -> std::process::Output {
         self.run_host_directly_in(name, &self.project_path())
     }
 
     /// 同上，指定项目：测同名实例的锁（同一个项目会先撞上项目锁）。
     pub fn run_host_directly_in(&self, name: &str, project: &str) -> std::process::Output {
-        std::process::Command::new(codix())
+        std::process::Command::new(conix())
             .args(["host", "--name", name, "--project", project])
-            .env("CODIX_HOME", self.home.path())
+            .env("CONIX_HOME", self.home.path())
             .env_remove("DYLD_FALLBACK_LIBRARY_PATH")
             .envs(self.extra_env.iter().map(|(k, v)| (k, v)))
             .output()
@@ -332,17 +332,17 @@ impl Live {
 }
 
 impl Drop for Live {
-    /// 用例中途失败也要停掉实例：否则留下常驻的 `codix host` 进程。`Drop` 里不能 await，
-    /// 所以走命令行的 `codix stop`。
+    /// 用例中途失败也要停掉实例：否则留下常驻的 `conix host` 进程。`Drop` 里不能 await，
+    /// 所以走命令行的 `conix stop`。
     fn drop(&mut self) {
         let Ok(dir) = std::fs::read_dir(self.layout().instances()) else {
             return;
         };
         for e in dir.flatten() {
-            let _ = std::process::Command::new(codix())
+            let _ = std::process::Command::new(conix())
                 .arg("stop")
                 .arg(e.file_name())
-                .env("CODIX_HOME", self.home.path())
+                .env("CONIX_HOME", self.home.path())
                 .env_remove("DYLD_FALLBACK_LIBRARY_PATH")
                 .output();
         }
@@ -359,7 +359,7 @@ pub fn new_project(name: &str) -> tempfile::TempDir {
     let dir = tempfile::Builder::new().prefix(name).tempdir().unwrap();
     std::fs::write(
         dir.path().join("README.md"),
-        "# app\n\nA tiny sample project for Codix live tests.\n",
+        "# app\n\nA tiny sample project for Conix live tests.\n",
     )
     .unwrap();
     let git = |args: &[&str]| {
@@ -374,7 +374,7 @@ pub fn new_project(name: &str) -> tempfile::TempDir {
         "-c",
         "user.name=live",
         "-c",
-        "user.email=live@codix",
+        "user.email=live@conix",
         "add",
         ".",
     ]);
@@ -382,7 +382,7 @@ pub fn new_project(name: &str) -> tempfile::TempDir {
         "-c",
         "user.name=live",
         "-c",
-        "user.email=live@codix",
+        "user.email=live@conix",
         "commit",
         "-q",
         "-m",

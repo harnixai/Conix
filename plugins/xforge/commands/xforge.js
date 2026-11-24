@@ -32,7 +32,7 @@ const TEMPLATES = {
 };
 const ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const REQ_RE = /^([a-z][a-z0-9-]*)\/R(\d+)$/;
-const NOISE = [".codix/", ".harnix/", ".agix/", ".wkts/", "xforge/"];
+const NOISE = [".conix/", ".harnix/", ".agix/", ".wkts/", "xforge/"];
 
 // ---------- 文件 ----------
 
@@ -80,7 +80,7 @@ const isWritten = (text) => text !== null && text.trim() !== "" && !text.include
 
 async function flowCurrent() {
   try {
-    return await codix.flow.current();
+    return await conix.flow.current();
   } catch (_) {
     return null;
   }
@@ -89,7 +89,7 @@ async function flowCurrent() {
 async function runSummary(run) {
   if (!run) return null;
   try {
-    const v = await codix.flow.run({ run });
+    const v = await conix.flow.run({ run });
     return { status: v.summary.status, stations: v.stations.map((s) => ({ id: s.id, status: s.status })) };
   } catch (_) {
     return null;
@@ -530,7 +530,7 @@ function readOnly(name, args) {
 }
 
 // 会改数据的子命令不在会话里写：流程站的会话里派工器要逐次判 Write（会话上有 Write 的 ask 规则），
-// 而命令里的子调用问不了人，一写就失败。所以先在会话里认出当前变更（要 codix.flow.current），再交给本包的
+// 而命令里的子调用问不了人，一写就失败。所以先在会话里认出当前变更（要 conix.flow.current），再交给本包的
 // 函数 xforge.command 去做——宿主以不带会话的 plugin.call 调它，写入只限函数声明的 xforge/**。
 // `xforge start` 例外：它要以人的会话的身份开运行，留在会话里。
 async function commandMain(name, argv, input, ctx) {
@@ -546,7 +546,7 @@ async function commandMain(name, argv, input, ctx) {
     }
   }
   try {
-    return await codix.plugin.call({ function: "xforge.command", input: { argv: [name, ...args] } });
+    return await conix.plugin.call({ function: "xforge.command", input: { argv: [name, ...args] } });
   } catch (e) {
     return { ok: false, error: { code: (e && e.code) || "failed", message: String((e && e.message) || e) } };
   }
@@ -796,7 +796,7 @@ async function xforgeCmd(args) {
     if (!allowed.includes(risk)) throw bad("risk", `xforge-${p[1]} takes risk ${allowed.join(" or ")}, not ${risk}: use another flow`);
     await readManifest();
     try {
-      const r = await codix.flow.start({ flow: `xforge-${p[1]}`, subject: p[2], inputs: { title: p[2], risk } });
+      const r = await conix.flow.start({ flow: `xforge-${p[1]}`, subject: p[2], inputs: { title: p[2], risk } });
       return { run: r.run, flow: `xforge-${p[1]}`, risk };
     } catch (e) {
       throw bad(e.code || "start_failed", e.message);

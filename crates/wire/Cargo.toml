@@ -1,6 +1,6 @@
 [package]
 name = "wire"
-description = "Agix 协议的 JSON-RPC 客户端与 Codix 用到的 serde 类型"
+description = "Agix 协议的 JSON-RPC 客户端与 Conix 用到的 serde 类型"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

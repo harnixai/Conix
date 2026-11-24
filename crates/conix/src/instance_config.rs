@@ -1,4 +1,4 @@
-//! 实例用到的 `codix.yaml` 那几段（`jobs`、`notify`）：启动时与会话里改配置（`codix_config_set`，
+//! 实例用到的 `conix.yaml` 那几段（`jobs`、`notify`）：启动时与会话里改配置（`conix_config_set`，
 //! architecture §8.11）走同一套解析与生效，免得两边对同一份文件读出两种结果。
 
 use std::path::{Path, PathBuf};
@@ -16,7 +16,7 @@ pub struct NotifyOrigin {
     pub log: PathBuf,
 }
 
-/// 把 `jobs` 与 `notify` 交给实例；回读不懂的项（写进 `/doctor` 的 codix.config）。
+/// 把 `jobs` 与 `notify` 交给实例；回读不懂的项（写进 `/doctor` 的 conix.config）。
 pub fn apply(hub: &Hub, cfg: &Config, notify: &NotifyOrigin) -> Vec<String> {
     let j = &cfg.jobs;
     let text = |a: &Option<config::Amount>| a.as_ref().map(config::Amount::text);
@@ -40,8 +40,8 @@ pub fn apply(hub: &Hub, cfg: &Config, notify: &NotifyOrigin) -> Vec<String> {
             Ok(n) => {
                 let mut n =
                     host::notify::Notifier::new(n, notify.origin.clone(), Some(notify.log.clone()));
-                // 只给 LIVE 测试用：合并窗口缩短，免得每条用例干等一分钟。不进 codix.yaml。
-                if let Some(ms) = std::env::var("CODIX_TEST_NOTIFY_WINDOW_MS")
+                // 只给 LIVE 测试用：合并窗口缩短，免得每条用例干等一分钟。不进 conix.yaml。
+                if let Some(ms) = std::env::var("CONIX_TEST_NOTIFY_WINDOW_MS")
                     .ok()
                     .and_then(|v| v.parse::<u64>().ok())
                 {
@@ -53,7 +53,7 @@ pub fn apply(hub: &Hub, cfg: &Config, notify: &NotifyOrigin) -> Vec<String> {
         }
     }
     for p in &problems {
-        tracing::warn!("codix.yaml: {p}");
+        tracing::warn!("conix.yaml: {p}");
     }
     hub.set_config_problems(problems.clone());
     problems
@@ -109,7 +109,7 @@ impl YamlStore {
 /// 与启动时同一个解析；读不懂的项（`jobs`、`notify` 的写法）也算不过。
 fn check(text: &str) -> Result<Config, String> {
     let cfg: Config =
-        serde_yaml::from_str(text).map_err(|e| format!("codix.yaml would not parse: {e}"))?;
+        serde_yaml::from_str(text).map_err(|e| format!("conix.yaml would not parse: {e}"))?;
     Ok(cfg)
 }
 
@@ -118,7 +118,7 @@ fn sections(text: &str) -> serde_yaml::Value {
 }
 
 #[async_trait]
-impl host::hub::CodixConfigStore for YamlStore {
+impl host::hub::ConixConfigStore for YamlStore {
     fn read(&self) -> Result<String, String> {
         std::fs::read_to_string(self.path()).map_err(|e| format!("{}: {e}", self.path().display()))
     }
@@ -128,7 +128,7 @@ impl host::hub::CodixConfigStore for YamlStore {
         let mut root: serde_yaml::Value = if old.trim().is_empty() {
             serde_yaml::Value::Mapping(Default::default())
         } else {
-            serde_yaml::from_str(&old).map_err(|e| format!("codix.yaml does not parse now: {e}"))?
+            serde_yaml::from_str(&old).map_err(|e| format!("conix.yaml does not parse now: {e}"))?
         };
         let v: serde_yaml::Value =
             serde_json::from_value(value.clone()).map_err(|e| e.to_string())?;
@@ -148,7 +148,7 @@ impl host::hub::CodixConfigStore for YamlStore {
         let old = self.read().unwrap_or_default();
         let dir = self.home.join("config-backups");
         std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-        let backup = dir.join(format!("codix-{}.yaml", host::instance::now_ms()));
+        let backup = dir.join(format!("conix-{}.yaml", host::instance::now_ms()));
         std::fs::write(&backup, &old).map_err(|e| format!("backup {}: {e}", backup.display()))?;
         let tmp = self.path().with_extension("yaml.tmp");
         std::fs::write(&tmp, text)
@@ -227,7 +227,7 @@ mod tests {
                 log: dir.path().join("n.jsonl"),
             },
         };
-        use host::hub::CodixConfigStore as _;
+        use host::hub::ConixConfigStore as _;
         assert!(
             s.set("jobs.defaults.network", &serde_json::json!("everywhere"))
                 .is_err()
