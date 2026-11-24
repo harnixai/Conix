@@ -30,16 +30,12 @@ impl Harness {
                 name: "dev".into(),
                 force: false,
             }),
-            None,
         )
         .await
     }
 
-    pub async fn start(scenario: &str, size: Size, start: Start, idle: Option<u64>) -> Harness {
-        let mut settings = model::Settings::default();
-        if let Some(t) = idle {
-            settings.idle_timeout_ms = t;
-        }
+    pub async fn start(scenario: &str, size: Size, start: Start) -> Harness {
+        let settings = model::Settings::default();
         let sc =
             mock::load_scenario(scenario).unwrap_or_else(|_| mock::Scenario::seed_only(scenario));
         let instances = Arc::new(mock::MockInstances::new(sc, mock::MockOptions::default()));

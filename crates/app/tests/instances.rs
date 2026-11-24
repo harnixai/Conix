@@ -1,4 +1,4 @@
-//! 场景 m21：实例选择、占用与强制接入、被踢、空闲脱离、心跳、停止（需求 I-01 至 I-11）。
+//! 场景 m21：实例选择、占用与强制接入、被踢、不做空闲脱离、心跳、停止（需求 I-01 至 I-11）。
 
 mod common;
 
@@ -11,7 +11,7 @@ use tui::Size;
 const SIZE: Size = Size::new(140, 36);
 
 async fn picker() -> Harness {
-    Harness::start("default", SIZE, Start::Picker, None).await
+    Harness::start("default", SIZE, Start::Picker).await
 }
 
 fn on_picker(h: &Harness) -> bool {
@@ -69,7 +69,6 @@ async fn m21_attach_occupied_from_command_line_falls_back_to_picker() {
             name: "ops".into(),
             force: false,
         }),
-        None,
     )
     .await;
     assert!(on_picker(&h));
@@ -122,40 +121,22 @@ async fn m21_kicked_goes_to_detached_then_back_to_picker() {
     assert!(on_picker(&h));
 }
 
+/// 没有空闲脱离：放着不动几个小时也还接着，心跳照发（被踢、实例停了才脱离；占着不放的由别人强制接入）。
 #[tokio::test(start_paused = true)]
-async fn m21_idle_warns_then_detaches_then_any_key_reattaches() {
-    let mut h = Harness::start(
-        "default",
-        SIZE,
-        Start::Op(model::InstOp::Attach {
-            name: "dev".into(),
-            force: false,
-        }),
-        Some(5 * 60_000),
-    )
-    .await;
-    h.advance(4 * 60_000 + 1_000).await;
+async fn m21_a_quiet_tui_stays_attached_and_keeps_beating() {
+    let mut h = Harness::new("default", SIZE).await;
+    h.advance(3 * 3_600_000).await;
+    assert_eq!(h.core.state.ui.screen, Screen::Workbench);
+    let calls = h.instances.backend("dev").unwrap().calls();
+    let calls = calls.lock().unwrap();
+    assert!(!calls.contains(&Command::Detach), "不会自己脱离");
     assert!(
-        h.last_line().contains("分钟后因空闲脱离"),
-        "{}",
-        h.last_line()
+        calls
+            .iter()
+            .filter(|c| matches!(c, Command::Heartbeat { .. }))
+            .count()
+            > 100
     );
-    h.tab(model::Tab::Sessions).await;
-    h.advance(4 * 60_000 + 30_000).await;
-    assert_eq!(
-        h.core.state.ui.screen,
-        Screen::Workbench,
-        "有输入就重新计时"
-    );
-    h.advance(60_000).await;
-    assert!(matches!(
-        h.core.state.ui.screen,
-        Screen::Detached(DetachReason::Idle { .. })
-    ));
-    let detached = h.instances.backend("dev").unwrap().calls();
-    assert!(detached.lock().unwrap().contains(&Command::Detach));
-    h.keys("a").await;
-    assert_eq!(h.core.state.ui.screen, Screen::Workbench, "任意键重新接入");
 }
 
 #[tokio::test(start_paused = true)]

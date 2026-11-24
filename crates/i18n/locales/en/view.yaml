@@ -115,6 +115,4 @@ view:
     kicked: "Force-attached by {by} ({ago} ago)"
     still_running: "The instance is still running"
     kicked_keys: "Enter to pick an instance · q to quit"
-    idle: "Idle for {idle}; detached automatically, the instance is still running"
-    idle_keys: "Any key to reattach · q to quit"
     stopped: "Instance {name} stopped"

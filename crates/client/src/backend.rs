@@ -38,12 +38,11 @@ struct Inner {
     discovery: Option<PathBuf>,
     client: ClientInfo,
     next_id: AtomicU64,
-    /// 最近一次心跳带的 `last_input_ms`：重连的 `Hello` 用它，否则实例拿握手时的旧值算空闲，
-    /// 一接回来就可能判成超时。
+    /// 最近一次心跳带的 `last_input_ms`：重连的 `Hello` 用它，否则 `conix list` 报的空闲时长回到
+    /// 握手时的旧值。
     last_input_ms: AtomicU64,
-    idle_timeout_ms: Option<u64>,
     link: Mutex<Link>,
-    /// 被踢、空闲脱离、实例停了，或者是自己要脱离 / 停实例：之后断开不再重连。
+    /// 被踢、实例停了，或者是自己要脱离 / 停实例：之后断开不再重连。
     done: AtomicBool,
     events: mpsc::UnboundedSender<Event>,
 }
@@ -63,10 +62,9 @@ impl SocketBackend {
         discovery: Option<PathBuf>,
         client: ClientInfo,
         force: bool,
-        idle_timeout_ms: Option<u64>,
     ) -> Result<SocketBackend, PortError> {
         let socket = socket.into();
-        let (lines, wr, reply) = handshake(&socket, &client, force, idle_timeout_ms).await?;
+        let (lines, wr, reply) = handshake(&socket, &client, force).await?;
         let Reply::Hello { instance, .. } = reply else {
             return Err(PortError::Failed("unexpected handshake reply".into()));
         };
@@ -75,7 +73,6 @@ impl SocketBackend {
             socket,
             discovery,
             last_input_ms: AtomicU64::new(client.last_input_ms),
-            idle_timeout_ms,
             client,
             next_id: AtomicU64::new(1),
             link: Mutex::new(Link::default()),
@@ -146,12 +143,7 @@ impl Inner {
                 }
             }
             Ok(ServerFrame::Event { event }) => {
-                if matches!(
-                    event,
-                    Event::Kicked { .. }
-                        | Event::IdleDetached { .. }
-                        | Event::InstanceStopped { .. }
-                ) {
+                if matches!(event, Event::Kicked { .. } | Event::InstanceStopped { .. }) {
                     self.done.store(true, Ordering::SeqCst);
                 }
                 self.emit(event);
@@ -181,7 +173,6 @@ async fn handshake(
     socket: &Path,
     client: &ClientInfo,
     force: bool,
-    idle_timeout_ms: Option<u64>,
 ) -> Result<(Reader, OwnedWriteHalf, Reply), PortError> {
     let stream = UnixStream::connect(socket)
         .await
@@ -193,7 +184,6 @@ async fn handshake(
         cmd: Command::Hello {
             client: client.clone(),
             force,
-            idle_timeout_ms,
         },
     };
     write_frame(&mut wr, &hello)
@@ -271,7 +261,7 @@ async fn reconnect(weak: Weak<Inner>) {
         if inner.instance_gone() {
             return give_up(&inner, "instance exited");
         }
-        match handshake(&socket, &client, false, inner.idle_timeout_ms).await {
+        match handshake(&socket, &client, false).await {
             Ok((lines, wr, _)) => return install(&inner, lines, wr, true),
             // 断开期间有人正常接入了（比如服务端因心跳超时放掉了我们）。实例还在跑，说
             // "实例停了"是错的；对用户来说这就是被别人占了，按被踢处理，同样不再重连。

@@ -82,7 +82,7 @@ async fn every_optional_frame_field_is_produced_somewhere() {
     let size = Size::new(160, 45);
     let mut seen = BTreeSet::new();
 
-    let mut h = Harness::start("default", size, Start::Picker, None).await;
+    let mut h = Harness::start("default", size, Start::Picker).await;
     mark(&mut seen, &h.core.frame());
     h.keys("Down Enter").await;
     mark(&mut seen, &h.core.frame());

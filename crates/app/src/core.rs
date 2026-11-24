@@ -256,15 +256,7 @@ async fn run_inst(
     match op {
         InstOp::List => Ok((InstOk::Listed(inst.list(true).await?), None)),
         InstOp::Attach { name, force } => {
-            let b = inst
-                .attach(
-                    name,
-                    Attach {
-                        force: *force,
-                        idle_timeout_ms: None,
-                    },
-                )
-                .await?;
+            let b = inst.attach(name, Attach { force: *force }).await?;
             attached(name, b)
         }
         InstOp::Start { name } => {

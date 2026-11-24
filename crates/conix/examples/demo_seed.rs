@@ -110,13 +110,7 @@ async fn main() {
     let all = instances.list(true).await.unwrap();
     let b: Arc<dyn Backend> = match client::for_project(&all, &project) {
         Some(i) if i.state == port::InstanceState::Running => instances
-            .attach(
-                &i.name.0,
-                port::Attach {
-                    force: true,
-                    ..Default::default()
-                },
-            )
+            .attach(&i.name.0, port::Attach { force: true })
             .await
             .unwrap(),
         Some(i) => instances.start(&i.name.0).await.unwrap(),

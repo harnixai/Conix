@@ -8,7 +8,7 @@ use std::time::Duration;
 use client::backend::write_frame;
 use client::local::now_ms;
 use port::link::{ClientFrame, LinkReply, ServerFrame};
-use port::{ClientInfo, Command, Event, Millis, PortError, Reply};
+use port::{ClientInfo, Command, Event, PortError, Reply};
 use serde::Deserialize;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::unix::OwnedWriteHalf;
@@ -24,8 +24,6 @@ const HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(35);
 const FLUSH_TIMEOUT: Duration = Duration::from_secs(3);
 
 pub struct ServeOptions {
-    /// 按 `last_input_ms` 兜底的空闲脱离；0 表示不兜底。
-    pub idle_timeout_ms: Millis,
     /// 这么久一帧都没收到就断开（TUI 僵死、ssh 半开）。
     pub heartbeat_timeout: Duration,
     /// 置为 `Some(原因)` 即关停：先给接入者推 `InstanceStopped{原因}`。发送端丢掉不算关停。
@@ -35,7 +33,6 @@ pub struct ServeOptions {
 impl ServeOptions {
     pub fn new(shutdown: watch::Receiver<Option<String>>) -> ServeOptions {
         ServeOptions {
-            idle_timeout_ms: 0,
             heartbeat_timeout: HEARTBEAT_TIMEOUT,
             shutdown,
         }
@@ -67,7 +64,6 @@ struct Shared {
     holder: Mutex<Option<Holder>>,
     stop: Notify,
     closing: watch::Sender<bool>,
-    idle_timeout_ms: Millis,
     heartbeat_timeout: Duration,
     uid: u32,
 }
@@ -86,7 +82,6 @@ pub async fn serve(
         holder: Mutex::new(None),
         stop: Notify::new(),
         closing: watch::channel(false).0,
-        idle_timeout_ms: opts.idle_timeout_ms,
         heartbeat_timeout: opts.heartbeat_timeout,
         uid: nix::unistd::geteuid().as_raw(),
     });
@@ -190,21 +185,11 @@ async fn connection(sh: Arc<Shared>, stream: UnixStream, conn: u64) {
     };
     // `list` 探测 socket 时只连不发，走的就是这里。
     let Ok(Ok(Some(line))) = first else { return };
-    let (id, mut client, force, idle_ms) = match serde_json::from_str::<ClientFrame>(&line) {
+    let (id, mut client, force) = match serde_json::from_str::<ClientFrame>(&line) {
         Ok(ClientFrame {
             id,
-            cmd:
-                Command::Hello {
-                    client,
-                    force,
-                    idle_timeout_ms,
-                },
-        }) => (
-            id,
-            client,
-            force,
-            idle_timeout_ms.unwrap_or(sh.idle_timeout_ms),
-        ),
+            cmd: Command::Hello { client, force },
+        }) => (id, client, force),
         _ => {
             if let Ok(IdOnly { id }) = serde_json::from_str(&line) {
                 let err = PortError::Failed("first frame must be hello".into());
@@ -257,22 +242,12 @@ async fn connection(sh: Arc<Shared>, stream: UnixStream, conn: u64) {
     let writer = write_loop(wr, rx, close_rx.clone());
     let reader = async {
         let mut seen = Instant::now();
-        let mut idle = Idle::new(client.last_input_ms);
         let mut kicked = close_rx;
         loop {
-            let hb_deadline = seen + sh.heartbeat_timeout;
-            let idle_deadline = (idle_ms > 0).then(|| idle.deadline(idle_ms));
-            let deadline = idle_deadline.map_or(hb_deadline, |d| d.min(hb_deadline));
             tokio::select! {
                 _ = closed(&mut kicked) => break,
                 _ = closed(&mut closing) => break,
-                _ = sleep_until(deadline) => {
-                    if idle_deadline.is_some_and(|d| d <= Instant::now()) {
-                        let after_ms = idle.at(Instant::now());
-                        let _ = sink.send(event(Event::IdleDetached { after_ms }));
-                    }
-                    break;
-                }
+                _ = sleep_until(seen + sh.heartbeat_timeout) => break,
                 line = lines.next_line() => {
                     let Ok(Some(line)) = line else { break };
                     seen = Instant::now();
@@ -291,7 +266,6 @@ async fn connection(sh: Arc<Shared>, stream: UnixStream, conn: u64) {
                             let _ = sink.send(reply(id, Ok(hello(&sh, &client))));
                         }
                         Command::Heartbeat { last_input_ms } => {
-                            idle = Idle::new(last_input_ms);
                             if last_input_ms != client.last_input_ms {
                                 client.last_input_ms = last_input_ms;
                                 let mut h = sh.holder.locked();
@@ -340,7 +314,7 @@ fn hello(sh: &Shared, client: &ClientInfo) -> Reply {
     }
 }
 
-/// 收到关闭信号时把已排队的帧写完再关：`Kicked`、`IdleDetached`、`InstanceStopped` 与
+/// 收到关闭信号时把已排队的帧写完再关：`Kicked`、`InstanceStopped` 与
 /// `Detach` 的回复都是在关之前排进去的，丢了对方就不知道自己为什么断了。
 async fn write_loop(
     mut wr: OwnedWriteHalf,
@@ -365,28 +339,4 @@ async fn write_loop(
         }
     }
     let _ = wr.shutdown().await;
-}
-
-/// 空闲时长按 tokio 的时钟往前推：`last_input_ms` 是墙钟，只在收到时折算一次，之后不再
-/// 读墙钟，测试暂停时间也能驱动兜底。
-struct Idle {
-    at: Instant,
-    ms: Millis,
-}
-
-impl Idle {
-    fn new(last_input_ms: Millis) -> Idle {
-        Idle {
-            at: Instant::now(),
-            ms: now_ms().saturating_sub(last_input_ms),
-        }
-    }
-
-    fn at(&self, now: Instant) -> Millis {
-        self.ms + now.saturating_duration_since(self.at).as_millis() as Millis
-    }
-
-    fn deadline(&self, timeout_ms: Millis) -> Instant {
-        self.at + Duration::from_millis(timeout_ms.saturating_sub(self.ms))
-    }
 }

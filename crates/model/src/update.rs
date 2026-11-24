@@ -4,8 +4,7 @@ use tui::layout::{self, ShowPane, Size};
 
 use crate::mouse::{Mouse, MouseButton, MouseKind};
 use crate::state::{
-    Confirm, DetachReason, Drag, Focus, HEARTBEAT_MS, IDLE_WARN_MS, Notice, Overlay, Picker,
-    Screen, State, Tab,
+    Confirm, DetachReason, Drag, Focus, HEARTBEAT_MS, Notice, Overlay, Picker, Screen, State, Tab,
 };
 use crate::view::{layout_spec, tab_labels};
 
@@ -67,7 +66,7 @@ pub enum Effect {
     Redraw,
     Bell,
     Instances(InstOp),
-    /// 放下当前后端：被踢、空闲脱离、实例停了之后不再收它的事件。
+    /// 放下当前后端：被踢、实例停了之后不再收它的事件。
     Release,
     /// 放进终端的剪贴板（OSC 52）。
     Clipboard(String),
@@ -162,7 +161,6 @@ impl State {
                 Command::Hello {
                     client,
                     force: false,
-                    idle_timeout_ms: None,
                 },
             ),
             self.call(
@@ -202,14 +200,6 @@ impl State {
             d.push(u.next_heartbeat_ms);
             if self.conv().is_some_and(|c| c.running) {
                 d.push((u.now_ms / SPINNER_MS + 1) * SPINNER_MS);
-            }
-            if u.idle_timeout_ms > 0 {
-                let at = u.last_input_ms + u.idle_timeout_ms;
-                d.push(if u.idle_warned {
-                    at
-                } else {
-                    at.saturating_sub(IDLE_WARN_MS)
-                });
             }
         }
         d.into_iter().min()
@@ -268,7 +258,6 @@ pub fn update(s: &mut State, msg: Msg) -> Vec<Effect> {
         Msg::Action(_) | Msg::Text(_) | Msg::Paste(_) | Msg::Mouse(_)
     ) {
         s.ui.last_input_ms = s.ui.now_ms;
-        s.ui.idle_warned = false;
     }
     let mut effects = update_confirm(s, msg);
     effects.extend(crate::follow::after_update(s));
@@ -299,14 +288,8 @@ fn update_inner(s: &mut State, msg: Msg) -> Vec<Effect> {
         (_, Msg::Instances(op, r)) => instances_done(s, op, r),
         (Screen::Instances(_), Msg::Action(a)) => picker_action(s, a),
         (Screen::Instances(_), Msg::Mouse(m)) => picker_mouse(s, m),
-        (Screen::Detached(reason), Msg::Action(a)) => {
-            let reason = reason.clone();
-            detached_action(s, &reason, Some(a))
-        }
-        (Screen::Detached(reason), Msg::Text(_)) => {
-            let reason = reason.clone();
-            detached_action(s, &reason, None)
-        }
+        (Screen::Detached(_), Msg::Action(a)) => detached_action(s, Some(a)),
+        (Screen::Detached(_), Msg::Text(_)) => detached_action(s, None),
         (Screen::Workbench, msg) => workbench(s, msg),
         (_, Msg::Resize(size)) => {
             s.ui.size = size;
@@ -348,7 +331,7 @@ fn workbench(s: &mut State, msg: Msg) -> Vec<Effect> {
         Msg::Reply(id, r) => reply(s, id, *r),
         Msg::Tick => {
             tick_common(s);
-            idle_and_heartbeat(s)
+            heartbeat(s)
         }
         Msg::Resize(size) => {
             s.ui.size = size;
@@ -370,30 +353,10 @@ fn tick_common(s: &mut State) {
     }
 }
 
-/// 空闲脱离与心跳（需求 I-10、I-11）。
-fn idle_and_heartbeat(s: &mut State) -> Vec<Effect> {
+/// 心跳（需求 I-11）：实例几次收不到就断开，僵死的 TUI、半开的 ssh 不会一直占着实例。
+fn heartbeat(s: &mut State) -> Vec<Effect> {
     let now = s.ui.now_ms;
     let mut out = vec![];
-    let timeout = s.ui.idle_timeout_ms;
-    if timeout > 0 {
-        let idle = now.saturating_sub(s.ui.last_input_ms);
-        if idle >= timeout {
-            out.push(s.call(Pending::Ignore, Command::Detach));
-            out.push(Effect::Release);
-            s.ui.screen = Screen::Detached(DetachReason::Idle { after_ms: idle });
-            s.ui.overlay = None;
-            return out;
-        }
-        if idle + IDLE_WARN_MS >= timeout && !s.ui.idle_warned {
-            s.ui.idle_warned = true;
-            let left = (timeout - idle).div_ceil(60_000);
-            s.ui.notice = Some(Notice {
-                text: i18n::t!("update.idle_warning", left = left),
-                error: false,
-                until_ms: s.ui.last_input_ms + timeout,
-            });
-        }
-    }
     if now >= s.ui.next_heartbeat_ms {
         s.ui.next_heartbeat_ms = now + HEARTBEAT_MS;
         let last = s.ui.last_input_ms;
@@ -557,20 +520,15 @@ fn create(s: &mut State) -> Vec<Effect> {
     })]
 }
 
-fn detached_action(s: &mut State, reason: &DetachReason, a: Option<Action>) -> Vec<Effect> {
+/// 被踢、实例停了之后的"已脱离"界面：退出，或回实例选择框。
+fn detached_action(s: &mut State, a: Option<Action>) -> Vec<Effect> {
     if a == Some(Action::Quit) || a == Some(Action::Detach) {
         return vec![Effect::Quit { detach: true }];
     }
-    match (reason, &s.ui.attached) {
-        (DetachReason::Idle { .. }, Some(name)) => {
-            vec![Effect::Instances(InstOp::Attach {
-                name: name.clone(),
-                force: false,
-            })]
-        }
-        _ if a == Some(Action::Open) || a.is_none() => s.open_picker(None),
-        _ => vec![],
+    if a == Some(Action::Open) || a.is_none() {
+        return s.open_picker(None);
     }
+    vec![]
 }
 
 fn instances_done(s: &mut State, op: InstOp, r: Result<InstOk, PortError>) -> Vec<Effect> {

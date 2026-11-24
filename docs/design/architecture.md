@@ -23,7 +23,7 @@ Conix 采用 **"常驻实例 + 可接入的 TUI"** 两进程结构，和 tmux �
 │  会话代理 ── Agix 客户端 ──► agix::embed（同进程，data_root = ~/.conix）│
 │  流程（harnix-flow 的内核与派工器，会话经会话代理开在 Agix 上）  │
 │  作业调度                                                         │
-│  单一接入：占用、强制接入、空闲脱离、心跳；状态落盘在实例目录     │
+│  单一接入：占用、强制接入、心跳；状态落盘在实例目录               │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
@@ -81,7 +81,7 @@ pub trait Backend: Send + Sync + 'static {
 
 - `InstanceInfo` 包含：名字、PID、主机名、项目、启动时间、版本、会话数、在等人的数量、状态（运行中 / 已停止 / 残留），以及 `holder: Option<ClientInfo>`，即当前接入者。
 - `ClientInfo` 包含：用户、PID、终端（tty）、ssh 来源（取自 `SSH_CONNECTION`）、接入时刻、最后一次输入的时刻。
-- `Attach` 包含：`force`，以及 `idle_timeout`（可选，覆盖配置里的值）。
+- `Attach` 包含：`force`。
 - app 把每次 `call` 都 spawn 出去，结果通过 `Msg::Reply` 投回事件循环，没有哪个调用会卡住界面（N-03）。
 
 ### 3.2 命令（`Command`）
@@ -100,7 +100,7 @@ pub trait Backend: Send + Sync + 'static {
 
 | 组 | 事件 |
 |---|---|
-| 连接 | `Connection(Connected \| Lost \| Reconnecting \| Resynced)`、`Kicked{by: ClientInfo, at}`（被强制接入的一方踢掉）、`IdleDetached{after_ms}` |
+| 连接 | `Connection(Connected \| Lost \| Reconnecting \| Resynced)`、`Kicked{by: ClientInfo, at}`（被强制接入的一方踢掉） |
 | 会话列表 | `SessionUpserted(SessionSummary)`、`SessionRemoved(id)` |
 | 一轮（仅限被 Watch 的会话） | `TurnStarted`、`StepRestarted{step}`、`TextDelta`、`ThinkingDelta`、`ToolStarted`、`ToolInput`、`ToolProgress`、`ToolFinished`、`TurnEnded{stop, usage}`、`TurnFailed` |
 | 插话 | `SteerDelivered`、`SteerReturned{messages}` |
@@ -131,7 +131,7 @@ State
 │   ├── jobs          作业与触发历史
 │   └── conn          连接状态
 └── ui            界面状态，只由输入（按键、鼠标）和 Tick 写入
-    ├── screen        实例选择 / 工作台 / 已脱离（被踢、空闲超时）
+    ├── screen        实例选择 / 工作台 / 已脱离（被踢、实例停了）
     ├── layout        并排或单栏、两栏比例、右栏是否收起、当前显示哪一栏（单栏时）
     ├── focus         Composer / Transcript / Side(Upper | Lower) / Dialog
     ├── context       对话区的上下文栈（面包屑）
@@ -139,7 +139,7 @@ State
     ├── composer      草稿、光标、历史、补全
     ├── transcript    每个上下文各自的滚动位置、选中块、折叠集合、拖选范围
     ├── mouse         是否捕获鼠标、正在拖动的对象（分隔线 / 选区）
-    └── idle          最后一次输入的时刻；空闲超时的时长
+    └── last_input    最后一次输入的时刻（随心跳报给实例，`conix list` 写空闲多久）
 ```
 
 **`FrameState` 只有 `view` 一个写者。**
@@ -259,7 +259,7 @@ loop {
 ├── settings.json                 ┐
 ├── sessions/<id>/  memory/       │ Agix 的全局数据，布局归 Agix（ARCHITECTURE.md §8）。sessions/<id>/ 下
 ├── scenes/  daemon/  plugins/ …  ┘ 对项目里的会话只有索引（§8.4）。模型、provider、权限都沿用 settings.json
-├── conix.yaml                    Conix 自己的配置（YAML）：界面、实例（空闲超时）；不存在时写一份带注释的缺省配置
+├── conix.yaml                    Conix 自己的配置（YAML）：界面、实例（个人项目）、作业护栏；不存在时写一份带注释的缺省配置
 ├── keybindings.json              快捷键覆盖
 ├── known-projects.json           认领过的项目：凭证 → 项目路径（§8.9）
 └── instances/<名字>/             目录 0700；只放这台机器上这个进程的东西
@@ -352,12 +352,12 @@ conix（一个二进制）
   `Kicked{by, at_ms}` 再关掉它，然后接受新连接。被踢的一方不重连。
 - 对端校验：accept 后取对端 uid（`peer_cred`），与实例进程的不同就直接关掉。
 - **心跳**：model 每 10 秒发 `Heartbeat{last_input_ms}`；实例 35 秒没收到任何帧就断开这条连接（TUI 僵死、
-  ssh 半开）。空闲脱离由 TUI 判断（model 已有）；实例按 `last_input_ms` 兜底：超过 `idle_timeout`
-  推 `IdleDetached` 后断开。
+  ssh 半开）。`last_input_ms` 只用来报接入者空闲了多久（`conix list`、被占用的提示）。**没有空闲脱离**：
+  人不在、连接活着就一直接着，要用的人强制接入；两边各算一遍空闲、再与重连的判断缠在一起，得不偿失。
 - **断线重连**（`SocketBackend`）：连接意外断开 → 推 `Connection(Lost)`，按 0.5s、1s、2s… 重连（推
   `Reconnecting{attempt}`），以不带 `force` 的 `Hello` 接回；成功 → `Connection(Resynced)`，model 重新
   拉列表与当前会话的快照。实例进程已不在（发现文件的 pid 死了）或 30 秒没接上 → `InstanceStopped`。
-- 脱离（`Detach`、退出 TUI、被踢、空闲）不影响实例里正在进行的工作。`StopInstance` 回 `Ok` 之后实例开始关停。
+- 脱离（`Detach`、退出 TUI、被踢）不影响实例里正在进行的工作。`StopInstance` 回 `Ok` 之后实例开始关停。
 
 ### 8.4 Agix 接入：`Hub`
 
@@ -692,7 +692,6 @@ schema；`job_validate` 不落盘，回下 5 次触发时刻与护栏的实际�
 
 | 问题 | 倾向 |
 |---|---|
-| 空闲超时的缺省值 | 30 分钟（`conix.yaml` 的 `instance.idle_timeout`），设为 `0` 表示不超时 |
 | 缺省终端尺寸 | 160×45，写在 `conix.yaml` 的 `ui.initial_size`，可以设为 `off` |
 | 宽屏下左右两栏的缺省比例 | 60 : 40，可调，并记住 |
 | 实例开机自启 | P2：在手册里给出 systemd user unit 和 launchd plist 的示例 |

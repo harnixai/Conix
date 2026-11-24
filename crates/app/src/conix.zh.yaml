@@ -25,8 +25,6 @@ ui:
     #   border: "238"
 
 instance:
-  # 空闲多久自动脱离，让出实例：30m、2h、0（不超时）。
-  idle_timeout: 30m
   # 个人项目：在家目录、根目录或 ~/.conix 里运行 conix 时进的项目（家目录本身不能当项目）。
   # 不写就是文档目录下的 Conix，如 ~/Documents/Conix。各处都用的流程、作业放在这里。
   # personal_project: ~/Documents/Conix

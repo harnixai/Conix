@@ -115,6 +115,4 @@ view:
     kicked: "被 {by} 强制接入（{ago} 之前）"
     still_running: "实例仍在运行"
     kicked_keys: "Enter 回到实例选择 · q 退出"
-    idle: "空闲 {idle}，已自动脱离，实例仍在运行"
-    idle_keys: "按任意键重新接入 · q 退出"
     stopped: "实例 {name} 已停止"

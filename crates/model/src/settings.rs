@@ -1,6 +1,4 @@
-//! 界面可调的部分（`~/.conix/conix.yaml` 的 `ui`、`instance`，由 app 读出来交给 model）。
-
-use crate::state::DEFAULT_IDLE_TIMEOUT_MS;
+//! 界面可调的部分（`~/.conix/conix.yaml` 的 `ui`，由 app 读出来交给 model）。
 
 #[derive(Debug, Clone)]
 pub struct Settings {
@@ -11,8 +9,6 @@ pub struct Settings {
     pub compact_tool_lines: usize,
     /// 宽屏时左栏占的百分比。
     pub ratio_pct: u16,
-    /// 0 表示不超时。
-    pub idle_timeout_ms: u64,
 }
 
 impl Default for Settings {
@@ -22,7 +18,6 @@ impl Default for Settings {
             syntax_theme: crate::highlight::DEFAULT_THEME.into(),
             compact_tool_lines: 3,
             ratio_pct: 60,
-            idle_timeout_ms: DEFAULT_IDLE_TIMEOUT_MS,
         }
     }
 }

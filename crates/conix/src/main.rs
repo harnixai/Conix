@@ -51,9 +51,6 @@ enum Cmd {
         /// 踢掉当前接入者。
         #[arg(long)]
         force: bool,
-        /// 空闲多久自动脱离，如 30m、2h、0（不超时）。
-        #[arg(long)]
-        idle_timeout: Option<String>,
     },
     /// 启动一个已停止的实例。
     Start { name: String },
@@ -81,9 +78,6 @@ fn localized_command() -> clap::Command {
         .mut_subcommand("attach", |c| {
             c.about(i18n::t!("app.cli.attach"))
                 .mut_arg("force", |a| a.help(i18n::t!("app.cli.attach_force")))
-                .mut_arg("idle_timeout", |a| {
-                    a.help(i18n::t!("app.cli.attach_idle_timeout"))
-                })
         })
         .mut_subcommand("start", |c| c.about(i18n::t!("app.cli.start")))
         .mut_subcommand("stop", |c| c.about(i18n::t!("app.cli.stop")))
@@ -113,21 +107,8 @@ async fn main() -> Result<()> {
         }
         return supervise::run(name, project).await;
     }
-    let idle_override = match &cli.command {
-        Some(Cmd::Attach {
-            idle_timeout: Some(t),
-            ..
-        }) => Some(
-            config::parse_duration_ms(t)
-                .with_context(|| i18n::t!("app.bad_duration", value = t))?,
-        ),
-        _ => None,
-    };
-    let (mut settings, more) = cfg.settings();
+    let (settings, more) = cfg.settings();
     problems.extend(more);
-    if let Some(idle) = idle_override {
-        settings.idle_timeout_ms = idle;
-    }
     let mock_mode = cli.mock.is_some();
     let instances: Arc<dyn Instances> = match &cli.mock {
         Some(scenario) => {
@@ -142,13 +123,10 @@ async fn main() -> Result<()> {
                 },
             ))
         }
-        None => Arc::new(
-            client::SocketInstances::new(
-                client::Layout::new(config::home()),
-                std::env::current_exe()?,
-            )
-            .with_idle_timeout(settings.idle_timeout_ms),
-        ),
+        None => Arc::new(client::SocketInstances::new(
+            client::Layout::new(config::home()),
+            std::env::current_exe()?,
+        )),
     };
     if let Some(Cmd::List { all }) = cli.command {
         for i in instances.list(all).await? {

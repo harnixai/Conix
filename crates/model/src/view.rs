@@ -1030,16 +1030,6 @@ fn detached(s: &State, r: &DetachReason) -> Vec<Line> {
             Line::default(),
             Line::toned(i18n::t!("view.detached.kicked_keys"), Tone::Dim),
         ],
-        DetachReason::Idle { after_ms } => vec![
-            Line::toned(i18n::t!("view.detached.title", name = name), Tone::Strong),
-            Line::default(),
-            Line::toned(
-                i18n::t!("view.detached.idle", idle = fmt_duration(*after_ms)),
-                Tone::Warn,
-            ),
-            Line::default(),
-            Line::toned(i18n::t!("view.detached.idle_keys"), Tone::Dim),
-        ],
         DetachReason::Stopped { reason } => vec![
             Line::toned(i18n::t!("view.detached.stopped", name = name), Tone::Strong),
             Line::default(),

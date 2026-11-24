@@ -185,7 +185,7 @@ pub struct Live {
 
 #[derive(Default)]
 pub struct Opts {
-    /// 写进 `conix.yaml` 的内容（实例的配置，比如空闲超时）。
+    /// 写进 `conix.yaml` 的内容（实例的配置，比如个人项目）。
     pub conix_yaml: Option<String>,
     /// 合进全局 `settings.json` 的键（比如多模型的用例写的 providers 与 model.order）。
     pub settings: Option<serde_json::Value>,

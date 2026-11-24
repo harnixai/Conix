@@ -1,6 +1,5 @@
 update:
   discarded: "已放弃"
-  idle_warning: "{left} 分钟后因空闲脱离（有任何输入就不会）"
   stopping_instance: "正在停止实例 {name} …"
   forcing: "正在强制接入 {name} …"
   stopping: "正在停止 {name} …"

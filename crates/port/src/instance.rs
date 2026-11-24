@@ -74,9 +74,6 @@ impl ClientInfo {
 pub struct Attach {
     #[serde(default)]
     pub force: bool,
-    /// 覆盖配置里的空闲超时；`Some(0)` 表示不超时。
-    #[serde(default)]
-    pub idle_timeout_ms: Option<Millis>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

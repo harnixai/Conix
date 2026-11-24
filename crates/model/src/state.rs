@@ -87,7 +87,6 @@ pub struct Picker {
 #[derive(Debug, Clone, PartialEq)]
 pub enum DetachReason {
     Kicked { by: ClientInfo, at_ms: u64 },
-    Idle { after_ms: u64 },
     Stopped { reason: String },
 }
 
@@ -219,10 +218,8 @@ pub struct Ui {
     pub confirm: Option<Confirm>,
     /// 接着的实例名（工作台或"已脱离"时有）。
     pub attached: Option<String>,
+    /// 最后一次输入的时刻：随心跳报给实例，`conix list` 与选择框里写"空闲多久"。
     pub last_input_ms: u64,
-    /// 0 表示不超时（需求 I-10）。
-    pub idle_timeout_ms: u64,
-    pub idle_warned: bool,
     pub next_heartbeat_ms: u64,
     pub size: Size,
     pub now_ms: u64,
@@ -340,9 +337,7 @@ impl Ui {
 }
 
 pub const PICKER_ROWS: usize = 6;
-pub const DEFAULT_IDLE_TIMEOUT_MS: u64 = 30 * 60_000;
 pub const HEARTBEAT_MS: u64 = 10_000;
-pub const IDLE_WARN_MS: u64 = 60_000;
 
 pub struct State {
     pub settings: crate::Settings,
@@ -365,7 +360,6 @@ impl State {
         settings: crate::Settings,
     ) -> State {
         let ratio = settings.ratio_pct.clamp(40, 75);
-        let idle = settings.idle_timeout_ms;
         State {
             settings,
             domain: Domain::default(),
@@ -374,8 +368,6 @@ impl State {
                 confirm: None,
                 attached: None,
                 last_input_ms: now_ms,
-                idle_timeout_ms: idle,
-                idle_warned: false,
                 next_heartbeat_ms: now_ms + HEARTBEAT_MS,
                 size,
                 now_ms,

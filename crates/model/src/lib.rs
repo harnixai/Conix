@@ -32,10 +32,7 @@ pub use mouse::{Mouse, MouseButton, MouseKind};
 pub use panel::set_utc_offset;
 pub use sessions::{SessRow, TreeRow, fmt_elapsed};
 pub use settings::Settings;
-pub use state::{
-    Confirm, DEFAULT_IDLE_TIMEOUT_MS, DetachReason, Domain, Focus, Overlay, Picker, Screen, State,
-    Tab, Ui,
-};
+pub use state::{Confirm, DetachReason, Domain, Focus, Overlay, Picker, Screen, State, Tab, Ui};
 pub use update::{Effect, InstOk, InstOp, Msg, ReqId, update};
 pub use view::view;
 pub use welcome::short_version;

@@ -17,9 +17,6 @@ pub enum Event {
         by: ClientInfo,
         at_ms: Millis,
     },
-    IdleDetached {
-        after_ms: Millis,
-    },
     InstanceStopped {
         reason: String,
     },

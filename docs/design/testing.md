@@ -131,7 +131,7 @@ conix --mock default                 # 只加载种子，不跑时间线
 | m18-errors | 一轮出错、命令失败、列表加载失败后重试 | 交互 §9 |
 | m19-many | 用 `busy` 种子：长列表的滚动、过滤、选中保持不变 | S-01 F-01 J-01 |
 | m20-first-run | 用 `empty` 种子：每个标签的空状态和引导文字 | 交互 §9 |
-| m21-instances | 实例选择：运行中、已停止、残留、已被占用四种状态；新建、接入、启动、停止；接入被占用的实例时被拒；强制接入（二次确认）以及被踢一方的"已脱离"界面；空闲超时前的提示与自动脱离；之后重新接入；脱离和停止的区别；心跳丢失后实例断开连接 | I-01 至 I-06、I-10、I-11 · 交互 §2.2 §4.5 §9 |
+| m21-instances | 实例选择：运行中、已停止、残留、已被占用四种状态；新建、接入、启动、停止；接入被占用的实例时被拒；强制接入（二次确认）以及被踢一方的"已脱离"界面；放着不动也不脱离；脱离和停止的区别；心跳丢失后实例断开连接 | I-01 至 I-06、I-10、I-11 · 交互 §2.2 §4.5 §9 |
 | m22-mouse | 交互 §6 表中每一格都要点一遍：标签、列表、展开、工具块、提问选项、二次确认按钮、拖动分隔线、各区域的滚轮、关闭和恢复鼠标捕获；转录里拖选并复制（P1） | M-01 至 M-08 · 交互 §6 |
 | m23-startup-size | 尺寸协商的三种情况：终端照办、不响应、在 tmux 里；退出时恢复原尺寸；配置成 `off` | L-06 · 交互 §2.1 |
 | m24-footer-hint | 在每一种上下文、每一种浮层和二次确认下，分别在 60 / 80 / 120 / 160 列宽度检查底栏最右边都是 `^G 切块 · ^N 标签 · ^B 切栏 · ^X 退出 · ^H 帮助`；单栏模式下能切过去也能切回来。键位的其余用例（^G 一圈三格、单栏换栏、回左边进提问框，^N 轮换标签，^T 交还输入框，^O 看转录与各种离开都收回精简，转录里 `o` `[` `]`，^H 退格或帮助，兼容键，`/mouse` `/events`）都在 `crates/app/tests/keys.rs` | L-07 L-12 · 交互 §2.4 §3 §7 |
@@ -189,7 +189,7 @@ mock 那一套不动，真实后端按层另加用例，全部离线、不调模
 | 文件 | 覆盖 |
 |---|---|
 | `live_instance.rs` | 新建、列出、发现文件与 `meta.json`、目录 0700 与 socket 0600、同名第二个实例拿不到锁、同一项目的第二个实例被拒并报出占着它的实例、停掉再照 `meta.json` 拉起、实例被杀后看护进程把它拉起来（`list` 写出重启次数）、连看护进程一起被杀后列为残留并清理 |
-| `live_attach.rs` | `Hello` 与能力位、被占用、强制接入踢人、脱离放开接入、空闲脱离、心跳超时断开后重连、实例被停与 `StopInstance`、脱离期间的事在下一次接入时推一次 `AwaySummary` |
+| `live_attach.rs` | `Hello` 与能力位、被占用、强制接入踢人、脱离放开接入、心跳超时断开后重连、实例被停与 `StopInstance`、脱离期间的事在下一次接入时推一次 `AwaySummary` |
 | `live_sessions.rs` | 只列本项目的会话、受信项目的会话放在项目里（不受信的在全局，都跨重启列得出）、第一句话做名字、改名与关闭跨重启保留、换模型、命令表、Watch 快照的历史与 todo、拒绝逐轮权限模式、建会话带模型与模式、已关闭的会话（列、看、重开、删）、重启后的累计用量 |
 | `live_turns.rs` | 文字与用量、忙时退回、插话送达、排队、中断、权限与模型提问的作答、侧问分叉、goal 的事件与快照、后台任务的输出与停止、子 Agent 的侧链会话与给它发消息 |
 | `live_jobs.rs` | 增删改与启停（定义进 `.conix/jobs.json`、启停进本机的 `jobs-state.json`）、立即运行触发的会话与结局、触发记录落盘、重启后没跑完的那次记为中断、错过的触发只补一次、停下正在跑的那一次记成手动停下、conix.yaml 给的超时到了被打断记成超时、停实例与崩溃留下的那次记成"实例停了"、一次失败的触发经配置的命令出口送出（TestNotify 回每个出口的结果）。作业定义要项目受信才读写，用例用 `start_trusted` |
@@ -258,7 +258,7 @@ catch_up`（再按名字过滤）。凭据取仓库根的 `.env`（worktree 里�
 | I-07 | 只走 unix socket，0600/0700，校验对端 uid，不监听网络 | live_instance::a_new_instance_is_listed_with_its_discovery_file_meta_and_private_socket（权限）；对端 uid 校验在 `host/src/server.rs`，换一个 uid 接入造不出来，只能靠代码审阅 | LIVE（uid 校验无用例） |
 | I-08 | 实例意外退出后 list 识别残留并清理 | live_instance::a_killed_instance_is_listed_as_stale_cleaned_and_can_be_started、a_crashed_instance_is_restarted_by_its_supervisor | LIVE |
 | I-09 | 断线重连、补齐、被占用就不再重试 | live_attach::a_silent_client_is_dropped_after_the_heartbeat_timeout_and_reconnects；app/crosscut::m15_reconnect_shows_state_and_refreshes；live_tui::the_keys_walk_the_workbench_of_a_real_instance（再接回来） | LIVE |
-| I-10 | 空闲脱离，时长可配、0 不超时 | live_attach::an_idle_client_is_detached_and_told_so；host/server::idle_fallback_detaches；app/instances::m21_idle_warns_then_detaches_then_any_key_reattaches | LIVE |
+| I-10 | 不做空闲脱离 | app/instances::m21_a_quiet_tui_stays_attached_and_keeps_beating；host/server::a_long_idle_holder_is_not_detached | 单测 + mock 场景 |
 | I-11 | 心跳保活，几次没收到就断开 | live_attach::a_silent_client_is_dropped_after_the_heartbeat_timeout_and_reconnects；host/server::silent_client_is_dropped_after_heartbeat_timeout；app/instances::m21_heartbeat_every_ten_seconds | LIVE |
 | L-01 | 左对话区、右三标签 | app/workbench::m17_wide_shows_both_panes；live_tui::the_keys_walk_the_workbench_of_a_real_instance | mock 场景 + LIVE |
 | L-02 | 宽屏并排、窄屏单栏切换 | app/workbench::m17_wide_shows_both_panes、m17_single_pane_switches_back_and_forth；app/keys::ctrl_g_switches_the_pane_when_only_one_fits | mock 场景 |

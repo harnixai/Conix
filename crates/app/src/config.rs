@@ -127,22 +127,12 @@ impl Default for ThemeConfig {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
 pub struct InstanceConfig {
-    pub idle_timeout: String,
     /// 个人项目（architecture §8.1）：在家目录、它的上级或全局目录里运行 `conix` 时进的项目。
     /// 不写就是 `<文档目录>/Conix`（`client::personal_project`）。`~` 开头按家目录展开。
     pub personal_project: Option<String>,
-}
-
-impl Default for InstanceConfig {
-    fn default() -> Self {
-        InstanceConfig {
-            idle_timeout: "30m".into(),
-            personal_project: None,
-        }
-    }
 }
 
 impl UiConfig {
@@ -188,42 +178,16 @@ impl Config {
             ));
             model::Settings::default().syntax_theme
         };
-        let idle_timeout_ms = parse_duration_ms(&self.instance.idle_timeout).unwrap_or_else(|| {
-            problems.push(i18n::t!(
-                "app.config.bad_idle_timeout",
-                value = format!("{:?}", self.instance.idle_timeout)
-            ));
-            model::DEFAULT_IDLE_TIMEOUT_MS
-        });
         (
             model::Settings {
                 theme,
                 syntax_theme,
                 compact_tool_lines: self.ui.compact_tool_lines.max(1),
                 ratio_pct: self.ui.ratio,
-                idle_timeout_ms,
             },
             problems,
         )
     }
-}
-
-/// `45s`、`30m`、`2h`、`1d`、`0`；读不懂返回 `None`。
-pub fn parse_duration_ms(s: &str) -> Option<u64> {
-    let s = s.trim();
-    if s == "0" {
-        return Some(0);
-    }
-    let (num, unit) = s.split_at(s.find(|c: char| !c.is_ascii_digit())?);
-    let n: u64 = num.parse().ok()?;
-    let per = match unit.trim() {
-        "s" => 1_000,
-        "m" => 60_000,
-        "h" => 3_600_000,
-        "d" => 86_400_000,
-        _ => return None,
-    };
-    Some(n * per)
 }
 
 /// 界面语言：`CONIX_LANG` 优先，其次配置的 `ui.language`；`auto` 照 `LC_ALL` / `LC_MESSAGES` /
@@ -303,7 +267,6 @@ mod tests {
         let (s, problems) = c.settings();
         assert!(problems.is_empty(), "{problems:?}");
         assert_eq!(s.theme, tui::Theme::claude());
-        assert_eq!(s.idle_timeout_ms, 30 * 60_000);
     }
 
     #[test]
@@ -315,8 +278,8 @@ mod tests {
         assert_eq!(c.ui.initial_size(), None);
         let (s, problems) = c.settings();
         assert_eq!(s.theme.accent, ratatui::style::Color::Rgb(1, 2, 3));
-        assert_eq!(problems.len(), 3, "{problems:?}");
-        assert_eq!(parse_duration_ms("2h"), Some(7_200_000));
+        // 老配置里的 `instance.idle_timeout`（空闲脱离已去掉）照常读过，不报。
+        assert_eq!(problems.len(), 2, "{problems:?}");
     }
 
     #[test]

@@ -32,7 +32,6 @@ const MAX_NAME_BYTES: usize = 40;
 pub struct SocketInstances {
     layout: Layout,
     exe: PathBuf,
-    idle_timeout_ms: Option<u64>,
     env: Vec<(String, String)>,
 }
 
@@ -42,7 +41,6 @@ impl SocketInstances {
         SocketInstances {
             layout,
             exe: exe.into(),
-            idle_timeout_ms: None,
             env: vec![],
         }
     }
@@ -51,12 +49,6 @@ impl SocketInstances {
     /// 自己的环境（Rust 2024 里改进程环境是 unsafe，workspace 禁了 unsafe）。
     pub fn with_env(mut self, env: impl IntoIterator<Item = (String, String)>) -> SocketInstances {
         self.env.extend(env);
-        self
-    }
-
-    /// TUI 这一侧的空闲超时（配置或 `--idle-timeout`）随 `Hello` 带给实例，实例的兜底断开按它算。
-    pub fn with_idle_timeout(mut self, ms: u64) -> SocketInstances {
-        self.idle_timeout_ms = Some(ms);
         self
     }
 
@@ -81,12 +73,7 @@ impl SocketInstances {
         let _ = fs::remove_file(self.layout.discovery(name));
     }
 
-    async fn connect(
-        &self,
-        name: &str,
-        force: bool,
-        idle_timeout_ms: Option<u64>,
-    ) -> Result<SocketBackend, PortError> {
+    async fn connect(&self, name: &str, force: bool) -> Result<SocketBackend, PortError> {
         if !self.exists(name) {
             return Err(PortError::NoSuchInstance(name.into()));
         }
@@ -98,7 +85,6 @@ impl SocketInstances {
             Some(self.layout.discovery(name)),
             this_client(),
             force,
-            idle_timeout_ms.or(self.idle_timeout_ms),
         )
         .await
     }
@@ -259,14 +245,12 @@ impl Instances for SocketInstances {
             None => derive_name(&project, |n| self.exists(n)),
         };
         self.launch(&name, &project).await?;
-        let b = self.connect(&name, false, None).await?;
+        let b = self.connect(&name, false).await?;
         Ok((b.instance().clone(), Arc::new(b)))
     }
 
     async fn attach(&self, name: &str, opts: Attach) -> Result<Arc<dyn Backend>, PortError> {
-        Ok(Arc::new(
-            self.connect(name, opts.force, opts.idle_timeout_ms).await?,
-        ))
+        Ok(Arc::new(self.connect(name, opts.force).await?))
     }
 
     async fn start(&self, name: &str) -> Result<Arc<dyn Backend>, PortError> {
@@ -279,7 +263,7 @@ impl Instances for SocketInstances {
                 .ok_or_else(|| PortError::Failed(format!("instance {name} has no project")))?;
             self.launch(name, Path::new(&project)).await?;
         }
-        Ok(Arc::new(self.connect(name, false, None).await?))
+        Ok(Arc::new(self.connect(name, false).await?))
     }
 
     async fn stop(&self, name: &str) -> Result<(), PortError> {

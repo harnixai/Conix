@@ -23,7 +23,6 @@ fn cli_help_resources_are_english() {
         "app.cli.list",
         "app.cli.attach",
         "app.cli.attach_force",
-        "app.cli.attach_idle_timeout",
         "app.cli.start",
         "app.cli.stop",
     ] {

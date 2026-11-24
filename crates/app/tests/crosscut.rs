@@ -81,7 +81,6 @@ async fn m19_long_lists_scroll_and_filter() {
             name: "ops".into(),
             force: true,
         }),
-        None,
     )
     .await;
     h.tab(Tab::Sessions).await;
@@ -119,7 +118,7 @@ async fn m20_first_run_has_guiding_empty_states() {
 
 #[tokio::test(start_paused = true)]
 async fn m22_mouse_on_picker_exit_dialog_tabs_and_ask() {
-    let mut h = Harness::start("default", SIZE, Start::Picker, None).await;
+    let mut h = Harness::start("default", SIZE, Start::Picker).await;
     let (col, row) = h.find("research").unwrap();
     h.click(col, row);
     h.click(col, row);

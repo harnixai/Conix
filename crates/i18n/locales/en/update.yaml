@@ -1,6 +1,5 @@
 update:
   discarded: "Discarded"
-  idle_warning: "Detaching for inactivity in {left} min (any input cancels it)"
   stopping_instance: "Stopping instance {name} …"
   forcing: "Force-attaching {name} …"
   stopping: "Stopping {name} …"

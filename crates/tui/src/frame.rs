@@ -93,7 +93,7 @@ pub struct FrameState {
 pub enum Body {
     Workbench(Box<Workbench>),
     Instances(InstancesScreen),
-    /// 被踢、空闲超时之后的"已脱离"界面。
+    /// 被踢、实例停了之后的"已脱离"界面。
     Detached(DetachedScreen),
     /// 终端太小（交互 §2.5）。
     TooSmall {

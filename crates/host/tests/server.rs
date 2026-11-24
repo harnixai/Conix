@@ -83,15 +83,14 @@ struct Server {
     task: JoinHandle<ServeEnd>,
 }
 
-fn start(idle_timeout_ms: u64) -> Server {
+fn start() -> Server {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("h.sock");
     let listener = tokio::net::UnixListener::bind(&path).unwrap();
     let svc = Arc::new(FakeService::default());
     let holders = Arc::new(Mutex::new(vec![]));
     let (shutdown, rx) = watch::channel(None);
-    let mut opts = ServeOptions::new(rx);
-    opts.idle_timeout_ms = idle_timeout_ms;
+    let opts = ServeOptions::new(rx);
     let h = holders.clone();
     let task = tokio::spawn(serve(listener, svc.clone(), opts, move |c| {
         h.lock().unwrap().push(c.cloned())
@@ -165,7 +164,6 @@ impl Raw {
             Command::Hello {
                 client: client(pid),
                 force,
-                idle_timeout_ms: None,
             },
         )
         .await;
@@ -184,7 +182,7 @@ fn holder_pid(r: &Result<Reply, PortError>) -> u32 {
 
 #[tokio::test]
 async fn handshake_attaches_and_repeated_hello_is_idempotent() {
-    let s = start(0);
+    let s = start();
     let (mut a, r) = Raw::hello(&s.path, 7, false).await;
     assert_eq!(holder_pid(&r), 7);
     assert_eq!(*s.svc.attaches.lock().unwrap(), [true]);
@@ -205,7 +203,6 @@ async fn handshake_attaches_and_repeated_hello_is_idempotent() {
         Command::Hello {
             client: client(7),
             force: false,
-            idle_timeout_ms: None,
         },
     )
     .await;
@@ -216,7 +213,7 @@ async fn handshake_attaches_and_repeated_hello_is_idempotent() {
 
 #[tokio::test]
 async fn first_frame_must_be_hello() {
-    let s = start(0);
+    let s = start();
     let mut a = Raw::connect(&s.path).await;
     a.send(5, Command::ListJobs).await;
     assert!(matches!(a.reply().await, (5, Err(PortError::Failed(_)))));
@@ -226,7 +223,7 @@ async fn first_frame_must_be_hello() {
 
 #[tokio::test]
 async fn second_client_is_told_who_holds_it() {
-    let s = start(0);
+    let s = start();
     let (mut a, _) = Raw::hello(&s.path, 7, false).await;
     let (mut b, r) = Raw::hello(&s.path, 8, false).await;
     match r {
@@ -243,7 +240,7 @@ async fn second_client_is_told_who_holds_it() {
 
 #[tokio::test]
 async fn force_kicks_the_old_client() {
-    let s = start(0);
+    let s = start();
     let (mut a, _) = Raw::hello(&s.path, 7, false).await;
     let (mut b, r) = Raw::hello(&s.path, 8, true).await;
     assert_eq!(holder_pid(&r), 8);
@@ -266,7 +263,7 @@ async fn force_kicks_the_old_client() {
 
 #[tokio::test]
 async fn detach_frees_the_slot() {
-    let s = start(0);
+    let s = start();
     let (mut a, _) = Raw::hello(&s.path, 7, false).await;
     a.send(2, Command::Detach).await;
     assert!(matches!(a.reply().await, (2, Ok(Reply::Ok))));
@@ -279,7 +276,7 @@ async fn detach_frees_the_slot() {
 
 #[tokio::test]
 async fn stop_instance_replies_then_ends_serving() {
-    let s = start(0);
+    let s = start();
     let (mut a, _) = Raw::hello(&s.path, 7, false).await;
     a.send(2, Command::StopInstance).await;
     assert!(matches!(a.reply().await, (2, Ok(Reply::Ok))));
@@ -290,7 +287,7 @@ async fn stop_instance_replies_then_ends_serving() {
 
 #[tokio::test]
 async fn shutdown_tells_the_client_why() {
-    let s = start(0);
+    let s = start();
     let (mut a, _) = Raw::hello(&s.path, 7, false).await;
     s.shutdown.send(Some("sigterm".into())).unwrap();
     match a.recv().await {
@@ -305,7 +302,7 @@ async fn shutdown_tells_the_client_why() {
 
 #[tokio::test]
 async fn silent_client_is_dropped_after_heartbeat_timeout() {
-    let s = start(0);
+    let s = start();
     let (mut a, _) = Raw::hello(&s.path, 7, false).await;
     // 握手用真实时间，之后暂停：只有推进时钟才会超时。
     tokio::time::pause();
@@ -324,7 +321,6 @@ async fn silent_client_is_dropped_after_heartbeat_timeout() {
         Command::Hello {
             client: client(7),
             force: false,
-            idle_timeout_ms: None,
         },
     )
     .await;
@@ -334,9 +330,10 @@ async fn silent_client_is_dropped_after_heartbeat_timeout() {
     assert_eq!(*s.holders.lock().unwrap().last().unwrap(), None);
 }
 
+/// 没有空闲脱离：接入者很久没输入，只要心跳在，连接就留着。
 #[tokio::test]
-async fn idle_fallback_detaches() {
-    let s = start(30 * 60_000);
+async fn a_long_idle_holder_is_not_detached() {
+    let s = start();
     let mut a = Raw::connect(&s.path).await;
     let mut c = client(7);
     c.last_input_ms = now_ms() - 31 * 60_000;
@@ -345,23 +342,23 @@ async fn idle_fallback_detaches() {
         Command::Hello {
             client: c,
             force: false,
-            idle_timeout_ms: None,
         },
     )
     .await;
     assert!(matches!(a.reply().await, (1, Ok(_))));
-    match a.recv().await {
-        Some(ServerFrame::Event {
-            event: Event::IdleDetached { after_ms },
-        }) => assert!(after_ms >= 31 * 60_000),
-        other => panic!("{other:?}"),
-    }
-    assert!(a.recv().await.is_none());
+    a.send(
+        2,
+        Command::Heartbeat {
+            last_input_ms: now_ms() - 31 * 60_000,
+        },
+    )
+    .await;
+    assert!(matches!(a.reply().await, (2, Ok(Reply::Ok))));
 }
 
 #[tokio::test]
 async fn slow_command_does_not_block_heartbeats() {
-    let s = start(0);
+    let s = start();
     let (mut a, _) = Raw::hello(&s.path, 7, false).await;
     a.send(2, Command::ListFlows).await;
     let t = now_ms() + 5;
@@ -373,7 +370,7 @@ async fn slow_command_does_not_block_heartbeats() {
 
 #[tokio::test]
 async fn unknown_command_gets_unsupported() {
-    let s = start(0);
+    let s = start();
     let (mut a, _) = Raw::hello(&s.path, 7, false).await;
     a.wr.write_all(b"{\"id\":9,\"cmd\":\"from_the_future\"}\n")
         .await

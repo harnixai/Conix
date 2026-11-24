@@ -164,16 +164,7 @@ async fn occupied_instances_refuse_unless_forced() {
     assert!(listed.iter().any(|i| i.holder.is_some()));
     let err = insts.attach("ops", Attach::default()).await.err().unwrap();
     assert!(matches!(err, PortError::Occupied { .. }));
-    insts
-        .attach(
-            "ops",
-            Attach {
-                force: true,
-                idle_timeout_ms: None,
-            },
-        )
-        .await
-        .unwrap();
+    insts.attach("ops", Attach { force: true }).await.unwrap();
     assert!(
         insts
             .list(false)

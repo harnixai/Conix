@@ -1,5 +1,5 @@
 //! LIVE：单一接入（architecture §8.3）——握手、被占用、强制接入踢人、脱离放开接入、
-//! 空闲脱离、心跳超时断开后重连、实例被停时接入者收到通知。
+//! 心跳超时断开后重连、实例被停时接入者收到通知。
 
 mod live;
 
@@ -21,7 +21,6 @@ async fn hello_reports_the_instance_its_capabilities_and_the_holder() {
         .ok(Command::Hello {
             client: client::this_client(),
             force: false,
-            idle_timeout_ms: None,
         })
         .await
     else {
@@ -52,13 +51,7 @@ async fn a_second_client_is_refused_until_it_forces_and_then_the_first_is_kicked
         Err(e) => panic!("{e:?}"),
         Ok(_) => panic!("同一实例只能接一个客户端"),
     }
-    let b = lv
-        .attach(Attach {
-            force: true,
-            ..Default::default()
-        })
-        .await
-        .expect("强制接入");
+    let b = lv.attach(Attach { force: true }).await.expect("强制接入");
     a.wait_event("被踢", QUICK, |e| {
         matches!(e, Event::Kicked { by, .. } if by.pid == std::process::id()).then_some(())
     })
@@ -90,40 +83,6 @@ async fn detaching_releases_the_instance_for_the_next_client() {
     lv.attach(Attach::default())
         .await
         .expect("脱离之后不带 force 也能接入");
-}
-
-#[tokio::test(flavor = "multi_thread")]
-#[ignore = "live"]
-async fn an_idle_client_is_detached_and_told_so() {
-    let lv = Live::new();
-    let a = lv.start().await;
-    a.ok(Command::Detach).await;
-    drop(a);
-    let mut b = loop {
-        // 上一条连接的收尾与这次接入可能交错：被占用就稍后再试。
-        match lv
-            .attach(Attach {
-                force: false,
-                idle_timeout_ms: Some(2_000),
-            })
-            .await
-        {
-            Ok(b) => break b,
-            Err(PortError::Occupied { .. }) => tokio::time::sleep(Duration::from_millis(100)).await,
-            Err(e) => panic!("{e:?}"),
-        }
-    };
-    b.heartbeat(Beat::None);
-    let after = b
-        .wait_event("空闲脱离", QUICK, |e| match e {
-            Event::IdleDetached { after_ms } => Some(*after_ms),
-            _ => None,
-        })
-        .await;
-    assert!(after >= 2_000, "{after}");
-    lv.attach(Attach::default())
-        .await
-        .expect("空闲脱离之后实例空出来了");
 }
 
 #[tokio::test(flavor = "multi_thread")]
