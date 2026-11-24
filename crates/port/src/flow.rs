@@ -26,7 +26,8 @@ pub enum FlowOrigin {
     /// 这个项目的流程。
     #[serde(alias = "user")]
     Project,
-    /// 项目里覆盖了同名全局流程的。
+    /// 全局可写层（`~/.codix/flows/`）里存了一份与内置或插件同名的：删掉就回到那一份（harnix-flow 的
+    /// `Origin::Override`）。项目自己的同名流程报 `Project`，不是这个。
     Override,
     /// 插件带来的（只读，全局）。
     Plugin,
@@ -36,7 +37,7 @@ impl FlowOrigin {
     pub fn is_global(self) -> bool {
         matches!(
             self,
-            FlowOrigin::Builtin | FlowOrigin::Global | FlowOrigin::Plugin
+            FlowOrigin::Builtin | FlowOrigin::Global | FlowOrigin::Plugin | FlowOrigin::Override
         )
     }
 }

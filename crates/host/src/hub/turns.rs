@@ -129,6 +129,12 @@ impl Hub {
     /// `run_turn` 一跑就是几分钟：另起任务等它，错误响应就是这一轮的失败（协议 §5.5）。
     pub(super) fn run_turn(&self, id: &str, text: &str, on_busy: &str) -> String {
         let turn = format!("cx-{}-{}", self.now(), rand_suffix());
+        // 引擎只在压缩做完后发一帧 `compact`，开始时什么都不发；界面的"压缩中"就从这里来。
+        if text.trim_start().starts_with("/compact") {
+            self.emit_events(vec![Event::Compacting {
+                session: SessionId(id.to_string()),
+            }]);
+        }
         if on_busy != "steer" {
             self.0
                 .sent

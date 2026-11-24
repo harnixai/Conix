@@ -11,7 +11,7 @@ marks:
     builtin: global · built-in
     global: global
     project: project
-    override: project · overrides global
+    override: global · overrides built-in
     plugin: global · plugin
   error:
     occupied: "instance is attached by {holder}"

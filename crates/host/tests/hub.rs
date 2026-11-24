@@ -1468,3 +1468,29 @@ async fn a_watched_sessions_usage_is_what_the_engine_reports() {
         "重启后内存里是 0，累计以引擎的为准"
     );
 }
+
+/// `/compact`：引擎只在压缩做完后发一帧，开始时实例先说"压缩中"。
+#[tokio::test]
+async fn compact_says_compacting_before_the_engine_finishes() {
+    let mut r = rig().await;
+    r.hub
+        .handle(Command::Watch {
+            session: SessionId("s1".into()),
+        })
+        .await
+        .unwrap();
+    r.hub
+        .handle(Command::Submit {
+            session: SessionId("s1".into()),
+            text: "/compact".into(),
+            mode: SubmitMode::Turn,
+        })
+        .await
+        .unwrap();
+    let ev = r.events().await;
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, Event::Compacting { session } if session.0 == "s1")),
+        "{ev:?}"
+    );
+}

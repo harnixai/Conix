@@ -12,7 +12,7 @@ marks:
     builtin: 全局 · 内置
     global: 全局
     project: 项目
-    override: 项目 · 覆盖全局
+    override: 全局 · 覆盖内置
     plugin: 全局 · 插件
   error:
     occupied: "实例已被 {holder} 接入"
