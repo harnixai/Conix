@@ -16,6 +16,11 @@ pub struct Task {
     pub agent_type: Option<String>,
     #[serde(default)]
     pub agent_session: Option<SessionId>,
+    /// 子 Agent、团队成员实际用的模型与 provider：起时是引擎的预测，调用后按真正答的那家改写。
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub provider: Option<String>,
     #[serde(default)]
     pub started_ms: Millis,
     #[serde(default)]

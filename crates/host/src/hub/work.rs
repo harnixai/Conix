@@ -368,7 +368,8 @@ fn job_by<'a>(jobs: &'a [Job], key: &str) -> Result<&'a Job, String> {
 fn task_brief(t: &port::Task) -> Value {
     json!({
         "id": t.id, "kind": t.kind, "status": t.status, "label": t.label,
-        "agent_type": t.agent_type, "session": t.agent_session, "usage": t.usage, "error": t.error,
+        "agent_type": t.agent_type, "model": t.model, "provider": t.provider,
+        "session": t.agent_session, "usage": t.usage, "error": t.error,
     })
 }
 

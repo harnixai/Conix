@@ -23,7 +23,7 @@
 │                                                                                              │├─ 重构认证模块 ──────────────────────────────────── 5 个在跑 ─┤
 │                                                                                              ││ ◐ 主 Agent                                         18.2k/6.1k│
 │                                                                                              ││ ├ ▾ ◐ ◆ 审查认证改动  reviewer               8m00s, 6.4k/1.8k│
-│                                                                                              ││ │ ├ ▾ ● ◆ 检查依赖许可  general               2m20s, 2.1k/640│
+│                                                                                              ││ │ ├ ▾ ● ◆ 检查依赖许可  general · deepseek-f… 2m20s, 2.1k/640│
 │                                                                                              ││ │ │ └ ● $ cargo deny check licenses  shell              1m40s│
 │                                                                                              ││ │ └ ● $ cargo test  shell                               2m00s│
 │                                                                                              ││ ├ ● ◉ tail -f app.log  monitor                         15m00s│

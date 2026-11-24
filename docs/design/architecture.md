@@ -672,8 +672,8 @@ schema；`job_validate` 不落盘，回下 5 次触发时刻与护栏的实际�
 
 **流程、作业页的树**（F-03、J-02）：主会话 → 站 → 站的任务 → 子 Agent 与任务，递归。任务树来自 `TaskUpserted`
 （每个会话的都推）加上 `SessionTasks` 的快照（选中运行或触发时取一次没 Watch 的那些会话的）。模型取节点会话的
-`provenance.model`；子 Agent 的实际模型 Agix 还不报（`session.tasks` 的 agent 任务没有模型），先用 `agent_type`，
-等 Agix#98（[Codix 12]）。
+`provenance.model`；子 Agent、团队成员的取任务的 `model` / `provider`（Agix 任务 `detail` 里的，能力位 `task_model`：
+起时是预测，第一次调用后按真正答的那家改写），侧链会话的模型跟着它改——子 Agent 可以与父会话不是同一家。
 
 ## 9. 旧实现踩过的坑
 

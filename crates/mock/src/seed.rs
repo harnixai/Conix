@@ -131,6 +131,8 @@ pub fn busy() -> Seed {
             label: format!("job-{i:02}.sh"),
             agent_type: None,
             agent_session: None,
+            model: None,
+            provider: None,
             started_ms: 1_763_000_000_000,
             ended_ms: None,
             usage: Usage::default(),

@@ -71,6 +71,8 @@ async fn lower_tree_three_levels_and_finished_group() {
         "审查认证改动",
         "cargo test",
         "检查依赖许可",
+        // 子 Agent 写类型再跟它实际用的模型：它与父会话不是同一家。
+        "general · deepseek",
         "cargo deny check licenses",
         "已结束 (",
         "├ ",

@@ -525,14 +525,17 @@ pub(crate) fn task_line(s: &State, t: &Task, prefix: &str, width: usize) -> Line
         (Some(_), true) => "▸ ",
         (None, _) => "",
     };
-    // 子 Agent 写它的 agent 类型：引擎还不报子 Agent 实际用的模型（Agix#98），类型多半就定了模型。
-    let kind = match &t.kind {
+    // 子 Agent 写它的 agent 类型，后面跟它实际用的模型：子 Agent 可以与父会话不是同一个模型、同一家。
+    let mut kind = match &t.kind {
         TaskKind::Agent => t
             .agent_type
             .clone()
             .unwrap_or_else(|| i18n::t!("sessions.sub_agent")),
         k => crate::marks::kind_label(k),
     };
+    if let Some(m) = t.model.as_ref().filter(|m| !m.is_empty()) {
+        kind = format!("{kind} · {m}");
+    }
     let end = t.ended_ms.unwrap_or(s.ui.now_ms);
     // 子 Agent 与任务用图标分开：◆ 是子 Agent（选中切到它的会话），其余是任务
     // （选中看它的输出）。

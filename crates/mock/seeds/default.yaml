@@ -278,7 +278,7 @@ sessions:
         host: ops-01
         project: ~/work/auth
         scene: code
-        model: claude-sonnet-5-5
+        model: deepseek-flash
         origin: {sub_agent: {parent: s1-reviewer, parent_title: 审查认证改动, task: t8}}
       updated_ms: 1763279930000
     running: true
@@ -525,6 +525,8 @@ tasks:
     label: 检查依赖许可
     agent_type: general
     agent_session: s1-reviewer-lic
+    model: deepseek-flash
+    provider: deepseek
     started_ms: 1763279860000
     usage: {input: 2100, output: 640, cache_read: 900, cache_write: 80}
   - id: t9

@@ -15,25 +15,25 @@ timeline:
   - at: 3200
     task_upserted: {id: t9, owner: s1-reviewer-lic, kind: shell, status: done, label: "cargo deny check licenses", started_ms: 1763279900000, ended_ms: 1763280003200}
   - at: 4000
-    task_upserted: {id: t8, owner: s1-reviewer, kind: agent, status: running, label: "检查依赖许可", started_ms: 1763279860000, agent_session: s1-reviewer-lic, agent_type: general, usage: {input: 2600, output: 820, cache_read: 1100}}
+    task_upserted: {id: t8, owner: s1-reviewer, kind: agent, status: running, label: "检查依赖许可", started_ms: 1763279860000, agent_session: s1-reviewer-lic, agent_type: general, model: deepseek-flash, provider: deepseek, usage: {input: 2600, output: 820, cache_read: 1100}}
   - at: 4100
     task_output: {task: t4, text: "2025-11-16T09:06:03Z INFO  GET /oauth/callback 200 176ms\n", next_byte: 1340}
   - at: 4300
     task_output: {task: t2, text: "test middleware::tests::rejects_expired ... ok\n", next_byte: 1080}
   - at: 5000
-    task_upserted: {id: t8, owner: s1-reviewer, kind: agent, status: running, label: "检查依赖许可", started_ms: 1763279860000, agent_session: s1-reviewer-lic, agent_type: general, usage: {input: 3400, output: 1150, cache_read: 1500}}
+    task_upserted: {id: t8, owner: s1-reviewer, kind: agent, status: running, label: "检查依赖许可", started_ms: 1763279860000, agent_session: s1-reviewer-lic, agent_type: general, model: deepseek-flash, provider: deepseek, usage: {input: 3400, output: 1150, cache_read: 1500}}
   - at: 5400
     task_output: {task: t2, text: "test config::tests::loads_provider ... ok\n", next_byte: 1140}
   - at: 5400
     task_output: {task: t4, text: "2025-11-16T09:06:30Z WARN  slow query: sessions lookup 388ms\n", next_byte: 1410}
   - at: 6200
-    task_upserted: {id: t8, owner: s1-reviewer, kind: agent, status: running, label: "检查依赖许可", started_ms: 1763279860000, agent_session: s1-reviewer-lic, agent_type: general, usage: {input: 4300, output: 1500, cache_read: 1900}}
+    task_upserted: {id: t8, owner: s1-reviewer, kind: agent, status: running, label: "检查依赖许可", started_ms: 1763279860000, agent_session: s1-reviewer-lic, agent_type: general, model: deepseek-flash, provider: deepseek, usage: {input: 4300, output: 1500, cache_read: 1900}}
   - at: 6500
     task_output: {task: t2, text: "test config::tests::env_override ... ok\n", next_byte: 1200}
   - at: 6700
     task_output: {task: t4, text: "2025-11-16T09:07:11Z INFO  GET /healthz 200 1ms\n", next_byte: 1480}
   - at: 7000
-    task_upserted: {id: t8, owner: s1-reviewer, kind: agent, status: done, label: "检查依赖许可", started_ms: 1763279860000, ended_ms: 1763280007000, agent_session: s1-reviewer-lic, agent_type: general, usage: {input: 5200, output: 1900, cache_read: 2300}}
+    task_upserted: {id: t8, owner: s1-reviewer, kind: agent, status: done, label: "检查依赖许可", started_ms: 1763279860000, ended_ms: 1763280007000, agent_session: s1-reviewer-lic, agent_type: general, model: deepseek-flash, provider: deepseek, usage: {input: 5200, output: 1900, cache_read: 2300}}
   - at: 7600
     task_output: {task: t2, text: "test e2e::tests::full_login_flow ... ok\n", next_byte: 1260}
   - at: 8000

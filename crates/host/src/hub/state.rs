@@ -417,6 +417,14 @@ impl St {
                 if let Some(child) = &t.agent_session {
                     let label = t.label.clone();
                     self.ensure_sidechain(&child.0, sid, &t.id.0, &label);
+                    // 侧链会话起时抄的是父会话的模型；子 Agent 可以走别的模型、别的 provider，以任务上报的为准。
+                    if let Some(m) = t.model.as_ref().filter(|m| !m.is_empty())
+                        && let Some(c) = self.sessions.get_mut(&child.0)
+                        && c.model != *m
+                    {
+                        c.model = m.clone();
+                        self.upsert(&child.0, out);
+                    }
                 }
                 self.task_owner.insert(t.id.0.clone(), rpc.to_string());
                 if let Some(s) = self.sessions.get_mut(sid) {
@@ -616,6 +624,8 @@ pub fn task_of(owner: &str, t: &TaskInfo) -> Task {
         label,
         agent_type: field("agent_type"),
         agent_session: field("agent_session_id").map(SessionId),
+        model: field("model"),
+        provider: field("provider"),
         started_ms: t.started_ms.max(0) as u64,
         ended_ms: t.ended_ms.map(|e| e.max(0) as u64),
         usage: t.usage.as_ref().map(map_usage).unwrap_or_default(),

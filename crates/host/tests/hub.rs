@@ -646,6 +646,46 @@ async fn session_tasks_gather_the_whole_tree_down_the_sub_agents() {
     assert!(ids.contains(&"t1") && ids.contains(&"t2"), "{ids:?}");
 }
 
+/// 子 Agent 可以走别的模型、别的家（Agix 0.4.2，能力位 `task_model`）：任务上报的模型起时是预测，调用后按真正
+/// 答的那家改写；侧链会话起时抄父会话的模型，跟着任务改过来。
+#[tokio::test]
+async fn a_sub_agent_task_carries_the_model_that_really_answered() {
+    let mut r = rig().await;
+    let task = |status: &str, model: &str, provider: &str| {
+        json!({"task_id":"t1","kind":"agent","status":status,"started_ms":0,
+            "detail":{"description":"审代码","agent_type":"reviewer","agent_session_id":"c1",
+                      "model":model,"provider":provider}})
+    };
+    r.frame(
+        "s1",
+        json!({"kind":"task_started","task":task("running","deepseek-flash","deepseek")}),
+    );
+    r.frame(
+        "s1",
+        json!({"kind":"task_updated","task":task("running","claude-sonnet-5-5","claude")}),
+    );
+    let ev = r.events().await;
+    let last = ev
+        .iter()
+        .filter_map(|e| match e {
+            Event::TaskUpserted(t) if t.id.0 == "t1" => Some(t.clone()),
+            _ => None,
+        })
+        .next_back()
+        .expect("任务推出来了");
+    assert_eq!(last.model.as_deref(), Some("claude-sonnet-5-5"));
+    assert_eq!(last.provider.as_deref(), Some("claude"));
+    let side = ev
+        .iter()
+        .filter_map(|e| match e {
+            Event::SessionUpserted(s) if s.id.0 == "c1" => Some(s.provenance.model.clone()),
+            _ => None,
+        })
+        .next_back()
+        .expect("侧链会话推出来了");
+    assert_eq!(side, "claude-sonnet-5-5", "侧链会话跟着任务改了模型");
+}
+
 #[tokio::test]
 async fn late_frames_do_not_resurrect_a_closed_session() {
     let mut r = rig().await;
