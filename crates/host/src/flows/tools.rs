@@ -52,20 +52,17 @@ fn str_of(input: &Value, k: &str) -> Option<String> {
     input.get(k).and_then(Value::as_str).map(str::to_string)
 }
 
-/// 这个会话能不能用这个工具。运行工具没写 `run` 的，库按会话自己的运行补（[`ConixAuthorHost::current_run`]）。
-fn allowed(scope: &Scope, name: &str, read_only: bool, input: &Value) -> Result<(), String> {
+/// 这个会话能不能用这个工具。运行里的会话连自己所在的运行也不能操作：一站自己给自己确认、放行、
+/// 强制放行，出口条件就形同虚设；它交付走派工器的 `flow_submit`（architecture §8.5）。
+fn allowed(scope: &Scope, name: &str, read_only: bool) -> Result<(), String> {
     if read_only {
         return Ok(());
     }
     match scope {
         Scope::Full => Ok(()),
-        Scope::Run(mine) if RUN_TOOLS.contains(&name) => match str_of(input, "run") {
-            None => Ok(()),
-            Some(r) if &r == mine => Ok(()),
-            Some(_) => Err(format!(
-                "not allowed: a session inside a flow run may operate only that run ({mine})"
-            )),
-        },
+        Scope::Run(mine) if RUN_TOOLS.contains(&name) => Err(format!(
+            "not allowed: a session inside a flow run ({mine}) may not operate runs, its own included; it hands its work in with flow_submit, and the user decides the rest"
+        )),
         Scope::Run(mine) => Err(format!(
             "not allowed: a session inside a flow run ({mine}) may not change flow definitions or start runs"
         )),
@@ -94,7 +91,7 @@ pub(crate) async fn call(
         async {
             let mut input = input.clone();
             resolve_number(f, &mut input).await?;
-            allowed(scope, name, spec.read_only, &input)?;
+            allowed(scope, name, spec.read_only)?;
             if matches!(name, author::TOOL_UPDATE | author::TOOL_DELETE) {
                 let flow = match str_of(&input, "flow") {
                     Some(n) => Some(n),
@@ -230,17 +227,16 @@ mod tests {
     }
 
     #[test]
-    fn a_run_session_may_operate_only_its_own_run_and_change_no_definition() {
+    fn a_run_session_only_looks_and_operates_no_run_not_even_its_own() {
         let mine = Scope::Run("r1".into());
-        assert!(allowed(&mine, "flow_list", true, &json!({})).is_ok());
-        assert!(allowed(&mine, "flow_pause", false, &json!({"run": "r1"})).is_ok());
-        assert!(allowed(&mine, "flow_pause", false, &json!({})).is_ok());
-        assert!(allowed(&mine, "flow_pause", false, &json!({"run": "r2"})).is_err());
-        assert!(allowed(&mine, "flow_update", false, &json!({"flow": "x"})).is_err());
-        assert!(allowed(&mine, "flow_start", false, &json!({"flow": "x"})).is_err());
+        assert!(allowed(&mine, "flow_list", true).is_ok());
+        assert!(allowed(&mine, "flow_pause", false).is_err());
+        assert!(allowed(&mine, "flow_force", false).is_err());
+        assert!(allowed(&mine, "flow_update", false).is_err());
+        assert!(allowed(&mine, "flow_start", false).is_err());
         let job = Scope::Job("j".into());
-        assert!(allowed(&job, "flow_show", true, &json!({})).is_ok());
-        assert!(allowed(&job, "flow_cancel", false, &json!({"run": "r1"})).is_err());
-        assert!(allowed(&Scope::Full, "flow_delete", false, &json!({})).is_ok());
+        assert!(allowed(&job, "flow_show", true).is_ok());
+        assert!(allowed(&job, "flow_cancel", false).is_err());
+        assert!(allowed(&Scope::Full, "flow_delete", false).is_ok());
     }
 }

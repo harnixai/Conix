@@ -121,6 +121,9 @@ impl Hub {
                         "{key} is not a closed session: close it first (session_close), then delete it"
                     ));
                 };
+                if !port::order::is_user_session(s) {
+                    return Err(inside_work(&s.provenance.origin));
+                }
                 self.dispatch(Command::DeleteSession {
                     session: s.id.clone(),
                 })
@@ -207,10 +210,8 @@ impl Hub {
             tools::JOB_STOP => {
                 let sched = self.scheduler().map_err(port_err)?;
                 let job = job_target(&sched.list(), input)?;
-                match &scope {
-                    tools::Scope::Full => {}
-                    tools::Scope::Job(mine) if mine == &job.id.0 => {}
-                    _ => return Err(out_of_scope(&scope)),
+                if scope != tools::Scope::Full {
+                    return Err(out_of_scope(&scope));
                 }
                 self.stop_firing(
                     &job.id.0,
@@ -229,10 +230,8 @@ impl Hub {
                     Some(_) => Some(job_target(&sched.list(), input)?),
                     None => None,
                 };
-                match (&scope, &existing) {
-                    (tools::Scope::Full, _) => {}
-                    (tools::Scope::Job(mine), Some(j)) if &j.id.0 == mine => {}
-                    _ => return Err(out_of_scope(&scope)),
+                if scope != tools::Scope::Full {
+                    return Err(out_of_scope(&scope));
                 }
                 let job = tools::job_from_input(input, existing)?;
                 let Reply::Job(saved) = self
@@ -252,10 +251,8 @@ impl Hub {
             tools::JOB_DELETE | tools::JOB_ENABLE | tools::JOB_RUN => {
                 let sched = self.scheduler().map_err(port_err)?;
                 let job = job_target(&sched.list(), input)?;
-                match &scope {
-                    tools::Scope::Full => {}
-                    tools::Scope::Job(mine) if mine == &job.id.0 => {}
-                    _ => return Err(out_of_scope(&scope)),
+                if scope != tools::Scope::Full {
+                    return Err(out_of_scope(&scope));
                 }
                 let (cmd, done) = match name {
                     tools::JOB_DELETE => (
@@ -317,31 +314,60 @@ impl Hub {
         Err(format!("no session {key}"))
     }
 
+    /// 自己总能动；用户会话还能动别的用户会话。运行与触发里面的会话（连同它们的子 Agent）谁的工具都动不了：
+    /// 外面只管运行与作业的生命周期，里面的事在 TUI 里切过去处理（architecture §8.5）。
     pub(super) fn may_touch_session(
         &self,
         scope: &tools::Scope,
         rpc: &str,
         id: &str,
     ) -> Result<(), String> {
-        if *scope == tools::Scope::Full || id == rpc {
-            Ok(())
-        } else {
-            Err(out_of_scope(scope))
+        if id == rpc {
+            return Ok(());
         }
+        if *scope != tools::Scope::Full {
+            return Err(out_of_scope(scope));
+        }
+        match self.root_origin(id) {
+            Some(port::Origin::User | port::Origin::Fork { .. }) => Ok(()),
+            Some(o) => Err(inside_work(&o)),
+            None => Ok(()),
+        }
+    }
+
+    /// 一个会话（子 Agent 的侧链按它的根）是怎么来的。
+    pub(super) fn root_origin(&self, id: &str) -> Option<port::Origin> {
+        let st = self.0.st.locked();
+        let mut cur = st.sessions.get(id)?;
+        while let Some(p) = cur.parent.as_ref().and_then(|p| st.sessions.get(p)) {
+            cur = p;
+        }
+        Some(cur.origin.clone())
     }
 }
 
-/// 摘要类全推；一轮的细节只推 Watch 着的会话（architecture §8.4）。
 pub(super) fn out_of_scope(scope: &tools::Scope) -> String {
     match scope {
         tools::Scope::Job(job) => format!(
-            "not allowed: a session started by a scheduled job may change only that job ({job}) and itself"
+            "not allowed: a session started by a scheduled job ({job}) may only look at jobs and flows, and change only itself"
         ),
         tools::Scope::Run(run) => format!(
-            "not allowed: a session inside a flow run may change only that run ({run}) and itself"
+            "not allowed: a session inside a flow run ({run}) may only look at jobs and flows, and change only itself"
         ),
         _ => "not allowed from this session".into(),
     }
+}
+
+/// 外面的会话想动运行或触发里面的会话。
+pub(super) fn inside_work(origin: &port::Origin) -> String {
+    let whose = match origin {
+        port::Origin::Job { name, .. } => format!("the scheduled job \"{name}\""),
+        port::Origin::FlowStation { subject, .. } => format!("the flow run \"{subject}\""),
+        _ => "a run or a job".into(),
+    };
+    format!(
+        "not allowed: this session belongs to {whose}. Operate the run or the job itself (flow_* / job_* tools); what happens inside it — messages, answers, permissions, renaming, closing — is for the user to do in the Conix TUI, switched to that session"
+    )
 }
 
 pub(super) fn local_time(ms: u64) -> String {

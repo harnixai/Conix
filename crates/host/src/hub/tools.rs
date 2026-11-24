@@ -135,19 +135,19 @@ pub fn declarations() -> Value {
         ),
         tool(
             SESSION_RENAME,
-            "Rename a session; this is the name shown in the sessions list. Omit target to rename the session you are in.",
+            "Rename a session; this is the name shown in the sessions list. Omit target to rename the session you are in. Only the user's sessions and this one: a session inside a flow run or started by a scheduled job is the user's to handle in the Conix TUI.",
             json!({"target": target("The session; omit for this one"), "title": {"type": "string"}}),
             &["title"]
         ),
         tool(
             SESSION_CLOSE,
-            "Close a session: it leaves the sessions list (its transcript is kept). Only when the user asks for it.",
+            "Close a session: it leaves the sessions list (its transcript is kept). Only when the user asks for it. Only the user's sessions and this one: a session inside a flow run or started by a scheduled job is the user's to handle in the Conix TUI.",
             json!({"target": target("The session")}),
             &["target"]
         ),
         tool(
             SESSION_DELETE,
-            "Delete a session for good: its transcript, memory and sub-agent sessions. A session open in the sessions list has to be closed first; closed ones are listed with all=true. Only when the user asks for it.",
+            "Delete a session for good: its transcript, memory and sub-agent sessions. A session open in the sessions list has to be closed first; closed ones are listed with all=true. Only when the user asks for it. Only the user's sessions and this one: a session inside a flow run or started by a scheduled job is the user's to handle in the Conix TUI.",
             json!({"target": target("The session (a closed one: its id)")}),
             &["target"]
         ),

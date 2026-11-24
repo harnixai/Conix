@@ -642,7 +642,7 @@ async fn late_frames_do_not_resurrect_a_closed_session() {
 }
 
 #[tokio::test]
-async fn a_job_fired_session_may_change_only_its_own_job() {
+async fn a_job_fired_session_only_looks_at_jobs_and_nobody_else_touches_it() {
     let mut r = rig().await;
     let save = |name: &str| port::Job {
         id: port::JobId(String::new()),
@@ -740,16 +740,42 @@ async fn a_job_fired_session_may_change_only_its_own_job() {
     );
     r.frame("zz", tool_call("zz", "g", "job_list", json!({})));
     r.frame("s1", tool_call("s1", "h", "job_list", json!({})));
+    // 用户会话动不了作业触发出来的会话：里面的事在 TUI 里处理。
+    r.frame(
+        "s1",
+        tool_call(
+            "s1",
+            "i",
+            "session_rename",
+            json!({"target": "new1", "title": "改作业的会话"}),
+        ),
+    );
+    r.frame(
+        "s1",
+        tool_call("s1", "j", "session_close", json!({"target": "new1"})),
+    );
+    r.frame(
+        "s1",
+        tool_call(
+            "s1",
+            "k",
+            "job_enable",
+            json!({"target": mine.id.0, "enabled": false}),
+        ),
+    );
     r.events().await;
     for (id, ok) in [
         ("a", false),
-        ("b", true),
+        ("b", false),
         ("c", false),
         ("d", false),
         ("e", true),
         ("f", false),
         ("g", false),
         ("h", true),
+        ("i", false),
+        ("j", false),
+        ("k", true),
     ] {
         let (err, text) = r.answer(id);
         assert_eq!(!err, ok, "{id}: {text}");
@@ -760,6 +786,8 @@ async fn a_job_fired_session_may_change_only_its_own_job() {
         "按 #n 列：{list}"
     );
     assert!(list.contains("mine") && list.contains("other"));
+    let (_, why) = r.answer("i");
+    assert!(why.contains("TUI"), "说明去哪处理：{why}");
 }
 
 /// 作业定义随项目提交，项目受信才读、才写；`/trust` 之后出现，取消信任就收起来（architecture §8.5）。
