@@ -4,7 +4,7 @@
 mod live;
 
 use live::{Answering, Live, TURN};
-use port::{Answer, Command, Event, FileChangeKind, Resolution, SubmitMode};
+use port::{Answer, Command, Event, FileChangeKind, PromptKind, Resolution, SubmitMode};
 
 /// 把实例的 `settings.json` 换成带额外键的（原有的提问超时放长保留）。
 fn settings(lv: &Live, extra: serde_json::Value) {
@@ -61,6 +61,10 @@ async fn allow_for_the_session_is_asked_once() {
     )
     .await;
     let p = c.wait_prompt(&s).await;
+    let first = match &p.kind {
+        PromptKind::Permission { summary, .. } => summary.clone(),
+        k => panic!("{k:?}"),
+    };
     c.ok(Command::Answer {
         session: s.clone(),
         prompt: p.id,
@@ -78,12 +82,19 @@ async fn allow_for_the_session_is_asked_once() {
         )
         .await;
     t.ended();
+    // 只看同一条命令：模型第二次偶尔把命令写得不一样（多个 `cd … &&`），那是另一条命令，问是对的。
+    let again: Vec<_> = t
+        .prompts
+        .iter()
+        .filter(|p| matches!(&p.kind, PromptKind::Permission { summary, .. } if *summary == first))
+        .collect();
     assert!(
-        t.prompts.is_empty(),
-        "本会话总是允许之后不再问：{:?}",
-        t.prompts
+        again.is_empty(),
+        "本会话总是允许之后同一条命令不再问：{again:?}"
     );
-    assert!(t.results.iter().all(|(_, err)| !err), "{:?}", t.results);
+    if t.prompts.is_empty() {
+        assert!(t.results.iter().all(|(_, err)| !err), "{:?}", t.results);
+    }
 }
 
 /// 引擎撤回提问（这里是超时）：实例推 `PromptResolved { Withdrawn }`，会话不再标成在等人，这一轮照样有结局。
