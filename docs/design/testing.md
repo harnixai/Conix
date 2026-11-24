@@ -330,7 +330,7 @@ catch_up`（再按名字过滤）。凭据取仓库根的 `.env`（worktree 里�
 | W-01 | 一次查到所有运行与触发 | host/flows::project_runs_span_flows_and_an_ended_run_is_run_again；host/hub::a_firing_keeps_a_report_that_work_tools_show_list_and_clean_up（work_list）；live_tools::a_user_session_finds_a_firing_with_work_list_and_reads_its_report | LIVE |
 | W-02 | 运行、触发的运行时目录与报告 | host/hub::a_firing_keeps_a_report_that_work_tools_show_list_and_clean_up；host/flows::project_runs_span_flows_and_an_ended_run_is_run_again（conix-report.json）；live_tools::a_user_session_finds_a_firing_with_work_list_and_reads_its_report | LIVE |
 | W-03 | 会话里清理已结束的 | host/hub::a_firing_keeps_a_report_that_work_tools_show_list_and_clean_up（先列后清、作业会话清不了）；流程运行的清理等 Harnix#70 | 缺 LIVE |
-| W-04 | 会话里自检、测试通知 | 无专门用例（conix_doctor / notify_test 与 /doctor、/notify 走同一条命令） | 缺 |
+| W-04 | 会话里自检、测试通知 | host/hub::sessions_run_the_self_check_and_send_a_test_notification（两种出口照实报、作业会话不发）；live_tools::a_user_session_runs_the_self_check_and_sends_a_test_notification（只读不问、往外发问人、出口真收到） | LIVE |
 | D-01 | `/doctor`：生效配置与引擎自检 | host/hub::doctor_reports_the_engines_checks_and_the_instances_own（离线、假引擎）；live_diagnostics::doctor_reports_the_engines_checks_and_the_instances_own（真实实例的每一项）、doctor_flags_an_inherited_job_network_and_an_unreadable_config | LIVE |
 | D-02 | 键位覆盖、冲突启动时报出 | keys 单测（`crates/keys`）；app/keys::*；app/guards | 单测 + mock 场景 |
 | D-03 | 一键帮助 | app/keys::the_help_lists_the_focused_context_with_shared_keys_on_one_line、ctrl_h_erases_while_typing_and_is_help_otherwise | mock 场景 |

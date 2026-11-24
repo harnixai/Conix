@@ -1692,3 +1692,79 @@ async fn compact_says_compacting_before_the_engine_finishes() {
         "{ev:?}"
     );
 }
+
+/// 会话里的自检与测试通知（architecture §8.12）：conix_doctor 与 /doctor 同一份；notify_test 经配置的出口
+/// 真发一条，回哪个出口通了；没配出口照实说；往外发的只给人开的会话。
+#[tokio::test]
+async fn sessions_run_the_self_check_and_send_a_test_notification() {
+    let mut r = rig_with(Box::new(|m, p| match m {
+        "daemon.doctor" => Ok(json!({"health": {"status": "ok", "checks": [
+            {"name": "settings.tiers", "status": "ok", "summary": "every settings.json present parses"}]}})),
+        _ => default_handler(m, p),
+    }))
+    .await;
+    let doctor = r
+        .hub
+        .run_tool("s1", "conix_doctor", &json!({}))
+        .await
+        .unwrap();
+    assert!(
+        doctor.contains("settings.tiers") && doctor.contains("conix.flows"),
+        "引擎的与实例自己的都在：{doctor}"
+    );
+    let none = r
+        .hub
+        .run_tool("s1", "notify_test", &json!({}))
+        .await
+        .unwrap();
+    assert!(none.contains("no notification sinks"), "{none}");
+
+    let dir = tempfile::tempdir().unwrap();
+    let out = dir.path().join("sent.json");
+    let cfg: host::notify::NotifyConfig = serde_json::from_value(json!({
+        "when": "always",
+        "sinks": [
+            {"name": "file", "command": ["sh", "-c", format!("cat > {}", out.display())], "stdin": "json"},
+            {"name": "broken", "command": ["/no/such/notifier"]},
+        ],
+    }))
+    .unwrap();
+    r.hub.set_notifier(host::notify::Notifier::new(
+        cfg,
+        host::notify::Origin {
+            instance: "app".into(),
+            host: "box".into(),
+            project: PROJECT.into(),
+        },
+        None,
+    ));
+    let sent = r
+        .hub
+        .run_tool("s1", "notify_test", &json!({}))
+        .await
+        .unwrap();
+    assert!(
+        sent.contains("ok  file") && sent.contains("failed  broken"),
+        "每个出口照实报：{sent}"
+    );
+    let body = std::fs::read_to_string(&out).unwrap();
+    assert!(body.contains("Conix test notification"), "{body}");
+
+    // 作业触发出来的会话不往外发。
+    let job = save_job(&r, simple_job("nightly", "跑测试")).await;
+    run_now(&r, &job.id).await;
+    r.events().await;
+    assert!(
+        r.hub
+            .run_tool("new1", "notify_test", &json!({}))
+            .await
+            .is_err()
+    );
+    assert!(
+        r.hub
+            .run_tool("new1", "conix_doctor", &json!({}))
+            .await
+            .is_ok(),
+        "自检只读，谁都能看"
+    );
+}

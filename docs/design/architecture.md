@@ -287,6 +287,7 @@ loop {
         └── conix/                Conix 的命名空间（Agix 的 `state/<产品名>/`），模型不能写
             ├── owner.json        认领凭证（§8.9）
             ├── host.lock         flock：一个项目同时只能有一个实例
+            ├── trust.json        人用 `/trust` 定过信不信（个人项目据此决定要不要自动信任，§8.1）
             ├── sessions.json     会话归属（§8.4）
             ├── jobs-state.json   作业在这台机器上的启用状态与调度基线
             ├── jobs/<作业 id>.jsonl  触发记录，一次一行
@@ -316,8 +317,9 @@ loop {
   设置分层撞在一起，引擎还把 `~/.<engine>` 当别的实例的状态目录守着。所以在家目录、它的上级（含根目录）或全局目录
   里运行 `conix`，进的是个人项目：`conix.yaml` 的 `instance.personal_project`，缺省 `<文档目录>/Conix`（macOS
   `~/Documents`；Linux 取 `XDG_DOCUMENTS_DIR`（环境变量或 `user-dirs.dirs`），没有就 `~/Documents`；Windows
-  `%USERPROFILE%\Documents`），没有就建。`conix new --project` 指到这些位置直接拒。个人项目和别的项目一样，要
-  `/trust` 之后才读写它的流程与作业。
+  `%USERPROFILE%\Documents`），没有就建。`conix new --project` 指到这些位置直接拒。个人项目第一次用就信任（实例起来时
+  `project.trust`），流程与作业不用先 `/trust`；人用 `/trust` 定过的照人定的——Agix 取消信任就是删掉那一条，
+  分不出"没人定过"和"人取消过"，所以 Conix 在 `state/conix/trust.json` 记下人的选择。
 
 ### 8.2 crate 与进程
 

@@ -187,6 +187,12 @@ impl ProjectState {
         self.dir().join("workspaces")
     }
 
+    /// 人用 `/trust` 定过这个项目信不信：Agix 只记"信任"（取消就是删掉那一条），分不出"没人定过"和
+    /// "人取消过"，个人项目第一次用就自动信任要靠这一份认出后者。
+    pub fn trust_choice(&self) -> PathBuf {
+        self.dir().join("trust.json")
+    }
+
     /// 作业起的运行在会话上多出的限制（网络、禁 `CronCreate`），按运行记。
     pub fn run_policies(&self) -> PathBuf {
         self.dir().join("run-policies.json")

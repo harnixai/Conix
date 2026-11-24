@@ -142,3 +142,49 @@ async fn a_killed_instance_is_listed_as_stale_cleaned_and_can_be_started() {
         InstanceState::Running
     );
 }
+
+/// 个人项目第一次用就信任（architecture §8.1）：不用 `/trust`，作业就存得进；人取消过信任的，重启之后
+/// 照旧不信。
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "live"]
+async fn the_personal_project_is_trusted_on_first_use_until_the_user_says_otherwise() {
+    let lv = Live::new();
+    std::fs::write(
+        lv.home.path().join("conix.yaml"),
+        format!("instance:\n  personal_project: {}\n", lv.project_path()),
+    )
+    .unwrap();
+    let job = port::Job {
+        id: port::JobId(String::new()),
+        name: "personal".into(),
+        cron: "0 4 * * *".into(),
+        kind: port::JobKind::Simple {
+            prompt: "say hi".into(),
+            skills: vec![],
+            project: None,
+            scene: None,
+            model: None,
+        },
+        enabled: true,
+        catch_up: false,
+        created_ms: 0,
+        guard: Default::default(),
+        auto_disabled: None,
+        effective_guard: None,
+        next_fire_ms: None,
+        last: None,
+        running_ms: None,
+        today_tokens: 0,
+    };
+    let c = lv.start().await;
+    c.call(port::Command::SaveJob { job: job.clone() })
+        .await
+        .expect("个人项目不用 /trust 就存得进作业");
+    c.ok(port::Command::TrustProject { trusted: false }).await;
+    drop(c);
+    let c = lv.restart().await;
+    assert!(
+        c.call(port::Command::SaveJob { job }).await.is_err(),
+        "人取消过信任的，重启之后不再自动信任"
+    );
+}

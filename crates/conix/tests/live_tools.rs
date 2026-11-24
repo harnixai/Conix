@@ -238,3 +238,45 @@ async fn a_user_session_finds_a_firing_with_work_list_and_reads_its_report() {
         t.results
     );
 }
+
+/// 会话里的自检与测试通知（architecture §8.12，需求 W-04）：conix_doctor 只读、不问；notify_test 会往外发，
+/// 问过人才发，经 conix.yaml 配的出口真送到。
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "live"]
+async fn a_user_session_runs_the_self_check_and_sends_a_test_notification() {
+    let sink = tempfile::tempdir().unwrap();
+    let out = sink.path().join("sent.json");
+    let lv = Live::with(live::Opts {
+        conix_yaml: Some(format!(
+            "notify:\n  when: always\n  sinks:\n    - name: file\n      command: [\"sh\", \"-c\", \"cat > {}\"]\n      stdin: json\n",
+            out.display()
+        )),
+        ..Default::default()
+    });
+    let mut c = lv.start_trusted().await;
+    c.answering(Answering::Auto);
+    let s = c.new_session().await;
+    c.watch(&s).await;
+    let t = c
+        .turn(
+            &s,
+            "Call conix_doctor once, then notify_test once. Do not ask me to confirm. Then reply \
+             with only the word CHECKED.",
+        )
+        .await;
+    t.ended();
+    for tool in ["conix_doctor", "notify_test"] {
+        assert!(t.tools.iter().any(|n| n == tool), "{tool}: {:?}", t.tools);
+    }
+    assert!(!asked_for(&t, "conix_doctor"), "自检只读，不问");
+    assert!(asked_for(&t, "notify_test"), "往外发的问过人");
+    assert!(
+        t.results
+            .iter()
+            .any(|(r, err)| !err && r.contains("ok  file")),
+        "{:?}",
+        t.results
+    );
+    let body = std::fs::read_to_string(&out).expect("出口收到了");
+    assert!(body.contains("Conix test notification"), "{body}");
+}

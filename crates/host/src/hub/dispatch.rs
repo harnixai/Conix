@@ -184,6 +184,19 @@ impl Hub {
                 )
                 .await
                 .map_err(rpc_err)?;
+                let choice = client::ProjectState::new(&self.0.project).trust_choice();
+                let written = choice
+                    .parent()
+                    .map_or(Ok(()), std::fs::create_dir_all)
+                    .and_then(|_| {
+                        std::fs::write(
+                            &choice,
+                            json!({"trusted": trusted, "at_ms": self.now()}).to_string(),
+                        )
+                    });
+                if let Err(e) = written {
+                    tracing::warn!(path = %choice.display(), "trust choice not recorded: {e}");
+                }
                 if let Some(f) = self.0.flows.get() {
                     f.trust_changed().await;
                 }

@@ -52,6 +52,7 @@ pub async fn run(name: String, project: PathBuf) -> Result<()> {
         host_lib: host_lib.clone(),
     })
     .await?;
+    trust_personal_project(&client, &project, &cfg).await;
     let clock: host::hub::Clock = Arc::new(host::instance::now_ms);
     let hub = Hub::start(
         Arc::new(client),
@@ -214,5 +215,42 @@ fn reopen_log(path: &std::path::Path) {
     };
     for fd in [1, 2] {
         let _ = nix::unistd::dup2(f.as_raw_fd(), fd);
+    }
+}
+
+/// 个人项目是 Conix 自己建在用户文档目录里的（architecture §8.1）：第一次用就信任，流程与作业不用先
+/// `/trust` 就能存。只在信任还没人定过时做：人用 `/trust` 定过的（`state/conix/trust.json`，Agix 自己分不出
+/// "没定过"和"取消过"）照人定的。
+async fn trust_personal_project(
+    engine: &impl host::Engine,
+    project: &std::path::Path,
+    cfg: &config::Config,
+) {
+    let personal = client::personal_project(cfg.instance.personal_project.as_deref());
+    if personal.canonicalize().ok().as_deref() != Some(project)
+        || ProjectState::new(project).trust_choice().exists()
+    {
+        return;
+    }
+    let root = project.to_string_lossy();
+    let status = match engine
+        .call("project.status", serde_json::json!({"project_root": root}))
+        .await
+    {
+        Ok(v) => v,
+        Err(e) => return tracing::warn!("project.status: {e}"),
+    };
+    if status["trust"] == "trusted" {
+        return;
+    }
+    match engine
+        .call(
+            "project.trust",
+            serde_json::json!({"project_root": root, "trusted": true}),
+        )
+        .await
+    {
+        Ok(_) => tracing::info!(project = %root, "personal project trusted on first use"),
+        Err(e) => tracing::warn!("project.trust: {e}"),
     }
 }
