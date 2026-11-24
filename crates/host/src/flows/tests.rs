@@ -69,6 +69,10 @@ struct Rig {
 }
 
 async fn rig() -> Rig {
+    rig_in(PROJECT).await
+}
+
+async fn rig_in(project: &str) -> Rig {
     let fake = Arc::new(Fake {
         calls: Mutex::default(),
         handler: handler(Arc::default()),
@@ -80,7 +84,7 @@ async fn rig() -> Rig {
         HubConfig {
             instance: "app".into(),
             host: "box".into(),
-            project: PROJECT.into(),
+            project: project.into(),
             version: "0".into(),
             started_ms: 1,
             registry: Registry::in_memory(),
@@ -262,6 +266,74 @@ async fn a_flow_jobs_flow_is_resolved_and_its_inputs_checked() {
     assert!(
         flows.check_job_flow(&first, &json!(5)).await.is_err(),
         "inputs 不是对象，不合 schema"
+    );
+    flows.stop().await;
+}
+
+/// 根入口不分流程列出运行；已结束的照原样重跑（architecture §8.12）。
+#[tokio::test]
+async fn project_runs_span_flows_and_an_ended_run_is_run_again() {
+    let dir = tempfile::tempdir().unwrap();
+    let project = dir.path().join("p");
+    std::fs::create_dir_all(&project).unwrap();
+    let r = rig_in(project.to_str().unwrap()).await;
+    let flows = super::start(
+        &r.hub,
+        super::FlowsConfig {
+            flows_dir: dir.path().join("flows"),
+            runs_dir: dir.path().join("runs"),
+            worktrees_dir: dir.path().join(".wkts"),
+            workspaces_dir: dir.path().join("ws"),
+            policies_file: None,
+        },
+    )
+    .await
+    .unwrap();
+    use crate::hub::FlowPort;
+    let all = flows.summaries().await;
+    let names: Vec<String> = port::order::flows(&all)
+        .iter()
+        .map(|f| f.name.clone())
+        .collect();
+    let a = flows
+        .start_run(&names[0], "甲", json!({}), None)
+        .await
+        .unwrap();
+    let b = flows
+        .start_run(names.last().unwrap(), "乙", json!({}), None)
+        .await
+        .unwrap();
+    let listed = flows.project_runs(10).await.unwrap();
+    for id in [&a.id, &b.id] {
+        assert!(listed.iter().any(|x| &x.id == id), "{listed:?}");
+    }
+    assert!(flows.rerun(&a.id.0).await.is_err(), "没结束的不重跑");
+    flows.op(&a.id.0, port::RunOp::Cancel).await.unwrap();
+    // 结束了：运行时目录里有 Conix 的报告。
+    let report = client::ProjectState::new(&project)
+        .run_dir(&a.id.0)
+        .join("conix-report.json");
+    for _ in 0..200 {
+        if report.exists() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    let rep: Value = serde_json::from_str(&std::fs::read_to_string(&report).unwrap()).unwrap();
+    assert_eq!(rep["run"]["status"], "cancelled", "{rep}");
+    assert!(rep["main_session"]["id"].is_string());
+    let again = flows.rerun(&a.id.0).await.unwrap();
+    assert_ne!(again.id, a.id);
+    assert_eq!(
+        (again.flow.as_str(), again.subject.as_str()),
+        (a.flow.as_str(), "甲")
+    );
+    let listed = flows.project_runs(10).await.unwrap();
+    assert!(
+        listed
+            .iter()
+            .any(|x| x.id == a.id && x.status == port::RunStatus::Cancelled),
+        "已结束的也列出来：{listed:?}"
     );
     flows.stop().await;
 }

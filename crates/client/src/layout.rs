@@ -173,6 +173,21 @@ impl ProjectState {
         self.dir().join("flow-runs")
     }
 
+    /// 一次运行的过程目录（流程库的 `with_runs_dir`，与 `flows::RUNS_DIR` 同一处）：Conix 的
+    /// `conix-report.json` 也写在这里，运行的东西都在一个目录里。
+    pub fn run_dir(&self, run: &str) -> PathBuf {
+        self.dir().join("runs").join(run)
+    }
+
+    /// 作业触发的运行时目录的根：`job-runs/<作业>/<触发时刻>/`。
+    pub fn job_runs(&self) -> PathBuf {
+        self.dir().join("job-runs")
+    }
+
+    pub fn job_run_dir(&self, job: &str, fired_ms: u64) -> PathBuf {
+        self.job_runs().join(job).join(fired_ms.to_string())
+    }
+
     pub fn flow_workspaces(&self) -> PathBuf {
         self.dir().join("workspaces")
     }

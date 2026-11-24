@@ -247,7 +247,9 @@ impl Hub {
             let outcome = match (stopped, ok) {
                 (Some(reason), _) => JobOutcome::Stopped { reason },
                 (None, true) => JobOutcome::Done,
-                (None, false) => JobOutcome::Failed { message: text },
+                (None, false) => JobOutcome::Failed {
+                    message: text.clone(),
+                },
             };
             let elapsed = self.now().saturating_sub(started);
             let store = sched.store();
@@ -258,6 +260,9 @@ impl Hub {
                     .into_iter()
                     .find(|e| e.fired_ms == fired)
             };
+            if let (Some(entry), Some(j)) = (&entry, sched.get(&job)) {
+                self.write_firing_report(&j, entry, Some(&text));
+            }
             let mut events = vec![];
             if let Some(entry) = entry {
                 events.push(Event::JobFired {

@@ -83,6 +83,10 @@ async fn rig_clocked(handler: Handler) -> (Rig, Arc<std::sync::atomic::AtomicU64
 }
 
 async fn rig_full(handler: Handler, clock: host::hub::Clock) -> Rig {
+    rig_at(handler, clock, PROJECT).await
+}
+
+async fn rig_at(handler: Handler, clock: host::hub::Clock, project: &str) -> Rig {
     let fake = Arc::new(Fake {
         calls: Mutex::default(),
         handler,
@@ -100,7 +104,7 @@ async fn rig_full(handler: Handler, clock: host::hub::Clock) -> Rig {
         HubConfig {
             instance: "app".into(),
             host: "box".into(),
-            project: PROJECT.into(),
+            project: project.into(),
             version: "0".into(),
             started_ms: 1,
             registry: Registry::open(dir.path().join("sessions.json")),
@@ -639,6 +643,143 @@ async fn late_frames_do_not_resurrect_a_closed_session() {
         panic!()
     };
     assert!(v.iter().all(|s| s.id.0 != "s2"), "{v:?}");
+}
+
+/// 每次触发一个运行时目录，实例记下它的情况；会话经 work_* 查、清（architecture §8.12）。
+#[tokio::test]
+async fn a_firing_keeps_a_report_that_work_tools_show_list_and_clean_up() {
+    let project = tempfile::tempdir().unwrap();
+    let now = Arc::new(std::sync::atomic::AtomicU64::new(1_763_400_000_000));
+    let n = now.clone();
+    let root = project.path().to_str().unwrap().to_string();
+    let here = root.clone();
+    // 假引擎的会话列在 PROJECT 下：挪到这个临时项目里，s1 才是这个实例的用户会话。
+    let handler: Handler = Box::new(move |m, p| {
+        let v = default_handler(m, p)?;
+        Ok(match m {
+            "session.list" => serde_json::from_str(&v.to_string().replace(PROJECT, &here)).unwrap(),
+            _ => v,
+        })
+    });
+    let mut r = rig_at(
+        handler,
+        Arc::new(move || n.load(std::sync::atomic::Ordering::SeqCst)),
+        &root,
+    )
+    .await;
+    let Reply::Job(job) = r
+        .hub
+        .handle(Command::SaveJob {
+            job: port::Job {
+                id: port::JobId(String::new()),
+                name: "nightly".into(),
+                cron: "0 2 * * *".into(),
+                kind: port::JobKind::Simple {
+                    prompt: "跑测试".into(),
+                    skills: vec![],
+                    project: None,
+                    scene: None,
+                    model: None,
+                },
+                enabled: true,
+                catch_up: false,
+                created_ms: 0,
+                guard: Default::default(),
+                auto_disabled: None,
+                effective_guard: None,
+                next_fire_ms: None,
+                last: None,
+                running_ms: None,
+                today_tokens: 0,
+            },
+        })
+        .await
+        .unwrap()
+    else {
+        panic!()
+    };
+    r.hub
+        .handle(Command::RunJobNow {
+            job: job.id.clone(),
+            subject: None,
+            prompt_append: None,
+        })
+        .await
+        .unwrap();
+    r.events().await;
+    let state = client::ProjectState::new(project.path());
+    let fired = 1_763_400_000_000u64;
+    let report = state.job_run_dir(&job.id.0, fired).join("report.json");
+    let running: Value = serde_json::from_str(&std::fs::read_to_string(&report).unwrap()).unwrap();
+    assert_eq!(running["entry"]["outcome"], "running", "{running}");
+    assert_eq!(running["session"]["model"], "test-model");
+
+    r.frame("new1", json!({"kind":"turn_start"}));
+    r.frame(
+        "new1",
+        json!({"kind":"text_delta","text":"巡检完了，没有新错误。"}),
+    );
+    r.frame(
+        "new1",
+        json!({"kind":"turn_complete","stop_reason":"end_turn","usage":{"output_tokens":7}}),
+    );
+    r.events().await;
+    let done: Value = serde_json::from_str(&std::fs::read_to_string(&report).unwrap()).unwrap();
+    assert_eq!(done["entry"]["outcome"], "done", "{done}");
+    assert_eq!(done["reply_tail"], "巡检完了，没有新错误。");
+
+    let shown = r
+        .hub
+        .run_tool("s1", "work_show", &json!({"job": "#1"}))
+        .await
+        .unwrap();
+    assert!(
+        shown.contains("巡检完了") && shown.contains("job-runs"),
+        "{shown}"
+    );
+    let list = r
+        .hub
+        .run_tool("s1", "work_list", &json!({"kind": "job"}))
+        .await
+        .unwrap();
+    assert!(list.contains("nightly") && list.contains("done"), "{list}");
+
+    // 31 天之后：先列出来，不删；dry_run false 才删，目录跟着没了。
+    now.fetch_add(31 * 24 * 3600 * 1000, std::sync::atomic::Ordering::SeqCst);
+    let dry = r
+        .hub
+        .run_tool("s1", "work_cleanup", &json!({}))
+        .await
+        .unwrap();
+    assert!(dry.contains("would remove 1"), "{dry}");
+    assert!(report.exists());
+    let gone = r
+        .hub
+        .run_tool("s1", "work_cleanup", &json!({"dry_run": false}))
+        .await
+        .unwrap();
+    assert!(gone.contains("removed 1"), "{gone}");
+    assert!(!report.exists());
+    let Reply::JobHistory(h) = r
+        .hub
+        .handle(Command::JobHistory {
+            job: job.id.clone(),
+            before_ms: None,
+            limit: None,
+            outcome: None,
+        })
+        .await
+        .unwrap()
+    else {
+        panic!()
+    };
+    assert!(h.is_empty(), "{h:?}");
+    // 作业触发出来的会话清不了。
+    let no = r
+        .hub
+        .run_tool("new1", "work_cleanup", &json!({"dry_run": false}))
+        .await;
+    assert!(no.is_err());
 }
 
 #[tokio::test]

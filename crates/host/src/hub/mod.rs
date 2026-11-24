@@ -15,6 +15,7 @@ mod state;
 mod tool_calls;
 pub(crate) mod tools;
 mod turns;
+mod work;
 
 use crate::sync::Locked;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -77,6 +78,12 @@ pub(crate) trait FlowPort: Send + Sync {
     async fn plugins_changed(&self, mounted: Vec<crate::plugins::Mounted>);
     /// 插件之间同名、被遮住的：插件名 → 一条一句。
     fn plugin_conflicts(&self) -> std::collections::BTreeMap<String, Vec<String>>;
+    /// 本项目的运行，不分流程（`work_list`）：没结束的全列，已结束的取最近 `ended` 个。
+    async fn project_runs(&self, ended: u32) -> Result<Vec<port::RunSummary>, String>;
+    /// 一次运行此刻的样子（`work_show`）。
+    async fn run_view(&self, run: &str) -> Result<port::RunView, String>;
+    /// 已结束的运行照原样再跑一次：同流程、同主题、同输入（`flow_rerun`）。
+    async fn rerun(&self, run: &str) -> Result<port::RunSummary, String>;
 }
 
 /// 作业起的一次还没结束的运行。

@@ -28,6 +28,22 @@ pub const CONFIG_PROVIDER_TEST: &str = "config_provider_test";
 pub const CONFIG_SWITCH: &str = "config_switch";
 pub const CONFIG_ROLLBACK: &str = "config_rollback";
 pub const CONIX_CONFIG_SET: &str = "conix_config_set";
+pub const WORK_LIST: &str = "work_list";
+pub const WORK_SHOW: &str = "work_show";
+pub const WORK_CLEANUP: &str = "work_cleanup";
+pub const FLOW_RERUN: &str = "flow_rerun";
+pub const CONIX_DOCTOR: &str = "conix_doctor";
+pub const NOTIFY_TEST: &str = "notify_test";
+
+/// 运行与触发的根入口、清理、会话里的诊断（architecture §8.12）。
+pub const WORK_TOOLS: [&str; 6] = [
+    WORK_LIST,
+    WORK_SHOW,
+    WORK_CLEANUP,
+    FLOW_RERUN,
+    CONIX_DOCTOR,
+    NOTIFY_TEST,
+];
 
 /// 配置自己的那几个（architecture §8.11）：只给人开的会话。
 pub const CONFIG_TOOLS: [&str; 6] = [
@@ -40,8 +56,11 @@ pub const CONFIG_TOOLS: [&str; 6] = [
 ];
 
 /// 只读的几个：建会话时给它们 allow 规则，查看不用每次问人。
-pub const READ_ONLY: [&str; 7] = [
+pub const READ_ONLY: [&str; 10] = [
     CONFIG_SHOW,
+    WORK_LIST,
+    WORK_SHOW,
+    CONIX_DOCTOR,
     SESSION_LIST,
     SESSION_SHOW,
     JOB_LIST,
@@ -91,7 +110,7 @@ fn tool(name: &str, description: &str, properties: Value, required: &[&str]) -> 
             "additionalProperties": false
         },
         "read_only": read_only,
-        "destructive": matches!(name, SESSION_CLOSE | SESSION_DELETE | JOB_DELETE | JOB_STOP | CONFIG_SWITCH),
+        "destructive": matches!(name, SESSION_CLOSE | SESSION_DELETE | JOB_DELETE | JOB_STOP | CONFIG_SWITCH | WORK_CLEANUP),
         "subagents": true
     })
 }
@@ -216,6 +235,55 @@ pub fn declarations() -> Value {
                 "prompt_append": {"type": "string", "description": "simple jobs: appended to the prompt for this firing only."}
             }),
             &["target"]
+        ),
+        tool(
+            WORK_LIST,
+            "Everything running, waiting or done in this project, in one list: the runs of every flow (no need to ask flow by flow) and the firings of every scheduled job. Filter by kind (flow | job), status (active: running or paused; waiting: on a person or something outside; ended), flow (its name) or job (\"#n\" or its id). Ended ones: the most recent `limit`.",
+            json!({
+                "kind": {"type": "string", "enum": ["all", "flow", "job"], "default": "all"},
+                "status": {"type": "string", "enum": ["all", "active", "waiting", "ended"], "default": "all"},
+                "flow": {"type": "string", "description": "Only the runs of this flow (its name)."},
+                "job": {"type": "string", "description": "Only the firings of this job: \"#n\" or its id."},
+                "limit": {"type": "integer", "default": 20}
+            }),
+            &[]
+        ),
+        tool(
+            WORK_SHOW,
+            "One run or one firing in full, from the record the instance keeps in its runtime directory: outcome, time, tokens, every session with its model and its tasks (sub-agents, shells…), and for a firing what it did and the end of its last reply. A run still going is shown as it is now. Give run, or job and fired_ms (omit fired_ms for the job's latest firing).",
+            json!({
+                "run": {"type": "string", "description": "A run id."},
+                "job": {"type": "string", "description": "\"#n\" or a job id."},
+                "fired_ms": {"type": "integer", "description": "Which firing of the job (its time, from work_list or job_history)."}
+            }),
+            &[]
+        ),
+        tool(
+            FLOW_RERUN,
+            "Run an ended flow run again: the same flow, subject and inputs, as a new run. Only when the user asks for it.",
+            json!({"run": {"type": "string", "description": "The ended run's id."}}),
+            &["run"]
+        ),
+        tool(
+            WORK_CLEANUP,
+            "Clear out what ended long ago: scheduled jobs' firings (their history lines and runtime directories) older than older_than_days. Ended flow runs are counted, not removed yet. dry_run (the default) only lists what would go; show that to the user and only call again with dry_run false when they say so.",
+            json!({
+                "older_than_days": {"type": "integer", "default": 30},
+                "dry_run": {"type": "boolean", "default": true}
+            }),
+            &[]
+        ),
+        tool(
+            CONIX_DOCTOR,
+            "Conix's self-check, the same as /doctor: the engine's checks (settings, providers, hooks, sandbox…) and the instance's own (project state, config it could not read, notification sinks, flows).",
+            json!({}),
+            &[]
+        ),
+        tool(
+            NOTIFY_TEST,
+            "Send one test notification through every sink configured in conix.yaml (notify) and say which got through. Use it after changing the notify settings.",
+            json!({}),
+            &[]
         ),
         tool(
             CONFIG_SHOW,
@@ -486,7 +554,7 @@ mod tests {
         let mut uniq = names.clone();
         uniq.sort();
         uniq.dedup();
-        assert_eq!(names.len(), 20);
+        assert_eq!(names.len(), 26);
         assert_eq!(uniq.len(), names.len());
         assert!(d.as_array().unwrap().iter().all(|t| t["subagents"] == true));
         for r in READ_ONLY {

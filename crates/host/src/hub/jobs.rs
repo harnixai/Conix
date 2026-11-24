@@ -117,6 +117,7 @@ impl Hub {
             }
         };
         let _ = store.locked().append(&job.id.0, &entry);
+        self.write_firing_report(&job, &entry, None);
         let mut events = vec![Event::JobFired {
             job: job.id.clone(),
             entry,

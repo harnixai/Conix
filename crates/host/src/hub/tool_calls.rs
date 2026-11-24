@@ -34,6 +34,9 @@ impl Hub {
             return r;
         }
         let port_err = |e: PortError| e.to_string();
+        if tools::WORK_TOOLS.contains(&name) {
+            return self.work_tool(&scope, name, input).await;
+        }
         if tools::CONFIG_TOOLS.contains(&name) {
             // 改的是这台机器上整个 Conix 的配置：作业与流程里的会话不给。
             if scope != tools::Scope::Full {
@@ -438,7 +441,7 @@ fn outcome_text(o: &port::JobOutcome) -> String {
     }
 }
 
-fn firing_line(e: &port::JobEntry) -> String {
+pub(super) fn firing_line(e: &port::JobEntry) -> String {
     let target = match &e.target {
         Some(port::JobTarget::Session { id, title }) => format!("  → session \"{title}\" ({id})"),
         Some(port::JobTarget::Run { id, subject }) => format!("  → run \"{subject}\" ({id})"),

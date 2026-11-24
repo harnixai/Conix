@@ -344,10 +344,7 @@ impl Flows {
 
     /// 一个运行变了：结束了就记进「已结束」（还没扫过就等第一次要时再扫）。
     fn note_ended(&self, r: &port::RunSummary) {
-        let done = matches!(
-            r.status,
-            port::RunStatus::Finished | port::RunStatus::Cancelled
-        );
+        let done = is_ended(&r.status);
         let mut ended = self.ended.locked();
         let Some(list) = ended.as_mut() else { return };
         list.retain(|x| x.id != r.id);
@@ -482,6 +479,10 @@ pub(crate) fn flow_err(e: harnix_flow::FlowError) -> PortError {
 }
 
 /// 派工器每改了运行就报一次：推运行的摘要与详情，以及它所属流程的摘要（在跑的个数）。
+fn is_ended(s: &port::RunStatus) -> bool {
+    matches!(s, port::RunStatus::Finished | port::RunStatus::Cancelled)
+}
+
 async fn follow(flows: Arc<Flows>, mut rx: broadcast::Receiver<harnix_flow::runner::Changed>) {
     loop {
         let changed = match rx.recv().await {
@@ -502,6 +503,9 @@ async fn follow(flows: Arc<Flows>, mut rx: broadcast::Receiver<harnix_flow::runn
             };
             seen_flows.insert(v.summary.flow.clone());
             flows.note_ended(&v.summary);
+            if is_ended(&v.summary.status) {
+                hub.write_run_report(&v);
+            }
             hub.emit_events(vec![
                 Event::RunUpserted(v.summary.clone()),
                 Event::RunDetail(Box::new(v)),
@@ -656,5 +660,43 @@ impl FlowPort for Flows {
 
     fn plugin_conflicts(&self) -> std::collections::BTreeMap<String, Vec<String>> {
         Flows::plugin_conflicts(self)
+    }
+
+    async fn project_runs(&self, ended: u32) -> Result<Vec<port::RunSummary>, String> {
+        let mut out = vec![];
+        for s in self
+            .runs(None, Some(RunStatus::Active))
+            .await
+            .map_err(|e| e.to_string())?
+        {
+            out.push(match self.view(&s.id).await {
+                Ok(v) => v.summary,
+                Err(_) => map::run_summary(&s),
+            });
+        }
+        out.sort_by_key(|r| std::cmp::Reverse((r.started_ms, r.id.0.clone())));
+        out.extend(
+            self.ended_runs(ended, None)
+                .await
+                .map_err(|e| e.to_string())?,
+        );
+        Ok(out)
+    }
+
+    async fn run_view(&self, run: &str) -> Result<port::RunView, String> {
+        self.view(run).await.map_err(|e| e.to_string())
+    }
+
+    async fn rerun(&self, run: &str) -> Result<port::RunSummary, String> {
+        let v = self.engine.get(run).await.map_err(|e| e.to_string())?;
+        let r = &v.record;
+        if r.status == RunStatus::Active {
+            return Err(format!(
+                "run {run} has not ended: pause, resume or cancel it instead (flow_pause / flow_resume / flow_cancel)"
+            ));
+        }
+        self.start_run(&r.flow, &r.subject, r.inputs.clone(), None)
+            .await
+            .map_err(|e| e.to_string())
     }
 }

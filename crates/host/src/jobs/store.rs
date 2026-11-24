@@ -435,6 +435,28 @@ impl JobStore {
         )
     }
 
+    /// 去掉 `before_ms` 之前结束的触发（还在跑的留着），整份重写再改名（`work_cleanup`）。回去掉几次。
+    pub fn prune_before(&self, id: &str, before_ms: u64) -> Result<usize, String> {
+        let all = self.history(id, usize::MAX);
+        let (gone, mut keep): (Vec<JobEntry>, Vec<JobEntry>) = all
+            .into_iter()
+            .partition(|e| e.fired_ms < before_ms && e.outcome != JobOutcome::Running);
+        if gone.is_empty() {
+            return Ok(0);
+        }
+        keep.reverse();
+        let mut text = String::new();
+        for e in &keep {
+            text.push_str(&serde_json::to_string(e).map_err(|e| e.to_string())?);
+            text.push('\n');
+        }
+        let path = self.history_path(id);
+        let tmp = path.with_extension("jsonl.tmp");
+        fs::write(&tmp, text).map_err(|e| e.to_string())?;
+        fs::rename(&tmp, &path).map_err(|e| e.to_string())?;
+        Ok(gone.len())
+    }
+
     /// 一页触发记录：新的在前，比 `before_ms` 早的，按结局筛。
     pub fn history_page(
         &self,
