@@ -18,6 +18,8 @@ files=()
 for f in crates/conix/tests/live_*.rs; do
     files+=(--test "$(basename "$f" .rs)")
 done
-cargo test -p conix "${files[@]}" -- --ignored --test-threads="$threads" --skip conformance
+# --no-fail-fast：一个文件挂了，后面的文件照样跑，一次看全。
+cargo test -p conix --no-fail-fast "${files[@]}" -- --ignored --test-threads="$threads" --skip conformance || failed=1
 # 流程的一致性套件自己就要跑十几轮模型，挤在并发里会撞上它的单轮超时：最后单独跑。
-exec cargo test -p conix --test live_flows -- --ignored --test-threads=1 conformance
+cargo test -p conix --test live_flows -- --ignored --test-threads=1 conformance || failed=1
+exit "${failed:-0}"
