@@ -67,6 +67,9 @@ impl Hub {
                 }
                 rec.updated_ms = now;
                 rec.closed = false;
+                if let Some(m) = options["model"].as_str() {
+                    rec.model = Some(m.to_string());
+                }
             });
         }
         if !known {
@@ -83,7 +86,11 @@ impl Hub {
                 title: title.unwrap_or_else(|| state::short(&id)),
                 project: project.map(str::to_string),
                 scene: r["scene"].as_str().unwrap_or(scene).to_string(),
-                model: self.0.default_model.locked().clone(),
+                // 站可以指定模型（流程的 `executor.model`）：记它，不记实例的缺省，界面与报告才写得对。
+                model: options["model"]
+                    .as_str()
+                    .map(str::to_string)
+                    .unwrap_or_else(|| self.0.default_model.locked().clone()),
                 origin,
                 live: true,
                 updated_ms: now,

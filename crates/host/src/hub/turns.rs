@@ -223,6 +223,11 @@ impl Hub {
         usage: Usage,
         budget: bool,
     ) {
+        // 无人看着的会话（流程站、作业）一轮失败了，原因只在帧里：没 Watch 就谁也看不到，日志里留一笔。
+        if !ok {
+            let why: String = text.chars().take(400).collect();
+            tracing::warn!(session, "turn failed: {why}");
+        }
         if self.0.side.locked().remove(session) {
             let first: String = text.chars().take(400).collect();
             self.emit_events(vec![Event::Notice {

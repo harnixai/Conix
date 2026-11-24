@@ -3,7 +3,7 @@
 # 自己的功能。凭据取仓库根的 .env（CONIX_LIVE_ENV 可指定别的文件）。
 #
 #   scripts/live.sh                    全部 live 用例
-#   scripts/live.sh live_jobs          只跑一个文件（live_instance / live_attach / live_sessions / live_turns / live_jobs / live_tools / live_flows / live_tui）
+#   scripts/live.sh live_jobs          只跑一个文件（live_instance / live_attach / live_sessions / live_turns / live_jobs / live_tools / live_flows / live_models / live_tui …）
 #   scripts/live.sh live_jobs catch_up 再按用例名过滤
 #
 # 同时起的实例数用 LIVE_THREADS 控制（缺省 4），太多会撞上模型服务的限流。

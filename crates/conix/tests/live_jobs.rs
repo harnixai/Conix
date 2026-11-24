@@ -436,6 +436,7 @@ async fn a_failed_firing_reaches_the_configured_notification_command() {
     let lv = Live::with(live::Opts {
         conix_yaml: Some(yaml),
         env: vec![("CONIX_TEST_NOTIFY_WINDOW_MS".into(), "300".into())],
+        ..Default::default()
     });
     let c = lv.start_trusted().await;
     let Reply::Notified(results) = c.ok(Command::TestNotify).await else {

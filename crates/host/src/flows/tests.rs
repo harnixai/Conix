@@ -157,6 +157,34 @@ async fn a_key_opens_the_same_session_and_another_spec_for_it_is_refused() {
     assert_eq!(project.as_deref(), Some(PROJECT));
 }
 
+/// 站指定了模型（`executor.model`）：会话上记的就是它，不是实例的缺省——流程页的树、报告都按它写。
+#[tokio::test]
+async fn a_station_session_keeps_the_model_it_was_opened_with() {
+    let r = rig().await;
+    let host = ConixSessionHost::new(
+        r.hub.downgrade(),
+        std::sync::Arc::new(super::policy::RunPolicies::in_memory()),
+    );
+    let mut s = spec("flow:r1/review/1/t");
+    s.placement.model = Some("claude-sonnet-5-5".into());
+    s.placement.provider = Some("claude".into());
+    let o = host.open(s).await.unwrap();
+    let create = r.calls("session.create").last().cloned().unwrap();
+    assert_eq!(create["options"]["provider"], "claude");
+    use crate::service::Service;
+    let Ok(port::Reply::Sessions(all)) = r
+        .hub
+        .handle(port::Command::ListSessions {
+            filter: Default::default(),
+        })
+        .await
+    else {
+        panic!()
+    };
+    let sum = all.iter().find(|x| x.id.0 == o.id).expect("会话在列表里");
+    assert_eq!(sum.provenance.model, "claude-sonnet-5-5");
+}
+
 #[tokio::test]
 async fn frames_reach_the_runner_with_the_text_that_started_the_turn() {
     let r = rig().await;

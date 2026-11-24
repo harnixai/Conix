@@ -46,7 +46,7 @@ pub fn credentials() -> &'static BTreeMap<String, String> {
             });
         let text = std::fs::read_to_string(&path)
             .unwrap_or_else(|e| panic!("读不了 {}：{e}", path.display()));
-        let vars: BTreeMap<String, String> = text
+        let mut vars: BTreeMap<String, String> = text
             .lines()
             .map(str::trim)
             .filter(|l| !l.is_empty() && !l.starts_with('#'))
@@ -58,6 +58,20 @@ pub fn credentials() -> &'static BTreeMap<String, String> {
                 )
             })
             .collect();
+        // .env 按厂商写（DEEPSEEK_*、CLAUDE_*）；引擎自带的 anthropic provider 读 ANTHROPIC_*，由 DeepSeek 那组
+        // 补出来。老写法（直接写 ANTHROPIC_*）照旧认。
+        for (to, from) in [
+            ("ANTHROPIC_AUTH_TOKEN", "DEEPSEEK_API_KEY"),
+            ("ANTHROPIC_BASE_URL", "DEEPSEEK_BASE_URL"),
+            ("ANTHROPIC_MODEL", "DEEPSEEK_MODEL"),
+            ("ANTHROPIC_SMALL_FAST_MODEL", "DEEPSEEK_FAST_MODEL"),
+        ] {
+            if !vars.contains_key(to)
+                && let Some(v) = vars.get(from).cloned()
+            {
+                vars.insert(to.to_string(), v);
+            }
+        }
         let has_key = ["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"]
             .iter()
             .any(|k| vars.get(*k).is_some_and(|v| !v.is_empty()));
@@ -72,6 +86,54 @@ pub fn credentials() -> &'static BTreeMap<String, String> {
 
 pub fn model() -> String {
     credentials()["ANTHROPIC_MODEL"].clone()
+}
+
+/// "换一个模型"的用例用的另一个模型；没写就是缺省的那个。
+pub fn other_model() -> String {
+    let c = credentials();
+    c.get("ANTHROPIC_SMALL_FAST_MODEL")
+        .or(c.get("ANTHROPIC_DEFAULT_HAIKU_MODEL"))
+        .cloned()
+        .unwrap_or_else(model)
+}
+
+/// 一个模型服务：多模型的用例按它在设置里写 provider。`key_env` 是放 key 的环境变量名（实例进程拿得到，
+/// 设置里不写 key）。
+#[derive(Debug, Clone)]
+pub struct Endpoint {
+    pub base_url: String,
+    pub key_env: String,
+    pub model: String,
+}
+
+/// DeepSeek：LIVE 缺省的那个，一定有。
+pub fn deepseek() -> Endpoint {
+    let c = credentials();
+    Endpoint {
+        base_url: c.get("ANTHROPIC_BASE_URL").cloned().unwrap_or_default(),
+        key_env: if c.contains_key("ANTHROPIC_AUTH_TOKEN") {
+            "ANTHROPIC_AUTH_TOKEN"
+        } else {
+            "ANTHROPIC_API_KEY"
+        }
+        .into(),
+        model: model(),
+    }
+}
+
+/// Anthropic：`.env` 里有 CLAUDE_API_KEY 与 CLAUDE_MODEL 才有；没有时多模型的用例跳过。
+pub fn claude() -> Option<Endpoint> {
+    let c = credentials();
+    let model = c.get("CLAUDE_MODEL").filter(|m| !m.is_empty())?.clone();
+    c.get("CLAUDE_API_KEY").filter(|k| !k.is_empty())?;
+    Some(Endpoint {
+        base_url: c
+            .get("CLAUDE_BASE_URL")
+            .cloned()
+            .unwrap_or_else(|| "https://api.anthropic.com".into()),
+        key_env: "CLAUDE_API_KEY".into(),
+        model,
+    })
 }
 
 fn conix() -> &'static str {
@@ -104,6 +166,8 @@ pub struct Live {
 pub struct Opts {
     /// 写进 `conix.yaml` 的内容（实例的配置，比如空闲超时）。
     pub conix_yaml: Option<String>,
+    /// 合进全局 `settings.json` 的键（比如多模型的用例写的 providers 与 model.order）。
+    pub settings: Option<serde_json::Value>,
     /// 只给实例进程的额外环境变量（比如缩短心跳超时）。
     pub env: Vec<(String, String)>,
 }
@@ -121,12 +185,17 @@ impl Live {
             .unwrap();
         // 提问超时放长，等人回答的不会自己撤掉。模型不写设置：0.4 里没定义 providers 时，
         // 自带的 anthropic 用进程参数取模型，由 CONIX_MODEL 交给实例进程（见下面的 env）。
+        let mut settings = serde_json::json!({
+            "permissions": {"prompt_timeout_secs": 600},
+        });
+        if let Some(serde_json::Value::Object(extra)) = &opts.settings {
+            for (k, v) in extra {
+                settings[k] = v.clone();
+            }
+        }
         std::fs::write(
             home.path().join("settings.json"),
-            serde_json::to_string_pretty(&serde_json::json!({
-                "permissions": {"prompt_timeout_secs": 600},
-            }))
-            .unwrap(),
+            serde_json::to_string_pretty(&settings).unwrap(),
         )
         .unwrap();
         if let Some(y) = &opts.conix_yaml {

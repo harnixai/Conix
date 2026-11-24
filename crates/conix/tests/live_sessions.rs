@@ -93,12 +93,7 @@ async fn set_model_is_recorded_and_the_command_table_is_listed() {
     let lv = Live::new();
     let mut c = lv.start().await;
     let s = c.new_session().await;
-    let creds = live::credentials();
-    let other = creds
-        .get("ANTHROPIC_SMALL_FAST_MODEL")
-        .or(creds.get("ANTHROPIC_DEFAULT_HAIKU_MODEL"))
-        .cloned()
-        .unwrap_or_else(live::model);
+    let other = live::other_model();
     c.skip_past();
     c.ok(Command::SetModel {
         session: s.clone(),
@@ -339,12 +334,7 @@ async fn checkpoints_list_turns_and_rewind_removes_the_later_ones() {
 async fn a_session_is_created_with_the_chosen_model_scene_and_mode() {
     let lv = Live::new();
     let mut c = lv.start().await;
-    let creds = live::credentials();
-    let other = creds
-        .get("ANTHROPIC_SMALL_FAST_MODEL")
-        .or(creds.get("ANTHROPIC_DEFAULT_HAIKU_MODEL"))
-        .cloned()
-        .unwrap_or_else(live::model);
+    let other = live::other_model();
     let Reply::Session(s) = c
         .ok(Command::CreateSession {
             project: Some(lv.project_path()),
