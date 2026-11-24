@@ -355,7 +355,7 @@ catch_up`（再按名字过滤）。凭据取仓库根的 `.env`（worktree 里�
 | 插件 | 装、披露、启用、停用、卸载，插件带来的流程能跑 | live_plugins::a_plugin_from_the_package_dirs_is_installed_enabled_and_its_flow_runs；engine/plugins::a_plugin_is_installed_enabled_and_its_flow_runs_on_its_functions；app/plugins::*（`/plugin` 的界面） | LIVE |
 | xforge | 内置的 xforge 流程从 open 到 archive | live_plugins::xforge_quick_goes_from_open_to_archive_with_a_real_model；engine/xforge::xforge_installs_offers_both_flows_and_carries_a_change_from_open_to_archive | LIVE |
 | 会话里配置：provider | 加、测、切、退 provider | live_config::a_provider_is_added_tested_switched_to_and_rolled_back_from_a_session；engine/config::an_unreachable_provider_is_added_tested_and_not_switched_to | LIVE |
-| 多模型的运行 | 一站生成、一站检视，用不同的 provider | live_models::{deepseek_writes_and_claude_reviews_in_one_run, claude_writes_and_deepseek_reviews_in_one_run}；host/flows::a_station_session_keeps_the_model_it_was_opened_with | LIVE（Anthropic 那一站等 Agix#102：code 场景发的 `cache_control.scope` 被官方 API 拒绝） |
+| 多模型的运行 | 一站生成、一站检视，用不同的 provider | live_models::{deepseek_writes_and_claude_reviews_in_one_run, claude_writes_and_deepseek_reviews_in_one_run}；host/flows::a_station_session_keeps_the_model_it_was_opened_with | LIVE |
 | 会话里配置：`config_show` 与 `conix_config_set` | 看生效配置；改 `conix.yaml`（jobs / notify 当场重读） | live_config_conix::a_session_shows_the_config_and_sets_a_conix_yaml_value | LIVE |
 | provider_switched 通知 | 引擎换了 provider，转录里出一条提示 | model/chat（`ProviderSwitched` 的排版）；live_config_conix::a_dead_first_provider_falls_over_and_the_switch_is_pushed（排在前面的连不上，引擎换到下一个） | LIVE |
 | 作业网络 | `jobs.defaults.network` 与作业的 `network` 下发到会话沙箱 | live_jobs::a_job_with_no_network_still_runs_local_commands | LIVE |

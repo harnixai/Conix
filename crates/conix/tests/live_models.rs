@@ -150,14 +150,25 @@ async fn pair(writer: &str, reviewer: &str) {
     };
     let (ws, rs) = (session_of("write"), session_of("review"));
     assert_ne!(ws, rs, "两站各有自己的会话");
-    let all = c.sessions().await;
-    let sum = |s: &port::SessionId| {
-        all.iter()
-            .find(|x| &x.id == s)
-            .cloned()
-            .unwrap_or_else(|| panic!("会话 {s:?} 不在列表里"))
-    };
-    let (wsum, rsum) = (sum(&ws), sum(&rs));
+    // 会话的用量在一轮结束（`turn_ended`）时才记上；站交了产出就算过，运行可能在检视站那一轮收尾之前就结束了。
+    let (mut wsum, mut rsum) = (None, None);
+    for _ in 0..120 {
+        let all = c.sessions().await;
+        let sum = |s: &port::SessionId| {
+            all.iter()
+                .find(|x| &x.id == s)
+                .cloned()
+                .unwrap_or_else(|| panic!("会话 {s:?} 不在列表里"))
+        };
+        let (a, b) = (sum(&ws), sum(&rs));
+        let both = a.usage.output > 0 && b.usage.output > 0;
+        (wsum, rsum) = (Some(a), Some(b));
+        if both {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+    let (wsum, rsum) = (wsum.unwrap(), rsum.unwrap());
     assert_eq!(wsum.provenance.model, w.1.model, "生成站用 {writer}");
     assert_eq!(rsum.provenance.model, r.1.model, "检视站用 {reviewer}");
     assert!(
