@@ -1,5 +1,7 @@
 name: governance
 title: 按治理文件下结论
+description: >-
+  照 governance/policy.yaml 判：brief 的 required_sections 与提纲的每一节都是单独一行的「## <名>」，提纲的每个来源都列在「## 来源」里，不用 banned 里的说法，不超过 max_chars；事实审读里 unsupported 不超过 reviews.facts.max_unsupported；规范审读判了 style 的每一条，违反了 severity 在 reviews.policy.block 里的规矩就挡住签发。
 kind: script
 script: governance
 params:

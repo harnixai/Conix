@@ -1,5 +1,7 @@
 name: reviews-verified
 title: 事实审读的引文出自原文
+description: >-
+  facts.jsonl 里每条 supported 的说法：source 是 notes/<名>.md 且存在，quote 是那份笔记里原样有的一句（至少六个字，比对时不看空白与标点）。
 kind: command
 command: python3 "$FLOW_WORKSPACE/tools/notesctl.py" verify-reviews reviews --notes "$FLOW_WORKSPACE/notes"
 cwd: "${output_dir}"

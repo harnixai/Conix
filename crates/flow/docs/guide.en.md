@@ -108,6 +108,25 @@ A pause lets what is in hand finish: a turn that is running is not cut off, its 
 6. For a system that must know the progress, put a **hook** in the pack.
 7. Validate (`flow_validate`), dry-run (`flow_dry_run`), then start.
 
+### A skill says only how to do the work
+
+In a session work item's message the skill comes after the **flow protocol** the flow generates from its definition, and
+where the two disagree the protocol wins. The protocol already says: which run, station, round and work item (the
+`foreach` item); on a rework, which exits of the last round were not met and every finding; how a sub-agent station
+hands its task out; the output contract and how to hand it in; the exit conditions and what each gate checks (a
+`check`'s paths, schema and patterns spelled out, a `command`'s command); the permissions; the output directory; that
+no one answers questions and that rework and confirmation are not its to decide. None of this goes in the skill again —
+written twice, it is two things to change together.
+
+A skill says how to do the station well: what to read, how to go about it, the shape, length and tone of the
+deliverables, the standards no gate can judge.
+
+- Of a `script` gate the protocol says only that a script reads the run's files: rules the session should know
+  beforehand go in the gate's `description` (the protocol carries it), or the skill points at where they are written
+  ("read `governance/policy.yaml`").
+- A skill has only `${output_dir}` put in; other references stay as written. A station's earlier results come with the
+  work item, or from the files it wrote.
+
 ## Examples
 
 ### In sequence: draft, then a person confirms

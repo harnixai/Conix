@@ -1,5 +1,7 @@
 name: brief-stats
 title: 简报的篇幅
+description: >-
+  简报 300 到 6000 字。
 kind: command
 # 项目自己的命令行（tools/notesctl.py）。命令行里不拼 ${...}：运行的目录给 cwd，项目在 $FLOW_WORKSPACE。
 command: python3 "$FLOW_WORKSPACE/tools/notesctl.py" stats brief.md
