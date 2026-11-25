@@ -1,2 +1,14 @@
 name: xforge-ledgers
-kind: host
+title: 台账里没有悬而未决的
+kind: check
+check: schema
+file: "xforge/changes/${stations.open.output.change}/ledgers/*.yaml"
+schema:
+  type: object
+  properties:
+    entries:
+      type: array
+      items:
+        type: object
+        properties:
+          conclusion: {not: {const: open}, description: "an open entry: decide it (accepted, rejected, resolved or deferred)"}

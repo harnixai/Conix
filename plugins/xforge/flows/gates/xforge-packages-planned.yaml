@@ -1,0 +1,17 @@
+name: xforge-packages-planned
+title: 工作包都划了范围
+kind: check
+check: schema
+file: "xforge/changes/${stations.open.output.change}/work-packages.yaml"
+schema:
+  type: object
+  required: [packages]
+  properties:
+    packages:
+      type: array
+      minItems: 1
+      items:
+        type: object
+        required: [id, paths]
+        properties:
+          paths: {type: array, minItems: 1, items: {type: string}}

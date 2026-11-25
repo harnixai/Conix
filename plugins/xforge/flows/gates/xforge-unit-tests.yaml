@@ -1,2 +1,5 @@
 name: xforge-unit-tests
-kind: host
+title: 验证命令都通过
+# 插件自己判（[x-conix.gates] 里的 xforge-unit-tests → xforge.check）：要读基线、跑命令，xflow check 与归档用的也是这一份。
+kind: script
+function: xforge-unit-tests

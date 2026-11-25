@@ -1,0 +1,6 @@
+name: xforge-verification
+title: 验证写好了
+kind: check
+check: files
+paths: ["xforge/changes/${stations.open.output.change}/verification.md"]
+not_containing: ["<!-- xforge:template -->"]

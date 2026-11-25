@@ -2,7 +2,7 @@ uses = ["conix"]
 
 [plugin]
 name = "xforge"
-version = "0.1.1"
+version = "0.1.2"
 api_version = "0.1"
 requires_engine = ">=0.4.0, <0.5"
 description = "规格驱动的变更：规格增量、台账、门禁，按 quick / solid 流程推进"
@@ -70,12 +70,11 @@ entry = "scripts/guard.js:around"
 [x-conix]
 flows = "flows"
 
+# 只登记要插件判的：读基线（规格增量、原则对照）、跑命令（改动范围、验证命令）。写没写、台账、工作包这几道是
+# 流程包里声明的 check，流程库自己判。
 [x-conix.gates]
-xforge-structure    = "xforge.check"
 xforge-spec-delta   = "xforge.check"
 xforge-constitution = "xforge.check"
-xforge-ledgers      = "xforge.check"
-xforge-integrated   = "xforge.check"
 xforge-unclaimed    = "xforge.check"
 xforge-unit-tests   = { function = "xforge.check", runs_commands = true, timeout = "10m" }
 

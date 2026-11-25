@@ -1,2 +1,5 @@
 name: xforge-unclaimed
-kind: host
+title: 改动都在工作包的范围里
+# 插件自己判（[x-conix.gates] 里的 xforge-unclaimed → xforge.check）：要读基线、跑命令，xflow check 与归档用的也是这一份。
+kind: script
+function: xforge-unclaimed

@@ -1,0 +1,6 @@
+name: xforge-proposal
+title: 提案写好了
+kind: check
+check: files
+paths: ["xforge/changes/${stations.open.output.change}/proposal.md"]
+not_containing: ["<!-- xforge:template -->"]

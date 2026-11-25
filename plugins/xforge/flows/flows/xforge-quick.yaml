@@ -24,7 +24,7 @@ stations:
       type: object
       required: [summary]
       properties: {summary: {type: string}}
-    exit: [{kind: output}, {kind: gate, gate: xforge-structure}, {kind: gate, gate: xforge-spec-delta}]
+    exit: [{kind: output}, {kind: gate, gate: xforge-proposal}, {kind: gate, gate: xforge-spec-delta}]
   - id: apply
     title: 实施
     executor: {kind: session}
@@ -43,7 +43,7 @@ stations:
       type: object
       required: [summary]
       properties: {summary: {type: string}}
-    exit: [{kind: output}, {kind: gate, gate: xforge-structure}, {kind: confirm}]
+    exit: [{kind: output}, {kind: gate, gate: xforge-verification}, {kind: confirm}]
     rework_to: [apply, propose]
   - id: archive
     title: 归档

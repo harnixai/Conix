@@ -1,2 +1,5 @@
 name: xforge-constitution
-kind: host
+title: 设计对照了每条原则
+# 插件自己判（[x-conix.gates] 里的 xforge-constitution → xforge.check）：要读基线、跑命令，xflow check 与归档用的也是这一份。
+kind: script
+function: xforge-constitution

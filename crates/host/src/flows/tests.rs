@@ -365,3 +365,49 @@ async fn project_runs_span_flows_and_an_ended_run_is_run_again() {
     );
     flows.stop().await;
 }
+
+/// 随 Conix 的 xforge 插件，照 Conix 挂插件的样子挂上：两条流程与它们用到的每道门禁都合法——声明的 `check` 由流程库判，
+/// 要插件判的几道在 `[x-conix.gates]` 里登记了。
+#[test]
+fn the_shipped_xforge_flows_and_gates_hold_together() {
+    use harnix_flow::{Packs, PartKind, part_problems, validate};
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../plugins/xforge");
+    let section = crate::plugins::conix_section(&root).expect("xforge 的 [x-conix]");
+    let mounted = [crate::plugins::Mounted {
+        name: "xforge".into(),
+        root,
+        section,
+    }];
+    let map = crate::plugins::PluginMap::build(&mounted);
+    let packs = super::build_packs(&mounted, &map).with_catalog(harnix_flow::Catalog {
+        scenes: [super::SCENE.to_string()].into(),
+        gates: map.gates.keys().cloned().collect(),
+        steps: map.steps.keys().cloned().collect(),
+        submit_scenes: [super::SCENE.to_string()].into(),
+        main_scene: Some(super::SCENE.into()),
+        ..Default::default()
+    });
+    for f in ["xforge-quick", "xforge-solid"] {
+        let (def, _) = packs.flow(f).unwrap_or_else(|| panic!("没有 {f}"));
+        assert_eq!(validate(&def, &packs), vec![], "{f}");
+        for st in &def.stations {
+            for e in &st.exit {
+                if let harnix_flow::ExitCond::Gate { gate, .. } = e {
+                    let (text, _) = packs.part(PartKind::Gate, gate).unwrap();
+                    assert_eq!(
+                        part_problems(PartKind::Gate, gate, &text, &packs),
+                        Vec::<String>::new(),
+                        "{gate}"
+                    );
+                    let g = packs.gate(gate).unwrap();
+                    if let Some(fun) = g.host_function() {
+                        assert!(
+                            map.gates.contains_key(fun),
+                            "{gate} 要插件判，却没登记 {fun}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}

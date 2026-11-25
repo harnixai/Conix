@@ -1,2 +1,17 @@
 name: xforge-integrated
-kind: host
+title: 工作包都做完了
+kind: check
+check: schema
+file: "xforge/changes/${stations.open.output.change}/work-packages.yaml"
+schema:
+  type: object
+  required: [packages]
+  properties:
+    packages:
+      type: array
+      minItems: 1
+      items:
+        type: object
+        required: [status]
+        properties:
+          status: {const: done}

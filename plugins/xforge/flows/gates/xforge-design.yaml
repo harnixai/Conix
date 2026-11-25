@@ -1,0 +1,6 @@
+name: xforge-design
+title: 设计写好了
+kind: check
+check: files
+paths: ["xforge/changes/${stations.open.output.change}/design.md"]
+not_containing: ["<!-- xforge:template -->"]
