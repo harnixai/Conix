@@ -1,0 +1,4 @@
+name: digest
+title: 每份笔记一句话
+description: 每份笔记开一个子运行（note）写一句话摘要，最后查汇总。
+version: 0.1.0

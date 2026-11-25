@@ -1,0 +1,11 @@
+name: verification
+title: 每条需求都验证过、有测试
+description: >-
+  对 spec-delta.yaml 里 added 与 modified 的每个编号：verification.md 里有一行同时写着编号和结论（通过 / 未通过 / 未验证），
+  结论不能是未通过；项目里要有一个测试文件带注释 `# <编号>`。
+kind: script
+script: verification
+params:
+  delta: "${output_dir}/spec-delta.yaml"
+  verification: "${output_dir}/verification.md"
+  tests: "**/*test*.*"

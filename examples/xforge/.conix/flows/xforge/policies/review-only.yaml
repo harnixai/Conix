@@ -1,0 +1,5 @@
+name: review-only
+title: 检查只看不改
+description: 独立检查不改提案、设计、代码与规格；发现的问题用 xledger 记进台账。
+permissions:
+  - {effect: deny, tools: [Write, Edit, NotebookEdit], message: 检查站只看不改；问题用 xledger add findings 记}

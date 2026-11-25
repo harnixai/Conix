@@ -1,0 +1,28 @@
+# 治理文件：这个项目的简报要守的规矩。改规矩改这里，不改门禁。
+#
+# - `brief` 与 `reviews` 是硬规矩，script 门禁 governance（.conix/flows/brief/scripts/governance.js）逐条判，给出能不能签发的结论。
+# - `style` 是要人或模型读懂了才判得了的规矩：审读站的 policy 审读员照它逐条写 reviews/policy.jsonl，
+#   governance 再按这里的 severity 决定哪些违反挡住签发。
+version: 1
+
+brief:
+  required_sections: [摘要, 结论, 来源]   # 每一节都要是简报里单独一行的「## <名>」
+  banned: ["保证不会", "绝对安全", "100%"] # 简报里不能出现的说法
+  max_chars: 6000
+
+reviews:
+  facts:
+    max_unsupported: 1                    # 事实核对里找不到依据的说法至多几条
+  policy:
+    block: [error]                        # 审读员判为违反、而规矩的 severity 在这里的，挡住签发
+
+style:
+  - id: no-new-facts
+    severity: error
+    rule: 不出现笔记里没有的数字、产品名或结论。
+  - id: actionable
+    severity: warn
+    rule: 「结论」里每一条都是能照着做的建议，不是口号。
+  - id: plain
+    severity: warn
+    rule: 句子平实，不用营销腔，不堆形容词。

@@ -1,0 +1,7 @@
+name: proposal-sections
+title: 提案的三节都写了
+kind: check
+check: text
+file: "${output_dir}/proposal.md"
+matches: ["(?m)^## 为什么", "(?m)^## 改什么", "(?m)^## 不改什么"]
+not_matches: ["TODO", "TBD"]

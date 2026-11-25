@@ -270,6 +270,8 @@ async fn a_flow_jobs_flow_is_resolved_and_its_inputs_checked() {
             workspaces_dir: dir.path().join("ws"),
             policies_file: None,
             command_gates: true,
+            artifacts_dir: None,
+            builtin_dir: None,
         },
     )
     .await
@@ -313,6 +315,8 @@ async fn project_runs_span_flows_and_an_ended_run_is_run_again() {
             workspaces_dir: dir.path().join("ws"),
             policies_file: None,
             command_gates: true,
+            artifacts_dir: None,
+            builtin_dir: None,
         },
     )
     .await
@@ -379,7 +383,7 @@ fn the_shipped_xforge_flows_and_gates_hold_together() {
         section,
     }];
     let map = crate::plugins::PluginMap::build(&mounted);
-    let packs = super::build_packs(&mounted, &map).with_catalog(harnix_flow::Catalog {
+    let packs = super::build_packs(&mounted, &map, None).with_catalog(harnix_flow::Catalog {
         scenes: [super::SCENE.to_string()].into(),
         gates: map.gates.keys().cloned().collect(),
         steps: map.steps.keys().cloned().collect(),

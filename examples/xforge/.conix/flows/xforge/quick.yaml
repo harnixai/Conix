@@ -1,0 +1,73 @@
+name: quick
+title: 快速变更
+description: 低风险的小变更：提案（连同工作包）、直接实施、验证、归档。
+inputs:
+  title:
+    schema: {type: string, minLength: 1}
+    description: 变更的短标题，也是归档的名字
+  risk:
+    schema: {enum: [low]}
+    default: low
+policies: [by-commands]
+archive:
+  name: "${date}${seq}-${inputs.title}"
+stations:
+  - id: propose
+    title: 提案
+    executor: {kind: session}
+    skill: propose
+    deliverables:
+      - {path: proposal.md, template: proposal.md, description: 提案：为什么、改什么、不改什么}
+    output:
+      type: object
+      required: [summary, packages]
+      properties:
+        summary: {type: string}
+        packages:
+          type: array
+          minItems: 1
+          maxItems: 2
+          items: {type: object, required: [id, title], properties: {id: {type: string}, title: {type: string}}}
+    exit:
+      - {kind: output}
+      - {kind: gate, gate: proposal-sections}
+      - {kind: gate, gate: spec-delta-shape}
+      - {kind: gate, gate: spec-delta}
+      - {kind: gate, gate: packages-planned-quick}
+    on_unmet: {rework_to: propose, max: 2}
+
+  - id: apply
+    title: 实施
+    executor: {kind: session}
+    skill: apply
+    output: {type: object, required: [summary], properties: {summary: {type: string}}}
+    exit:
+      - {kind: output}
+      - {kind: gate, gate: packages-done}
+      - {kind: gate, gate: unclaimed}
+      - {kind: gate, gate: unit-tests}
+    on_unmet: {rework_to: apply, max: 2}
+    rework_to: [propose]
+
+  - id: verify
+    title: 验证
+    executor: {kind: session}
+    skill: verify
+    deliverables:
+      - {path: verification.md, template: verification.md, description: 验证记录：每条需求怎么验证的、结论}
+    output: {type: object, required: [summary], properties: {summary: {type: string}}}
+    exit:
+      - {kind: output}
+      - {kind: gate, gate: verification}
+      - {kind: confirm, who: owner, label: 验收}
+    rework_to: [apply, propose]
+
+  - id: archive
+    title: 归档
+    executor: {kind: session}
+    skill: archive
+    output: {type: object, required: [summary], properties: {summary: {type: string}}}
+    exit:
+      - {kind: output}
+      - {kind: gate, gate: archived}
+    on_unmet: {rework_to: archive, max: 2}

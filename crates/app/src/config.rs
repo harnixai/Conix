@@ -40,6 +40,31 @@ pub struct Config {
 #[serde(default)]
 pub struct FlowsSection {
     pub command_gates: CommandGates,
+    /// 项目的制品目录名（docs/design/layout.md）；项目自己的 `.conix/conix.yaml` 写了的以项目的为准，都没写是 `conix`。
+    pub artifacts_dir: Option<String>,
+}
+
+/// 项目自己的 `.conix/conix.yaml`：脚手架里只认这几项，决定不了这台机器跑不跑命令。
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+pub struct ProjectConfig {
+    pub flows: ProjectFlows,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+pub struct ProjectFlows {
+    pub artifacts_dir: Option<String>,
+}
+
+impl ProjectConfig {
+    /// 读项目的 `.conix/conix.yaml`；没有或读不了就是缺省的。
+    pub fn load(project: &std::path::Path) -> Self {
+        std::fs::read_to_string(project.join(".conix").join(FILE))
+            .ok()
+            .and_then(|t| serde_yaml::from_str(&t).ok())
+            .unwrap_or_default()
+    }
 }
 
 /// 命令门禁跑不跑：`trusted`（缺省，受信的项目里跑，与 Agix 对项目 hook 的规矩一致）、`off`（这台机器一律不跑）。

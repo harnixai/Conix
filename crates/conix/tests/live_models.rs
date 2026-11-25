@@ -265,7 +265,7 @@ fn both_spent(lv: &Live) {
 
 /// 运行时目录里的报告（architecture §8.12），运行结束时写。
 async fn report(lv: &Live, id: &RunId) -> String {
-    let path = lv.state().run_dir(&id.0).join("conix-report.json");
+    let path = lv.process_dir(&id.0).join("conix-report.json");
     for _ in 0..100 {
         if let Ok(t) = std::fs::read_to_string(&path) {
             return t;
@@ -275,10 +275,10 @@ async fn report(lv: &Live, id: &RunId) -> String {
     panic!("没有报告：{}", path.display())
 }
 
-/// 一站最新交的产出与它的时间（流程库的过程目录 `stations/<站>/`：一个工作项是 `output.json`，几个是
+/// 一站最新交的产出与它的时间（流程库的过程目录 `_run/stations/<站>/`：一个工作项是 `output.json`，几个是
 /// `<工作项>.json`）。返工后的一轮是新的工作项、新的文件，上一轮的留着，所以只认最新的那份。
 fn latest(lv: &Live, id: &RunId, st: &str) -> Option<(Value, SystemTime)> {
-    let dir = lv.state().run_dir(&id.0).join("stations").join(st);
+    let dir = lv.process_dir(&id.0).join("stations").join(st);
     std::fs::read_dir(&dir)
         .ok()?
         .filter_map(|f| {

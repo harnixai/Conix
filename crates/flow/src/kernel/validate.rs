@@ -1104,6 +1104,11 @@ pub fn part_problems(kind: PartKind, name: &str, text: &str, packs: &dyn Packs) 
             Err(e) => out.push(format!("not a gate: {e}")),
             Ok(g) => {
                 named(&g.name, &mut out);
+                let mut g = g;
+                // A bundle's gate runs the bundle's script (in Conix: docs/design/layout.md §2).
+                if let (Some((b, _)), Some(sc)) = (crate::bundle::split(name), g.script.as_mut()) {
+                    *sc = crate::bundle::in_bundle(b, sc);
+                }
                 out.extend(gate_problems(&g, packs));
             }
         },

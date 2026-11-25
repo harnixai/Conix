@@ -1,0 +1,14 @@
+# 项目原则：xforge 流程的设计站逐条对照（门禁 constitution 读这份文件）。
+principles:
+  - id: P1
+    title: 只用标准库
+    text: 不引入第三方依赖；要用的东西标准库没有，就自己写一个小的。
+  - id: P2
+    title: 每条需求都有测试
+    text: 新增或修改的需求，测试里要有一条用例注释 `# <需求编号>` 指向它（门禁 verification 也查）。
+  - id: P3
+    title: 不破坏已有接口
+    text: 已发布的函数签名与行为不改；要改行为走 modified 增量并说明影响。
+  - id: P4
+    title: 小步可验证
+    text: 工作包各自能单独验证；一个包只碰它声明的路径。

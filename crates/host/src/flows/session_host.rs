@@ -427,7 +427,7 @@ mod tests {
         spec.tools = harnix_flow::runner::tool_specs();
         let o = options_of(&spec, None);
         assert_eq!(o["settings"]["model"]["effort"], "high");
-        assert_eq!(o["host_tools"].as_array().unwrap().len(), 3);
+        assert_eq!(o["host_tools"].as_array().unwrap().len(), 4);
         assert!(
             o["settings"].get("sandbox").is_none(),
             "不是作业起的运行：网络照设置"

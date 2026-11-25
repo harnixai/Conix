@@ -1,0 +1,4 @@
+name: publish
+title: 外部审批后发布
+description: 简报经外部审批系统（MCP）批准后发布。
+version: 0.1.0

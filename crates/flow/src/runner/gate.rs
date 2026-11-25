@@ -338,6 +338,7 @@ async fn script_gate(
         "inputs": rec.inputs,
         "outputs": outputs,
         "output_dir": rec.output_dir,
+        "data_dir": rec.data_dir,
         "workspace": ctx.get("workspace"),
         "params": crate::kernel::refs::resolve(&g.params, ctx),
     });
@@ -377,6 +378,8 @@ pub(crate) struct Trial {
     pub inputs: Value,
     pub outputs: serde_json::Map<String, Value>,
     pub output_dir: Option<String>,
+    /// The bundle's data directory the run would have had (in Conix).
+    pub data_dir: Option<String>,
     /// Why a command may not run here; `None`: it may.
     pub no_commands: Option<String>,
 }
@@ -405,6 +408,7 @@ async fn try_gate(rn: &Runner, t: Trial) -> Tried {
     let ctx = serde_json::json!({
         "run": "trial", "subject": "trial", "inputs": t.inputs, "stations": stations,
         "item": null, "task": null, "workspace": t.ws.to_string_lossy(), "output_dir": t.output_dir,
+        "data_dir": t.data_dir,
     });
     match g.kind {
         GateKind::Check if g.check == Some(crate::kernel::parts::CheckKind::Sealed) => tried(GateResult::errored(
@@ -424,7 +428,7 @@ async fn try_gate(rn: &Runner, t: Trial) -> Tried {
             };
             let input = serde_json::json!({
                 "gate": g.name, "run": "trial", "flow": "trial", "station": t.station, "round": 1,
-                "inputs": t.inputs, "outputs": t.outputs, "output_dir": t.output_dir,
+                "inputs": t.inputs, "outputs": t.outputs, "output_dir": t.output_dir, "data_dir": t.data_dir,
                 "workspace": t.ws.to_string_lossy(), "params": crate::kernel::refs::resolve(&g.params, &ctx),
             });
             trial_script(source, input, reader, g.script_seconds()).await

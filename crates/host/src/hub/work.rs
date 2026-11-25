@@ -53,9 +53,16 @@ impl Hub {
         write_json(&dir.join("report.json"), &report);
     }
 
+    /// 一次运行的过程目录：流程库说在哪就在哪（有制品目录时在 `<制品>/runs/<运行>/_run`）。
+    fn run_process_dir(&self, run: &str) -> std::path::PathBuf {
+        self.flows()
+            .and_then(|f| f.process_dir(run))
+            .unwrap_or_else(|| self.project_state().run_dir(run))
+    }
+
     /// 一次运行结束时的 `conix-report.json`，写在流程库的过程目录里：运行的东西都在一个目录。
     pub(crate) fn write_run_report(&self, v: &port::RunView) {
-        let dir = self.project_state().run_dir(&v.summary.id.0);
+        let dir = self.run_process_dir(&v.summary.id.0);
         write_json(&dir.join("conix-report.json"), &self.run_report(v, &dir));
     }
 
@@ -244,7 +251,7 @@ impl Hub {
                 .flows()
                 .ok_or("flows are not available in this instance")?;
             let v = f.run_view(run.trim()).await?;
-            let dir = self.project_state().run_dir(&v.summary.id.0);
+            let dir = self.run_process_dir(&v.summary.id.0);
             let saved = std::fs::read_to_string(dir.join("conix-report.json"))
                 .ok()
                 .and_then(|t| serde_json::from_str::<Value>(&t).ok());

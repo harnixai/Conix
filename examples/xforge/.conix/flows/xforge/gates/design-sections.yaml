@@ -1,0 +1,7 @@
+name: design-sections
+title: 设计的四节都写了
+kind: check
+check: text
+file: "${output_dir}/design.md"
+matches: ["(?m)^## 做法", "(?m)^## 取舍", "(?m)^## 原则对照", "(?m)^## 工作包"]
+not_matches: ["TODO", "TBD"]

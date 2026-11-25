@@ -1,0 +1,34 @@
+name: unclaimed
+title: 改动都在工作包的范围里
+description: >-
+  工作区里还没提交的每个改动（git status），都要落在某个工作包的路径里（packages.paths，xpkg plan 写的）；
+  制品目录与 .conix/ 不算。只要 sh 与 git。
+kind: command
+cwd: "${output_dir}"
+result: json
+timeout_seconds: 60
+command: |
+  rel=${PWD#"$FLOW_WORKSPACE"/}; art=${rel%%/*}
+  if [ ! -s packages.paths ]; then
+    printf '{"verdict":"error","summary":"没有 packages.paths：工作包用 xpkg plan 划"}\n'; exit 0
+  fi
+  git -C "$FLOW_WORKSPACE" status --porcelain -uall > changes.txt || { printf '{"verdict":"error","summary":"git status 跑不了"}\n'; exit 0; }
+  n=0; bad=0; findings=""
+  while IFS= read -r line; do
+    p=${line#???}; p=${p##* -> }; p=${p#\"}; p=${p%\"}
+    case "$p" in "$art"/*|.conix/*) continue ;; esac
+    n=$((n+1)); hit=0
+    while IFS= read -r pat; do
+      [ -z "$pat" ] && continue
+      case "$p" in $pat) hit=1; break ;; esac
+    done < packages.paths
+    if [ $hit = 0 ]; then
+      bad=$((bad+1))
+      findings="$findings${findings:+,}{\"rule\":\"unclaimed\",\"severity\":\"error\",\"path\":\"$p\",\"message\":\"改了，但没有哪个工作包声明这个路径\"}"
+    fi
+  done < changes.txt
+  if [ $bad -gt 0 ]; then
+    printf '{"verdict":"fail","summary":"%s 个改动不在任何工作包的范围里","findings":[%s],"metrics":{"changed":%s}}\n' "$bad" "$findings" "$n"
+  else
+    printf '{"verdict":"pass","summary":"%s 个改动都在工作包的范围里","metrics":{"changed":%s}}\n' "$n" "$n"
+  fi

@@ -102,10 +102,12 @@ impl Bench {
     }
 }
 
-const FLOWS: &[&str] = &["brief", "digest", "digest-note", "publish"];
+const FLOWS: &[&str] = &["brief", "digest", "digest/note", "publish"];
+/// Each bundle's gates, by full name: the demo's three bundles are each self-contained.
 const GATES: &[&str] = &[
-    "outline-shape", "sections-written", "brief-shape", "brief-stats", "facts-shape", "policy-shape", "reviews-verified",
-    "governance", "untouched", "digest-complete", "publish-ready",
+    "brief/outline-shape", "brief/sections-written", "brief/brief-shape", "brief/brief-stats", "brief/facts-shape",
+    "brief/policy-shape", "brief/reviews-verified", "brief/governance", "brief/untouched", "digest/digest-complete",
+    "publish/publish-ready",
 ];
 
 #[test]
@@ -170,8 +172,8 @@ const POLICY: &str = concat!(
 /// The files a run would have when the station `govern` judges, with `brief` as its brief: a sample
 /// is all a trial reads, so the demo's governance file goes in with it.
 fn delivered(brief: &str, facts: &str, policy: &str) -> Value {
-    let rules = std::fs::read_to_string(demo().join("governance/policy.yaml")).unwrap();
-    json!({"governance/policy.yaml": rules, "out/outline.yaml": OUTLINE, "out/brief.md": brief,
+    let rules = std::fs::read_to_string(demo().join(".conix/governance/policy.yaml")).unwrap();
+    json!({".conix/governance/policy.yaml": rules, "out/outline.yaml": OUTLINE, "out/brief.md": brief,
         "out/reviews/facts.jsonl": facts, "out/reviews/policy.jsonl": policy})
 }
 
@@ -181,49 +183,49 @@ fn delivered(brief: &str, facts: &str, policy: &str) -> Value {
 async fn the_demos_check_gates_judge_yaml_jsonl_files_and_text() {
     let b = bench();
     // check: schema, on YAML
-    let (v, _) = b.verdict("outline-shape", json!({"out/outline.yaml": OUTLINE}), json!({})).await;
+    let (v, _) = b.verdict("brief/outline-shape", json!({"out/outline.yaml": OUTLINE}), json!({})).await;
     assert_eq!(v, "pass");
     let bad = "title: x\nsections:\n  - {id: Bad Id, title: t, sources: [timeouts.md]}\n";
-    let (v, r) = b.verdict("outline-shape", json!({"out/outline.yaml": bad}), json!({})).await;
+    let (v, r) = b.verdict("brief/outline-shape", json!({"out/outline.yaml": bad}), json!({})).await;
     assert_eq!(v, "fail", "{r}");
     assert!(r["findings"].as_array().unwrap().len() >= 2, "too few sections, a bad id, a bad source: {r}");
 
     // check: files
-    let (v, _) = b.verdict("sections-written", json!({"out/sections/timeouts.md": "## 超时\n正文"}), json!({})).await;
+    let (v, _) = b.verdict("brief/sections-written", json!({"out/sections/timeouts.md": "## 超时\n正文"}), json!({})).await;
     assert_eq!(v, "pass");
-    let (v, r) = b.verdict("sections-written", json!({"out/sections/timeouts.md": "## 超时\nTODO"}), json!({})).await;
+    let (v, r) = b.verdict("brief/sections-written", json!({"out/sections/timeouts.md": "## 超时\nTODO"}), json!({})).await;
     assert_eq!(v, "fail", "{r}");
-    let (v, _) = b.verdict("sections-written", json!({"out/other.md": "x"}), json!({})).await;
+    let (v, _) = b.verdict("brief/sections-written", json!({"out/other.md": "x"}), json!({})).await;
     assert_eq!(v, "fail", "no section written at all");
 
     // check: text
-    let (v, _) = b.verdict("brief-shape", json!({"out/brief.md": good_brief()}), json!({})).await;
+    let (v, _) = b.verdict("brief/brief-shape", json!({"out/brief.md": good_brief()}), json!({})).await;
     assert_eq!(v, "pass");
-    let (v, r) = b.verdict("brief-shape", json!({"out/brief.md": "# t\n\n## 摘要\nTODO\n"}), json!({})).await;
+    let (v, r) = b.verdict("brief/brief-shape", json!({"out/brief.md": "# t\n\n## 摘要\nTODO\n"}), json!({})).await;
     assert_eq!(v, "fail", "{r}");
 
     // check: schema, on JSONL
-    let (v, r) = b.verdict("facts-shape", json!({"out/reviews/facts.jsonl": FACTS}), json!({})).await;
+    let (v, r) = b.verdict("brief/facts-shape", json!({"out/reviews/facts.jsonl": FACTS}), json!({})).await;
     assert_eq!(v, "pass", "{r}");
-    let (v, r) = b.verdict("facts-shape", json!({"out/reviews/facts.jsonl": format!("[{}]", FACTS.lines().collect::<Vec<_>>().join(","))}), json!({})).await;
+    let (v, r) = b.verdict("brief/facts-shape", json!({"out/reviews/facts.jsonl": format!("[{}]", FACTS.lines().collect::<Vec<_>>().join(","))}), json!({})).await;
     assert_eq!(v, "fail", "an array on one line is one row, not three: {r}");
-    let (v, _) = b.verdict("policy-shape", json!({"out/reviews/policy.jsonl": POLICY}), json!({})).await;
+    let (v, _) = b.verdict("brief/policy-shape", json!({"out/reviews/policy.jsonl": POLICY}), json!({})).await;
     assert_eq!(v, "pass");
-    let (v, r) = b.verdict("policy-shape", json!({"out/reviews/policy.jsonl": POLICY.replace("violated", "meh")}), json!({})).await;
+    let (v, r) = b.verdict("brief/policy-shape", json!({"out/reviews/policy.jsonl": POLICY.replace("violated", "meh")}), json!({})).await;
     assert_eq!(v, "fail", "{r}");
 
     // check: output, on the child runs' results.
     let each = json!({"each": [{"path": "notes/a.md", "line": "一句足够长的摘要文字"}, null]});
-    let (v, _) = b.verdict("digest-complete", json!({}), each).await;
+    let (v, _) = b.verdict("digest/digest-complete", json!({}), each).await;
     assert_eq!(v, "pass");
-    let (v, _) = b.verdict("digest-complete", json!({}), json!({"each": [null, null]})).await;
+    let (v, _) = b.verdict("digest/digest-complete", json!({}), json!({"each": [null, null]})).await;
     assert_eq!(v, "fail", "no child delivered");
 }
 
 #[tokio::test]
 async fn the_demos_script_gate_concludes_from_the_governance_file() {
     let b = bench();
-    let (v, r) = b.verdict("governance", delivered(&good_brief(), FACTS, POLICY), json!({})).await;
+    let (v, r) = b.verdict("brief/governance", delivered(&good_brief(), FACTS, POLICY), json!({})).await;
     assert_eq!(v, "pass", "{r}");
     assert_eq!((r["metrics"]["sources"].as_u64(), r["metrics"]["violated"].as_u64()), (Some(3), Some(1)), "{r}");
     assert!(r["summary"].as_str().unwrap().contains("可以签发"), "a warn rule broken is a reminder: {r}");
@@ -232,14 +234,14 @@ async fn the_demos_script_gate_concludes_from_the_governance_file() {
         + "{\"claim\": \"a\", \"verdict\": \"unsupported\", \"source\": \"\", \"quote\": \"\"}\n"
         + "{\"claim\": \"b\", \"verdict\": \"unsupported\", \"source\": \"\", \"quote\": \"\"}\n";
     let policy = POLICY.replace(r#""no-new-facts", "verdict": "ok""#, r#""no-new-facts", "verdict": "violated""#).replace("actionable", "other");
-    let (v, r) = b.verdict("governance", delivered(&broken, &unsupported, &policy), json!({})).await;
+    let (v, r) = b.verdict("brief/governance", delivered(&broken, &unsupported, &policy), json!({})).await;
     assert_eq!(v, "fail", "{r}");
     let text = r["findings"].to_string();
     for what in ["notes/caching.md", "重试与缓存", "100%", "没有依据", "no-new-facts", "actionable 没有判"] {
         assert!(text.contains(what), "{what}: {r}");
     }
     assert!(r["summary"].as_str().unwrap().contains("不可签发"), "{r}");
-    let (v, _) = b.verdict("governance", json!({"out/brief.md": good_brief()}), json!({})).await;
+    let (v, _) = b.verdict("brief/governance", json!({"out/brief.md": good_brief()}), json!({})).await;
     assert_eq!(v, "error", "no outline: nothing to judge");
 }
 
@@ -256,19 +258,19 @@ async fn the_demos_command_gates_run_its_own_tool() {
         i
     };
     std::fs::write(out.join("brief.md"), good_brief()).unwrap();
-    let r = b.ok("s", TOOL_GATE_TRY, gate("brief-stats")).await;
+    let r = b.ok("s", TOOL_GATE_TRY, gate("brief/brief-stats")).await;
     assert_eq!(r["verdict"], "pass", "{r}");
     assert!(r["metrics"]["chars"].as_u64().unwrap() >= 300, "{r}");
     std::fs::write(out.join("brief.md"), "# 短\n").unwrap();
-    let r = b.ok("s", TOOL_GATE_TRY, gate("brief-stats")).await;
+    let r = b.ok("s", TOOL_GATE_TRY, gate("brief/brief-stats")).await;
     assert_eq!(r["verdict"], "fail", "{r}");
     std::fs::write(out.join("reviews/facts.jsonl"), FACTS).unwrap();
-    let r = b.ok("s", TOOL_GATE_TRY, gate("reviews-verified")).await;
+    let r = b.ok("s", TOOL_GATE_TRY, gate("brief/reviews-verified")).await;
     assert_eq!(r["verdict"], "pass", "{r}");
     assert_eq!(r["metrics"]["supported"], 3, "{r}");
     let made_up = FACTS.replace("网关 10 秒", "网关 30 秒");
     std::fs::write(out.join("reviews/facts.jsonl"), made_up).unwrap();
-    let r = b.ok("s", TOOL_GATE_TRY, gate("reviews-verified")).await;
+    let r = b.ok("s", TOOL_GATE_TRY, gate("brief/reviews-verified")).await;
     assert_eq!(r["verdict"], "fail", "a quote the note does not have: {r}");
     assert!(r["findings"].to_string().contains("notes/timeouts.md"), "{r}");
 }

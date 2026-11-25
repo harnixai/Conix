@@ -1,0 +1,4 @@
+# 这个项目的 Conix 配置（脚手架，进 git）。制品目录叫 xforge：运行的目录在 xforge/runs/（不进 git），
+# xforge 流程包的数据（规格 specs/、归档 archive/）直接在 xforge/ 下。
+flows:
+  artifacts_dir: xforge

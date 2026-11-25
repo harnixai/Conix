@@ -93,6 +93,8 @@ async fn a_plugin_is_installed_enabled_and_its_flow_runs_on_its_functions() {
             workspaces_dir: home.path().join("ws"),
             policies_file: None,
             command_gates: true,
+            artifacts_dir: None,
+            builtin_dir: None,
         },
     )
     .await

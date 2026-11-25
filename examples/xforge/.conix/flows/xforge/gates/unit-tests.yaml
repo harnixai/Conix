@@ -1,0 +1,6 @@
+name: unit-tests
+title: 项目的验证都通过
+description: 跑项目的 .conix/governance/verify.sh（项目自己写：单测、lint 这些），退出码 0 才过。
+kind: command
+command: sh "$FLOW_WORKSPACE/.conix/governance/verify.sh"
+timeout_seconds: 600

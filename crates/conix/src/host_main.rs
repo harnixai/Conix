@@ -110,6 +110,15 @@ pub async fn run(name: String, project: PathBuf) -> Result<()> {
             workspaces_dir: state.flow_workspaces(),
             policies_file: Some(state.run_policies()),
             command_gates: cfg.flows.command_gates != config::CommandGates::Off,
+            artifacts_dir: Some(
+                config::ProjectConfig::load(&project)
+                    .flows
+                    .artifacts_dir
+                    .or(cfg.flows.artifacts_dir.clone())
+                    .filter(|a| host::flows::artifacts_dir_ok(a))
+                    .unwrap_or_else(|| host::flows::ARTIFACTS_DIR.to_string()),
+            ),
+            builtin_dir: Some(state.dir().join("flows-builtin")),
         },
     )
     .await;

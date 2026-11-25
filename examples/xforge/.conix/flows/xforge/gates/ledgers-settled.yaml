@@ -1,0 +1,18 @@
+name: ledgers-settled
+title: 台账里没有悬而未决的
+kind: check
+check: schema
+file: "${output_dir}/ledgers/*.yaml"
+schema:
+  type: object
+  required: [entries]
+  properties:
+    entries:
+      type: array
+      items:
+        type: object
+        required: [id, text, conclusion]
+        properties:
+          conclusion:
+            enum: [accepted, rejected, resolved, deferred]
+            description: "open 的条目要先有结论：xledger set <种类> <编号> accepted|rejected|resolved|deferred"

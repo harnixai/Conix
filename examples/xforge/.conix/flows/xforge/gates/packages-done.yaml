@@ -1,0 +1,17 @@
+name: packages-done
+title: 工作包都做完了
+kind: check
+check: schema
+file: "${output_dir}/work-packages.yaml"
+schema:
+  type: object
+  required: [packages]
+  properties:
+    packages:
+      type: array
+      minItems: 1
+      items:
+        type: object
+        required: [id, status]
+        properties:
+          status: {const: done, description: "做完了用 xpkg done 登记；做不下去的 blocked 要人看"}

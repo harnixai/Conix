@@ -63,7 +63,7 @@ fn install_demo(lv: &Live, models: Option<(&Endpoint, &Endpoint)>) {
         .unwrap();
     assert!(st.success(), "拷演示项目");
     let Some((ds, cl)) = models else { return };
-    let brief = Path::new(&to).join(".conix/flows/brief.yaml");
+    let brief = Path::new(&to).join(".conix/flows/brief/flow.yaml");
     let text = std::fs::read_to_string(&brief).unwrap();
     let swaps = [
         (
@@ -492,6 +492,54 @@ async fn the_demo_brief_runs_every_kind_of_gate_on_two_models_and_both_kinds_of_
     })
     .await;
     approved_outside(&record(&lv, &id), "publish", &rid);
+
+    // 归档（docs/design/layout.md §3）：运行的目录在制品目录的 runs/ 下、不进 git；结束后留下的制品连同
+    // record.json 进了包的数据目录。
+    let project = Path::new(&lv.project_path()).to_path_buf();
+    assert_eq!(
+        std::fs::read_to_string(project.join("conix/.gitignore")).unwrap_or_default(),
+        "runs/\n"
+    );
+    assert!(
+        out.starts_with(&*project.join("conix/runs").to_string_lossy()),
+        "{out}"
+    );
+    let mut archived = None;
+    for _ in 0..100 {
+        archived = std::fs::read_dir(project.join("conix/brief/archive"))
+            .ok()
+            .and_then(|d| {
+                d.flatten()
+                    .map(|e| e.path())
+                    .find(|p| p.join("record.json").is_file())
+            });
+        if archived.is_some() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    let archived = archived.expect("归档了");
+    for f in [
+        "brief.md",
+        "outline.yaml",
+        "reviews/facts.jsonl",
+        "reviews/policy.jsonl",
+    ] {
+        assert!(archived.join(f).is_file(), "{}/{f}", archived.display());
+    }
+    assert!(!archived.join("_run").exists(), "过程目录不进归档");
+    let kept: Value =
+        serde_json::from_str(&std::fs::read_to_string(archived.join("record.json")).unwrap())
+            .unwrap();
+    assert_eq!(kept["status"], "finished", "{kept}");
+    let sign_off = kept["stations"]
+        .as_array()
+        .and_then(|v| v.iter().find(|s| s["id"] == "sign-off"))
+        .expect("签发站");
+    assert_eq!(
+        sign_off["confirms"][0]["by"]["kind"], "person",
+        "{sign_off}"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]

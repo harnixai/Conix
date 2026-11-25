@@ -1,0 +1,5 @@
+name: xforge
+title: XForge 开发流程
+description: 规格驱动的变更：提案与规格增量、设计与工作包、独立检查、按工作包实施、验证、归档。solid 是完整路径，quick 是低风险的小变更。
+version: 0.1.0
+commands: [xspec, xledger, xpkg]

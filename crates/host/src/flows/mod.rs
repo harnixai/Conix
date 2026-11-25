@@ -4,6 +4,7 @@
 
 mod approvals;
 pub(crate) mod authorize;
+pub mod builtin;
 mod frames;
 mod map;
 pub(crate) mod policy;
@@ -62,6 +63,22 @@ pub struct FlowsConfig {
     pub policies_file: Option<PathBuf>,
     /// 命令门禁跑不跑（`conix.yaml` 的 `flows.command_gates`）；跑也只在受信的项目里（流程库自己判）。
     pub command_gates: bool,
+    /// 项目的制品目录名（docs/design/layout.md）：运行的目录、流程包的数据与归档都在它下面；`None` 是流程库原来的布局。
+    pub artifacts_dir: Option<String>,
+    /// 随 Conix 内置的流程包写到这里再读（[`builtin`]）；`None` 不带内置的包。
+    pub builtin_dir: Option<PathBuf>,
+}
+
+/// 制品目录缺省的名字。
+pub const ARTIFACTS_DIR: &str = "conix";
+
+/// 制品目录名能不能用：一个普通的名字，不以 `.` 开头（`.conix`、`.git` 都不行）。
+pub fn artifacts_dir_ok(name: &str) -> bool {
+    !name.is_empty()
+        && !name.starts_with('.')
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
 }
 
 /// 命令门禁的子进程永远拿不到的环境变量，门禁的 `env` 写了也不给：模型 provider 的密钥、Conix 与 Agix 自己的。
@@ -127,12 +144,18 @@ pub struct Flows {
     plugin_map: Arc<std::sync::RwLock<crate::plugins::PluginMap>>,
     /// 插件之间同名、没提供出来的流程与件。
     shadowed: std::sync::Mutex<Vec<harnix_flow::Shadowing>>,
+    /// 内置流程包写在哪（[`FlowsConfig::builtin_dir`]）：插件启停重建流程包时还要垫上它。
+    builtin_dir: Option<PathBuf>,
 }
 
 /// 垫在项目下面的流程包：插件（按名字）> 库自带的示例包，都只读。没有全局可写层：流程与作业只在项目里，
 /// 存的都进项目自己的 `.conix/flows/`（architecture §8.1）。插件带来的门禁与步骤名进目录，流程只能用目录里有的名字。
-fn build_packs(mounted: &[crate::plugins::Mounted], map: &crate::plugins::PluginMap) -> DirPacks {
-    let mut dir = DirPacks::new(Vec::<PathBuf>::new()).with_builtin(MemPacks::examples());
+fn build_packs(
+    mounted: &[crate::plugins::Mounted],
+    map: &crate::plugins::PluginMap,
+    builtin: Option<&Path>,
+) -> DirPacks {
+    let mut dir = DirPacks::new(builtin.map(Path::to_path_buf)).with_builtin(MemPacks::examples());
     for m in mounted {
         if let Some(d) = m.flows_dir() {
             dir = dir.with_plugin(m.name.clone(), d);
@@ -167,7 +190,12 @@ pub async fn start(hub: &Hub, cfg: FlowsConfig) -> anyhow::Result<Arc<Flows>> {
     };
     let mounted = hub.mounted_plugins().await;
     let map = crate::plugins::PluginMap::build(&mounted);
-    let dir = build_packs(&mounted, &map);
+    if let Some(d) = &cfg.builtin_dir
+        && let Err(e) = builtin::write(d)
+    {
+        tracing::warn!(dir = %d.display(), error = %e, "the built-in flow bundles were not written");
+    }
+    let dir = build_packs(&mounted, &map, cfg.builtin_dir.as_deref());
     let shadowed = dir.shadowed();
     let swap = Arc::new(swap::SwapPacks::new(Arc::new(dir)));
     let plugin_map = Arc::new(std::sync::RwLock::new(map));
@@ -181,9 +209,12 @@ pub async fn start(hub: &Hub, cfg: FlowsConfig) -> anyhow::Result<Arc<Flows>> {
         ..rcfg
     };
     prepare_worktrees_dir(&cfg.worktrees_dir);
-    let layout = ProjectLayout::new(".conix", cfg.worktrees_dir, BRANCH_PREFIX)
+    let mut layout = ProjectLayout::new(".conix", cfg.worktrees_dir, BRANCH_PREFIX)
         .with_agent_dirs(AGENT_DIRS)
         .with_runs_dir(RUNS_DIR);
+    if let Some(a) = cfg.artifacts_dir.as_deref().filter(|a| artifacts_dir_ok(a)) {
+        layout = layout.with_artifacts_dir(a);
+    }
     let packs = Arc::new(CatalogPacks::over(&rcfg, vec![], swap.clone()));
     packs.set_layout(layout.clone());
     let packs: Arc<dyn Packs> = packs;
@@ -233,6 +264,7 @@ pub async fn start(hub: &Hub, cfg: FlowsConfig) -> anyhow::Result<Arc<Flows>> {
         swap,
         plugin_map,
         shadowed: std::sync::Mutex::new(shadowed),
+        builtin_dir: cfg.builtin_dir.clone(),
     });
     let _ = flows.author.set(AuthorTools::new(
         &runner,
@@ -456,10 +488,21 @@ impl Flows {
         hub.emit_events(events);
     }
 
+    /// 一次运行的过程目录（流程库的投影写在这里，Conix 的 `conix-report.json` 也写在这里）：有制品目录时是
+    /// `<项目>/<制品>/runs/<运行>/_run`（docs/design/layout.md），否则是 `.conix/state/conix/runs/<运行>`。
+    fn process_dir_of(&self, run: &str) -> Option<PathBuf> {
+        let layout = self.engine.layout()?;
+        let project = Path::new(&self.project);
+        match layout.run_dir(project, run) {
+            Some(d) => Some(d.join(harnix_flow::kernel::layout::PROCESS_DIR)),
+            None => Some(layout.runs_dir(project).join(run)),
+        }
+    }
+
     /// 启用着的插件变了：重建流程包、换上新的门禁与步骤，列表跟着刷新。在跑的运行不受影响。
     pub(crate) async fn set_plugins(&self, mounted: &[crate::plugins::Mounted]) {
         let map = crate::plugins::PluginMap::build(mounted);
-        let dir = build_packs(mounted, &map);
+        let dir = build_packs(mounted, &map, self.builtin_dir.as_deref());
         *self.shadowed.locked() = dir.shadowed();
         self.swap.set(Arc::new(dir));
         *self.plugin_map.write().unwrap_or_else(|e| e.into_inner()) = map;
@@ -548,6 +591,10 @@ async fn follow(flows: Arc<Flows>, mut rx: broadcast::Receiver<harnix_flow::runn
 
 #[async_trait]
 impl FlowPort for Flows {
+    fn process_dir(&self, run: &str) -> Option<PathBuf> {
+        self.process_dir_of(run)
+    }
+
     async fn command(&self, cmd: Command) -> Result<Reply, PortError> {
         match cmd {
             Command::ListFlows => Ok(Reply::Flows(self.summaries().await)),

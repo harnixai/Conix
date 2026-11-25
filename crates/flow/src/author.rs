@@ -18,7 +18,7 @@
 //! | `flow_delete {flow?}` | no | delete a flow (a built-in one: its override) |
 //! | `flow_part_set {kind, name, text}` / `flow_part_delete {kind, name}` | no | change, delete a skill, rule, policy, gate or hook |
 //! | `flow_dry_run {flow?, inputs?, mocks?}` | yes | dry-run a flow, as far as it goes |
-//! | `flow_gate_try {gate?, text?, script?, files?, workspace?, station?, inputs?, outputs?, output_dir?}` | no | judge a gate once, as a run would, nothing recorded |
+//! | `flow_gate_try {gate?, text?, script?, files?, workspace?, station?, inputs?, outputs?, output_dir?, data_dir?}` | no | judge a gate once, as a run would, nothing recorded |
 //! | `flow_start {flow?, subject, inputs?, title?}` | no | start a flow for real |
 //! | `flow_guide {topic?, lang?}` | yes | the flow guide, or one chapter of it (`gates`, `confirm`, `deliver`) |
 //! | `flow_runs {flow?}` / `flow_run {run?, flow?}` | yes | a flow's runs; one run |
@@ -307,12 +307,12 @@ const TOOLS: &[Row] = &[
     },
     Row {
         name: TOOL_GATE_TRY,
-        description: "Judge a gate once, as a run would, and see its whole result (verdict, summary, findings, evidence, metrics, log); nothing is recorded. Write a gate, then try it on a sample that should pass and on one that should not: a gate that passes both checks nothing. The gate: `gate` (one in the packs) or `text` (its YAML, not saved yet), and `script` (a script gate's JS, not saved yet). What it judges: `files` ({path: text}, a sample made for this trial alone), else `workspace` (a directory in the project), else the project. What the run would have had: `station`, `inputs`, `outputs` ({station: output}, for `${stations.<id>.output}` and a script's `input.outputs`), `output_dir`. A command gate runs only in a trusted project.",
+        description: "Judge a gate once, as a run would, and see its whole result (verdict, summary, findings, evidence, metrics, log); nothing is recorded. Write a gate, then try it on a sample that should pass and on one that should not: a gate that passes both checks nothing. The gate: `gate` (one in the packs) or `text` (its YAML, not saved yet), and `script` (a script gate's JS, not saved yet). What it judges: `files` ({path: text}, a sample made for this trial alone), else `workspace` (a directory in the project), else the project. What the run would have had: `station`, `inputs`, `outputs` ({station: output}, for `${stations.<id>.output}` and a script's `input.outputs`), `output_dir`, `data_dir` (a bundle's). A command gate runs only in a trusted project.",
         schema: || json!({"type": "object", "properties": {
             "gate": {"type": "string"}, "text": {"type": "string"}, "script": {"type": "string"},
             "files": {"type": "object", "additionalProperties": {"type": "string"}},
             "workspace": {"type": "string"}, "station": {"type": "string"},
-            "inputs": {"type": "object"}, "outputs": {"type": "object"}, "output_dir": {"type": "string"}}}),
+            "inputs": {"type": "object"}, "outputs": {"type": "object"}, "output_dir": {"type": "string"}, "data_dir": {"type": "string"}}}),
         read_only: false,
         does: Does::GateTry,
     },
@@ -800,6 +800,7 @@ impl Cx<'_> {
             inputs: input.get("inputs").cloned().unwrap_or_else(|| json!({})),
             outputs: input.get("outputs").and_then(Value::as_object).cloned().unwrap_or_default(),
             output_dir: str_of(input, "output_dir").map(String::from),
+            data_dir: str_of(input, "data_dir").map(String::from),
             no_commands,
         };
         let tried = self.rn.try_gate(trial).await;

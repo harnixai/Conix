@@ -316,6 +316,25 @@ impl Live {
     }
 
     /// 项目状态里的 JSON 文件（`sessions.json`、`jobs-state.json`）。
+    /// 一次运行的过程目录（docs/design/layout.md）：`<项目>/conix/runs/<运行>/_run`，运行 ID 照流程库的做法换成
+    /// 一个名字（`.` 这类换成 `-`）。
+    pub fn process_dir(&self, run: &str) -> PathBuf {
+        let safe: String = run
+            .chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                    c
+                } else {
+                    '-'
+                }
+            })
+            .collect();
+        PathBuf::from(self.project_path())
+            .join("conix/runs")
+            .join(safe)
+            .join("_run")
+    }
+
     pub fn read_state(&self, file: &str) -> serde_json::Value {
         read_json_file(&self.state().dir().join(file))
     }

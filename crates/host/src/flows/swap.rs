@@ -25,6 +25,9 @@ impl SwapPacks {
 }
 
 impl Packs for SwapPacks {
+    fn bundle_file(&self, bundle: &str, rel: &str) -> Option<String> {
+        self.get().bundle_file(bundle, rel)
+    }
     fn flows(&self) -> Vec<String> {
         self.get().flows()
     }

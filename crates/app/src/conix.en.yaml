@@ -70,5 +70,8 @@ jobs:
 
 # Flows. A command gate (kind: command) runs a command on this machine: trusted runs them in trusted
 # projects only (the default); off never runs them.
+# artifacts_dir: the project's directory for flow runs, bundle data and archives (default conix). A
+# project's own .conix/conix.yaml may set flows.artifacts_dir too, and wins.
 # flows:
 #   command_gates: trusted
+#   artifacts_dir: conix

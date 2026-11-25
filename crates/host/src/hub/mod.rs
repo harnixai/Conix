@@ -84,6 +84,8 @@ pub(crate) trait FlowPort: Send + Sync {
     async fn run_view(&self, run: &str) -> Result<port::RunView, String>;
     /// 已结束的运行照原样再跑一次：同流程、同主题、同输入（`flow_rerun`）。
     async fn rerun(&self, run: &str) -> Result<port::RunSummary, String>;
+    /// 一次运行的过程目录（流程库的投影、`conix-report.json`）。
+    fn process_dir(&self, run: &str) -> Option<std::path::PathBuf>;
 }
 
 /// 作业起的一次还没结束的运行。

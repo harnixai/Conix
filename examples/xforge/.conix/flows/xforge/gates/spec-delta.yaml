@@ -1,0 +1,10 @@
+name: spec-delta
+title: 规格增量对得上基线
+description: >-
+  对照 ${data_dir}/specs/ 的现状判 spec-delta.yaml（xspec check 是同一套）：added 的编号不能已经有、前缀是某份规格的、
+  大于那份规格已有的最大编号；modified 与 removed 的编号必须存在，modified 的正文要真的变了；同一个编号不能出现在两处。
+kind: script
+script: spec-delta
+params:
+  delta: "${output_dir}/spec-delta.yaml"
+  specs: "${data_dir}/specs/*.md"

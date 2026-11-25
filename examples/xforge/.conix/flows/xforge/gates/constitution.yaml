@@ -1,0 +1,10 @@
+name: constitution
+title: 设计对照了每条原则
+description: >-
+  读项目的 .conix/governance/constitution.yaml：design.md 的「## 原则对照」一节里，每条原则一行、以它的编号开头
+  （`- P1：……`），说清设计怎么守它，至少十来个字；不能写原则里没有的编号。项目没有这份文件时只提醒、不挡。
+kind: script
+script: constitution
+params:
+  constitution: .conix/governance/constitution.yaml
+  design: "${output_dir}/design.md"
