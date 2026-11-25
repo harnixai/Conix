@@ -1,7 +1,0 @@
-name: sources-cited
-title: 提纲里的来源都列进了简报
-kind: script
-script: sources-cited
-params:
-  outline: "${output_dir}/outline.json"
-  brief: "${output_dir}/brief.md"
