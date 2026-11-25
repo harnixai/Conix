@@ -9,8 +9,17 @@
 
 | 本地目录 | 来源仓库 | 来源路径 | 版本 | 用途 | 状态 |
 |---|---|---|---|---|---|
-| `3rds/harnix-flow/` | [harnixai/Harnix](https://github.com/harnixai/Harnix) | `crates/flow` | `Harnix-v0.4.7-2026111901`（`FLOW_API_VERSION` 1，格式 1） | 流程内核、存储、流程包、派工器与编写工具 | 已拷入 |
-
-拷贝用 `scripts/fetch-3rds.sh`：从本地的 Harnix 仓库（缺省 `../Harnix`，`HARNIX_DIR` 可改）按表里的发布标签整目录取出（`git archive`），与检出停在哪里无关。拷进来的 crate 不是 workspace 成员（`exclude`），格式与 clippy 不管它；它自己的测试单独跑：`cargo test --manifest-path 3rds/harnix-flow/Cargo.toml`。
+| ~~`3rds/harnix-flow/`~~ | [harnixai/Harnix](https://github.com/harnixai/Harnix) | `crates/flow` | `Harnix-v0.4.7-2026111901`（`FLOW_API_VERSION` 1，格式 1） | 流程内核、存储、流程包、派工器与编写工具 | 已分叉到 `crates/flow`，见下 |
 
 Agix 不在这里：它是 git submodule，位于 `agix/`。
+
+## 分叉记录：`crates/flow`
+
+流程库从 `Harnix-v0.4.7-2026111901` 的 `crates/flow` 分叉（`git archive` 原样取出），包名仍是 `harnix-flow`，成为 Conix
+workspace 的成员。为什么分叉、改成什么样见 `docs/design/flows.md`。目录里的 `rustfmt.toml` 关掉了格式化，与 Harnix 那份
+逐行可比：`diff -r <(git -C ../Harnix archive Harnix-v0.4.7-2026111901 crates/flow …) crates/flow` 看得到的就是全部改动。
+
+每一项改动落地时在这里记一行；往回提给 Harnix（issue 标签 `codix`，标题 `codix-NN：…`）时按这张表整理。
+
+| 改动 | 设计 | Conix 提交 | 已提给 Harnix |
+|---|---|---|---|

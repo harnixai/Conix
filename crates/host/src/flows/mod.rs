@@ -1,4 +1,4 @@
-//! 流程（architecture §8.6）：拷进 `3rds/harnix-flow` 的流程库，装在实例里。内核与存储、
+//! 流程（architecture §8.6）：分叉自 Harnix 的流程库（`crates/flow`），装在实例里。内核与存储、
 //! 流程包、派工器都用库的；会话由 [`session_host`] 经 Hub 开在嵌入的 Agix 上。端口的流程命令、
 //! `flow_*` 宿主工具、流程作业的触发都从这里进。
 

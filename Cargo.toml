@@ -1,7 +1,7 @@
 [workspace]
 resolver = "3"
 members = ["crates/*"]
-exclude = ["agix", "3rds", "archive"]
+exclude = ["agix", "archive"]
 
 [workspace.package]
 version = "0.1.8-2026112403"
@@ -23,10 +23,10 @@ client = { path = "crates/client" }
 host  = { path = "crates/host" }
 engine = { path = "crates/engine" }
 app   = { path = "crates/app" }
-# 拷进 3rds 的流程库（不是成员，scripts/fetch-3rds.sh 拷来）。
-harnix-flow = { path = "3rds/harnix-flow" }
+# 流程库：从 Harnix-v0.4.7 分叉，在 Conix 里改（docs/design/flows.md）；包名沿用，往回迁时对得上。
+harnix-flow = { path = "crates/flow" }
 
-# 与 Harnix flow 用同一个 YAML 库：flow 拷进 3rds 后不多出第二个。
+# 与流程库用同一个 YAML 库，不多出第二个。
 serde_yaml  = "0.9"
 serde       = { version = "1", features = ["derive"] }
 serde_json  = "1"

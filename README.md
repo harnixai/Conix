@@ -14,11 +14,10 @@ git -C agix checkout main
 Agix 的配置：`~/.conix/settings.json`，或环境变量 `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` /
 `ANTHROPIC_BASE_URL`。
 
-构建前先按 `3rds/INDEX.md` 把流程库拷进来（要有 Harnix 的本地检出，缺省 `../Harnix`，`HARNIX_DIR` 可改）：
+构建：
 
 ```sh
 git submodule update --init agix
-scripts/fetch-3rds.sh               # 3rds/harnix-flow
 cargo build -p conix
 cd ~/my-project && /path/to/conix   # 接入（或新建）这个项目的实例
 conix list --all                    # 本机的实例

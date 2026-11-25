@@ -1,0 +1,3 @@
+# 流程库从 Harnix 分叉而来（docs/design/flows.md §8）：不跟 Conix 的格式化，保持与 Harnix 那份逐行可比，
+# 往回迁时 diff 只有真正的改动。新代码照原有风格手写。
+disable_all_formatting = true

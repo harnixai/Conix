@@ -517,7 +517,7 @@ schema；`job_validate` 不落盘，回下 5 次触发时刻与护栏的实际�
 
 ### 8.6 流程
 
-流程用 Harnix 拆出来的库 `harnix-flow`（`3rds/harnix-flow/`，原样拷入，`scripts/fetch-3rds.sh`）：内核、
+流程用 Harnix 拆出来的库 `harnix-flow`（`crates/flow/`，从 Harnix-v0.4.7 分叉，治理相关的改动见 `flows.md`）：内核、
 存储、流程包、派工器（runner）都是库的，实例只做装配与宿主的那一半（`host/src/flows/`）。
 
 - **装配**（`flows::start`，实例起来时一次）：
