@@ -43,8 +43,6 @@ pub struct SessionSettings {
     pub deny: Vec<String>,
     /// `model.effort`。
     pub effort: Option<String>,
-    /// `prompt.append`。
-    pub prompt_append: Option<String>,
     /// `sandbox.network.mode`：`deny_all` / `allowlist` / `proxy` / `unrestricted`。
     pub network: Option<String>,
     /// `session.token_budget`：会话从创建起能花的 token（不计缓存命中）。
@@ -76,9 +74,6 @@ impl SessionSettings {
         }
         if let Some(e) = &self.effort {
             put(&["model", "effort"], json!(e));
-        }
-        if let Some(p) = &self.prompt_append {
-            put(&["prompt", "append"], json!(p));
         }
         if let Some(n) = &self.network {
             put(&["sandbox", "network", "mode"], json!(n));
@@ -148,7 +143,6 @@ mod tests {
             ask: vec!["Write".into()],
             deny: vec!["CronCreate".into()],
             effort: Some("high".into()),
-            prompt_append: Some("hi".into()),
             network: Some("deny_all".into()),
             token_budget: Some(2_000_000),
         };
@@ -157,7 +151,6 @@ mod tests {
             json!({
                 "permissions": {"mode": "acceptEdits", "ask": ["Write"], "deny": ["CronCreate"]},
                 "model": {"effort": "high"},
-                "prompt": {"append": "hi"},
                 "sandbox": {"network": {"mode": "deny_all"}},
                 "session": {"token_budget": 2_000_000},
             })

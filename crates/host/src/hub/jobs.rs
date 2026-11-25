@@ -35,14 +35,18 @@ impl Hub {
                         .map(Into::into),
                     // 无人值守的会话里模型再自建定时任务，就在 Conix 的作业与护栏之外了。
                     deny: vec!["CronCreate".into()],
-                    prompt_append: (!skills.is_empty()).then(|| {
-                        format!(
-                            "This is the scheduled job \"{}\". Use these skills: {}.",
-                            job.name,
-                            skills.join(", ")
-                        )
-                    }),
                     ..SessionSettings::default()
+                };
+                // 要用的 skills 写进这次的提示词，不放会话层的 `prompt.append`：那一层写了就整个替换项目、
+                // 场景设置里的 `prompt.append`（Agix 不按项合并），项目给所有会话的说明在这次触发里就没了。
+                let text = if skills.is_empty() {
+                    prompt.clone()
+                } else {
+                    format!(
+                        "This is the scheduled job \"{}\". Use these skills: {}.\n\n{prompt}",
+                        job.name,
+                        skills.join(", ")
+                    )
                 };
                 let origin = Origin::Job {
                     job: job.id.clone(),
@@ -72,7 +76,7 @@ impl Hub {
                             }),
                             audit: None,
                         },
-                        Some((sid, prompt.clone())),
+                        Some((sid, text)),
                     ),
                     Err(e) => (
                         JobEntry {

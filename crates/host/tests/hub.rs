@@ -1203,6 +1203,38 @@ async fn validating_a_job_saves_nothing_and_says_what_would_happen() {
     assert!(v.is_empty(), "校验不存");
 }
 
+/// 要用的 skills 写进这次触发的提示词，不进会话层的 `prompt.append`：那一层会整个替换项目设置里的。
+#[tokio::test]
+async fn a_jobs_skills_go_into_the_prompt_not_over_the_projects_prompt_append() {
+    let mut r = rig().await;
+    let mut j = simple_job("nightly", "跑测试");
+    if let port::JobKind::Simple { skills, .. } = &mut j.kind {
+        *skills = vec!["review".into(), "lint".into()];
+    }
+    let Reply::Job(job) = r.hub.handle(Command::SaveJob { job: j }).await.unwrap() else {
+        panic!()
+    };
+    r.hub
+        .handle(Command::RunJobNow {
+            job: job.id.clone(),
+            subject: None,
+            prompt_append: None,
+        })
+        .await
+        .unwrap();
+    r.events().await;
+    let create = r.calls("session.create").last().cloned().unwrap();
+    assert!(
+        create["options"]["settings"]["prompt"].is_null(),
+        "{create}"
+    );
+    let turn = r.calls("session.run_turn").last().cloned().unwrap();
+    assert_eq!(
+        turn["message"],
+        "This is the scheduled job \"nightly\". Use these skills: review, lint.\n\n跑测试"
+    );
+}
+
 /// 停下正在跑的那一次：打断它的会话，那一轮结束时记成手动停下，不算失败的原因写错。
 #[tokio::test]
 async fn stopping_a_running_firing_interrupts_its_session_and_records_why() {

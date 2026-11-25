@@ -378,9 +378,10 @@ conix（一个二进制）
   与建会话的时刻（会话列表的顺序、`#n` 按它）；没记过的按 `User`，时刻取引擎报的。子 Agent 的上级来自任务的
   `agent_session_id`。
 - 建会话一律带 `prompt_types: ["permission", "question"]`，项目根就是实例的项目。会话的其余选项（模式、ask / deny 规则、
-  `model.effort`、`prompt.append`、`sandbox.network.mode`、`session.token_budget`）进 `options.settings`（`hub::session_opts`），空的不写；
+  `model.effort`、`sandbox.network.mode`、`session.token_budget`）进 `options.settings`（`hub::session_opts`），空的不写；
   0.4 不再收 `options` 顶层的 `permission_mode` / `permission_rules` / `effort` / `prompt`（传了就 `INVALID_PARAMS`）。
-  `session.create` 回的 `clamped_options` 记日志。
+  `session.create` 回的 `clamped_options` 记日志。不写 `prompt.append`：会话层写了就整个替换项目、场景设置里的
+  （Agix 不按项合并），项目给所有会话的说明就丢了；作业要用的 skills 写进那次触发的提示词。
 
 帧、方法与领域事件、命令的对应：
 
