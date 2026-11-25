@@ -2,7 +2,7 @@ name: outline-shape
 title: 提纲的格式
 kind: check
 check: schema
-file: "${output_dir}/outline.json"
+file: "${output_dir}/outline.yaml"      # 按扩展名读成 YAML
 schema:
   type: object
   required: [title, sections]

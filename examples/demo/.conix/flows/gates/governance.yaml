@@ -1,0 +1,9 @@
+name: governance
+title: 按治理文件下结论
+kind: script
+script: governance
+params:
+  policy: governance/policy.yaml            # 项目的治理文件，相对项目
+  outline: "${output_dir}/outline.yaml"
+  brief: "${output_dir}/brief.md"
+  reviews: "${output_dir}/reviews"

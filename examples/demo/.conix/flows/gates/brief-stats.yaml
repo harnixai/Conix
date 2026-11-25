@@ -1,7 +1,8 @@
 name: brief-stats
 title: 简报的篇幅
 kind: command
-command: sh "$FLOW_WORKSPACE/tools/brief-stats.sh" brief.md
+# 项目自己的命令行（tools/notesctl.py）。命令行里不拼 ${...}：运行的目录给 cwd，项目在 $FLOW_WORKSPACE。
+command: python3 "$FLOW_WORKSPACE/tools/notesctl.py" stats brief.md
 cwd: "${output_dir}"
 result: json
 timeout_seconds: 30

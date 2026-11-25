@@ -1,0 +1,16 @@
+name: facts-shape
+title: 事实审读的格式
+kind: check
+check: schema
+file: "${output_dir}/reviews/facts.jsonl"   # JSONL 读成数组：一行一个元素
+schema:
+  type: array
+  minItems: 3
+  items:
+    type: object
+    required: [claim, verdict, source, quote]
+    properties:
+      claim: {type: string, minLength: 4}
+      verdict: {enum: [supported, unsupported]}
+      source: {type: string, pattern: "^(notes/[a-z0-9-]+\\.md)?$"}
+      quote: {type: string}

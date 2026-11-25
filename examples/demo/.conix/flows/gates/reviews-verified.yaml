@@ -1,0 +1,7 @@
+name: reviews-verified
+title: 事实审读的引文出自原文
+kind: command
+command: python3 "$FLOW_WORKSPACE/tools/notesctl.py" verify-reviews reviews --notes "$FLOW_WORKSPACE/notes"
+cwd: "${output_dir}"
+result: json
+timeout_seconds: 30

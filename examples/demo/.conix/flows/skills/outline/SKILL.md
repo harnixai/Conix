@@ -9,5 +9,14 @@ description: 读笔记，列出简报的提纲。
   （这一节依据的笔记路径，写成 `notes/<文件名>.md`，至少一份）。
 - 每份笔记至少被一节用到。
 
-把提纲写进 `${output_dir}/outline.json`：`{"title": "<简报标题>", "sections": [ ... ]}`。
+把提纲写成 YAML，放在 `${output_dir}/outline.yaml`：
+
+```yaml
+title: <简报标题>
+sections:
+  - id: timeouts
+    title: <这一节的中文标题>
+    sources: [notes/timeouts.md]
+```
+
 交付的输出是 `{"sections": [ ... ]}`，和文件里的 `sections` 一样。

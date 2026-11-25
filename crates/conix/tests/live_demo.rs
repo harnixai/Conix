@@ -1,16 +1,20 @@
 //! LIVE：仓库里的演示项目（`examples/demo`）照原样拷进项目里跑，真实的实例、引擎与模型。流程治理的每样都在
 //! 这里走一遍（design/flows.md）：
 //!
-//! - `brief`：三类门禁（`check` 的 schema / files / text / sealed，`script`，`command`）都真判过、证据进了运行记录；
-//!   子 Agent 站的交付核实过子 Agent（`delivery.agent`）；主会话在 DeepSeek 上，子 Agent 站与独立会话站点名
-//!   Claude 的模型，两家都真花了 token。最后一站人确认：模型做不了（没有工具），名单上没有的人做不了
-//!   （`roles.yaml`），实例的主人做了才结束，记成 `person`。
+//! - `brief`：一次运行把流程的功能全走到。
+//!   - 声明的门禁读模型写的 YAML（`outline.yaml`）、JSONL（两份审读）、Markdown，`check` 的 schema / files / text /
+//!     sealed 都真判过、证据进了运行记录。
+//!   - `command` 门禁跑项目自己的命令行（`tools/notesctl.py`）：数简报的字数，逐条核对审读里的引文出自原文。
+//!   - `script` 门禁（QuickJS）读项目的治理文件 `governance/policy.yaml`，对照交付物下"能不能签发"的结论。
+//!   - 多模型：主会话在 DeepSeek；分节的子 Agent 与汇总的独立会话在 Claude；审读站的两个工作项**同时**跑，
+//!     一个在 DeepSeek、一个在 Claude。两家都真花了 token；子 Agent 的交付核实过是答完了的子 Agent 给的。
+//!   - 两种授权：签发站人确认（模型没有这个工具、名单上没有的人做不了、实例的主人做了才过，记成 `person`）；
+//!     发布站经 MCP 在外部审批系统建单、在那边批了才过（Agix 的 `mcp.callTool`，记下审批人与单的链接）。
 //! - `digest`：每份笔记一个子运行，父任务拿到的是子流程声明的 `result`；`children` 是 `require: any`。
-//! - `publish`：外部审批 `via: mcp`。引擎没有 `mcp.callTool`（harnixai/Agix#111）时，这一站是 error 并写明缺什么；
-//!   有了就走完：建单、在演示的审批系统里批、记下审批人与单号。
+//! - `publish`：单独的外部审批，不开会话。
 //! - 作业：演示项目带的两个作业读得出来、克隆下来是停用的；简单作业立即跑一次就有结果。
 //!
-//! 演示项目里写的模型名换成 `.env` 里的；没有 Claude 的 key 就跳过多模型的那条。
+//! 演示项目里写的模型名换成 `.env` 里的；没有 Claude 的 key 就跳过 `brief`。
 
 mod live;
 
@@ -24,8 +28,8 @@ use port::{
 };
 use serde_json::Value;
 
-/// `brief` 一次：提纲、两三节、汇总，加上可能的打回。
-const RUN: Duration = Duration::from_secs(1200);
+/// `brief` 一次：提纲、两三节、汇总、两份审读，加上可能的打回。
+const RUN: Duration = Duration::from_secs(2400);
 
 fn demo() -> &'static Path {
     Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../examples/demo"))
@@ -47,8 +51,9 @@ fn providers(ds: &Endpoint, cl: &Endpoint) -> Value {
     })
 }
 
-/// 演示项目拷进实例的项目：流程里的模型名换成这次用的。
-fn install_demo(lv: &Live, cl: Option<&Endpoint>) {
+/// 演示项目拷进实例的项目。给了两家的模型就把 `brief` 里写的模型名换成这次用的：按上下文整段换，
+/// 要换成的名字可能就是演示里写的某一个（CLAUDE_MODEL 常是 claude-sonnet-5-5），逐个替换会改两遍。
+fn install_demo(lv: &Live, models: Option<(&Endpoint, &Endpoint)>) {
     let to = lv.project_path();
     let st = std::process::Command::new("cp")
         .arg("-R")
@@ -57,20 +62,39 @@ fn install_demo(lv: &Live, cl: Option<&Endpoint>) {
         .status()
         .unwrap();
     assert!(st.success(), "拷演示项目");
+    let Some((ds, cl)) = models else { return };
     let brief = Path::new(&to).join(".conix/flows/brief.yaml");
     let text = std::fs::read_to_string(&brief).unwrap();
-    // 先换独立会话的那个：要换成的模型可能就叫 claude-sonnet-5-5，先换子 Agent 的会被第二次替换再改一遍。
-    let (sub_agent, session) = match cl {
-        Some(cl) => (
-            cl.model.clone(),
+    let swaps = [
+        (
+            "kind: agent, model: claude-haiku-5-5",
+            format!("kind: agent, model: {}", cl.model),
+        ),
+        (
+            "provider: claude, model: claude-sonnet-5-5",
             format!("provider: claude, model: {}", cl.model),
         ),
-        None => (live::model(), format!("model: {}", live::model())),
-    };
-    let text = text
-        .replace("model: claude-sonnet-5-5", &session)
-        .replace("model: claude-haiku-5-5", &format!("model: {sub_agent}"));
-    std::fs::write(&brief, text).unwrap();
+        (
+            "provider: deepseek, model: deepseek-flash",
+            format!("provider: deepseek, model: {}", ds.model),
+        ),
+    ];
+    let mut out = String::new();
+    for line in text.lines() {
+        let mut l = line.to_string();
+        if let Some((from, to)) = swaps.iter().find(|(f, _)| line.contains(f)) {
+            l = line.replace(from, to);
+        }
+        out.push_str(&l);
+        out.push('\n');
+    }
+    for (from, _) in &swaps {
+        assert!(
+            text.contains(from),
+            "演示的 brief 里没有 {from}：改了演示要跟着改这里"
+        );
+    }
+    std::fs::write(&brief, out).unwrap();
 }
 
 fn rig() -> Option<(Endpoint, Endpoint, Live)> {
@@ -83,7 +107,7 @@ fn rig() -> Option<(Endpoint, Endpoint, Live)> {
         settings: Some(providers(&ds, &cl)),
         ..Default::default()
     });
-    install_demo(&lv, Some(&cl));
+    install_demo(&lv, Some((&ds, &cl)));
     Some((ds, cl, lv))
 }
 
@@ -174,41 +198,116 @@ fn confirm(station: &str, reason: Option<&str>) -> RunOp {
     }
 }
 
+/// 一个任务记录的会话在哪个模型上。
+fn model_of(all: &[port::SessionSummary], sid: &str) -> Option<String> {
+    all.iter()
+        .find(|x| x.id.0 == sid)
+        .map(|x| x.provenance.model.clone())
+}
+
+/// 外部审批：等 `station` 那条 MCP 的确认建好单，像审批人那样在演示的审批系统里批，返回单号。
+async fn approve_outside(lv: &Live, id: &RunId, station: &str) -> String {
+    let mut approval = Value::Null;
+    for _ in 0..240 {
+        let rec = record(lv, id);
+        let c = check(&rec, station, "confirm by editor").clone();
+        assert_ne!(c["status"], "error", "建单失败：{c}");
+        if rec["stations"][station]["approvals"]
+            .as_array()
+            .is_some_and(|a| !a.is_empty())
+        {
+            approval = rec;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+    assert!(
+        !approval.is_null(),
+        "外部审批没有动静：{}",
+        record(lv, id)["stations"][station]
+    );
+    let req = &approval["stations"][station]["approvals"][0]["request"];
+    let rid = req["id"]
+        .as_str()
+        .unwrap_or_else(|| panic!("建单的结果里没有 id：{req}"))
+        .to_string();
+    let st = std::process::Command::new("python3")
+        .args(["tools/approvals_mcp.py", "approve", &rid])
+        .current_dir(lv.project_path())
+        .status()
+        .unwrap();
+    assert!(st.success());
+    rid
+}
+
+/// 外部审批过了的那条确认：经 MCP、审批系统答的审批人、链到那张单。
+fn approved_outside(rec: &Value, station: &str, rid: &str) {
+    let last = rec["stations"][station]["confirms"]
+        .as_array()
+        .and_then(|v| v.last())
+        .cloned()
+        .expect("确认记录");
+    assert_eq!(
+        (last["via"].as_str(), last["by"]["kind"].as_str()),
+        (Some("mcp"), Some("mcp")),
+        "{last}"
+    );
+    // 流程写了 `link: url`：记的是单的链接，链到这张单。
+    assert!(
+        last["ref"]
+            .as_str()
+            .is_some_and(|r| r.ends_with(&format!("#{rid}"))),
+        "{last}"
+    );
+    assert_eq!(
+        last["by"]["id"].as_str(),
+        std::env::var("USER").ok().as_deref(),
+        "审批系统答的审批人：{last}"
+    );
+    assert_eq!(last["pass"], true, "{last}");
+}
+
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "live"]
-async fn the_demo_brief_passes_its_gates_on_two_models_and_ends_on_a_persons_sign_off() {
+async fn the_demo_brief_runs_every_kind_of_gate_on_two_models_and_both_kinds_of_sign_off() {
     let Some((ds, cl, lv)) = rig() else { return };
     let _log = LogOnPanic(&lv);
     let mut c = lv.start_trusted().await;
     c.answering(Answering::Auto);
     let id = start(&c, "brief", "服务可靠性：超时、重试与缓存", Value::Null).await;
 
-    // 一路走到最后一站等人签发：门禁不过的由 on_unmet 打回，不该停下等人。
-    let at_review = wait_run(&mut c, &id, "走到签发", |v| {
-        if v.stations.iter().any(|s| {
-            s.status == StationStatus::Unmet
-                && s.id.0 != "review"
-                && s.unmet.as_deref().is_some_and(|u| u.contains("error"))
-        }) {
-            panic!("门禁没得出结论：{:#?}", v.stations)
+    // 一路走到签发：门禁不过的由 on_unmet 打回，不该停下等人；门禁判不了（error）也不该有。
+    let at_sign_off = wait_run(&mut c, &id, "走到签发", |v| {
+        let stuck = match &v.summary.status {
+            RunStatus::Waiting { reason } => ["unmet", "failed", "held"].contains(&reason.as_str()),
+            _ => false,
+        };
+        if stuck
+            || v.stations.iter().any(|s| {
+                s.status == StationStatus::Unmet
+                    && s.unmet.as_deref().is_some_and(|u| u.contains("error"))
+            })
+        {
+            panic!("运行停下了：{:?}\n{:#?}", v.summary.status, v.stations)
         }
-        station(v, "review").status == StationStatus::Working
+        station(v, "sign-off").status == StationStatus::Working
             && matches!(v.summary.status, RunStatus::Waiting { .. })
     })
     .await;
-    for st in ["outline", "sections", "assemble"] {
+    for st in ["outline", "sections", "assemble", "reviews", "govern"] {
         assert_eq!(
-            station(&at_review, st).status,
+            station(&at_sign_off, st).status,
             StationStatus::Passed,
             "{st}"
         );
     }
 
-    // 三类门禁都真判过，证据进了运行记录。
+    // 声明的门禁：YAML、Markdown、JSONL 都真读过，证据进了运行记录。
     let rec = record(&lv, &id);
+    let out = rec["output_dir"].as_str().expect("输出目录").to_string();
     let outline = passed(&rec, "outline", "outline-shape");
     assert!(
-        outline["evidence"].to_string().contains("outline.json"),
+        outline["evidence"].to_string().contains("outline.yaml"),
         "{outline}"
     );
     let sections = passed(&rec, "sections", "sections-written");
@@ -219,28 +318,50 @@ async fn the_demo_brief_passes_its_gates_on_two_models_and_ends_on_a_persons_sig
         "{sections}"
     );
     passed(&rec, "assemble", "brief-shape");
-    let script = passed(&rec, "assemble", "sources-cited");
+    for g in ["facts-shape", "policy-shape"] {
+        let r = passed(&rec, "reviews", g);
+        assert!(r["evidence"].to_string().contains(".jsonl"), "{r}");
+    }
+    for f in [
+        "outline.yaml",
+        "brief.md",
+        "reviews/facts.jsonl",
+        "reviews/policy.jsonl",
+    ] {
+        assert!(Path::new(&out).join(f).is_file(), "{out}/{f}");
+    }
+
+    // 命令门禁：项目自己的命令行数了字数、逐条核对了引文。
+    let stats = passed(&rec, "assemble", "brief-stats");
     assert!(
-        script["metrics"]["sources"].as_u64().unwrap_or(0) >= 2,
-        "{script}"
+        stats["metrics"]["chars"].as_u64().unwrap_or(0) >= 300,
+        "{stats}"
     );
+    let verified = passed(&rec, "reviews", "reviews-verified");
     assert!(
-        script["evidence"].to_string().contains("brief.md"),
-        "脚本读过的文件由运行时记下：{script}"
+        verified["metrics"]["supported"].as_u64().unwrap_or(0) >= 1,
+        "{verified}"
     );
-    let command = passed(&rec, "assemble", "brief-stats");
+
+    // 脚本门禁：按治理文件下的结论，读过治理文件与两份审读。
+    let gov = passed(&rec, "govern", "governance");
+    // 运行记录里门禁的 summary 记在 `detail`。
     assert!(
-        command["metrics"]["chars"].as_u64().unwrap_or(0) >= 300,
-        "{command}"
+        gov["detail"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("可以签发"),
+        "{gov}"
     );
-    let sealed = passed(&rec, "review", "untouched");
-    assert!(
-        sealed["summary"].to_string().contains("checked") || sealed["detail"].is_string(),
-        "{sealed}"
-    );
-    let out = rec["output_dir"].as_str().expect("输出目录");
-    for f in ["outline.json", "brief.md"] {
-        assert!(Path::new(out).join(f).is_file(), "{out}/{f}");
+    assert_eq!(gov["metrics"]["rules"], 3, "治理文件的 style 三条：{gov}");
+    let read = gov["evidence"].to_string();
+    for f in [
+        "governance/policy.yaml",
+        "brief.md",
+        "facts.jsonl",
+        "policy.jsonl",
+    ] {
+        assert!(read.contains(f), "脚本读过的文件由运行时记下：{f} {gov}");
     }
 
     // 子 Agent 站：每节的交付都核实过是一个答完了的子 Agent 给的。
@@ -255,8 +376,8 @@ async fn the_demo_brief_passes_its_gates_on_two_models_and_ends_on_a_persons_sig
         assert_eq!(d["agent"]["status"], "done", "{t}");
     }
 
-    // 两个模型：子 Agent 跑在 Claude 上，独立会话站也是；主会话在 DeepSeek。
-    let main = at_review.main_session.clone();
+    // 多模型。子 Agent 跑在 Claude 上，汇总的独立会话也是；主会话在 DeepSeek。
+    let main = at_sign_off.main_session.clone();
     let main_tasks = match c
         .ok(Command::SessionTasks {
             session: main.clone(),
@@ -274,54 +395,71 @@ async fn the_demo_brief_passes_its_gates_on_two_models_and_ends_on_a_persons_sig
     for a in &agents {
         assert_eq!(a.model.as_deref(), Some(cl.model.as_str()), "{a:?}");
     }
-    let assemble = station(&at_review, "assemble")
+    let all = c.sessions().await;
+    let assemble = station(&at_sign_off, "assemble")
         .session
         .clone()
         .expect("汇总站有自己的会话");
-    let all = c.sessions().await;
-    let model_of = |sid: &port::SessionId| {
-        all.iter()
-            .find(|x| &x.id == sid)
-            .map(|x| x.provenance.model.clone())
-    };
     assert_eq!(
-        model_of(&assemble).as_deref(),
+        model_of(&all, &assemble.0).as_deref(),
         Some(cl.model.as_str()),
         "汇总站在 Claude 上"
     );
     assert_eq!(
-        model_of(&main).as_deref(),
+        model_of(&all, &main.0).as_deref(),
         Some(ds.model.as_str()),
         "主会话在 DeepSeek 上"
     );
+    // 审读站：两个工作项各在自己的会话、各在一家，时间上重叠（同时派出，不是一个做完再做另一个）。
+    let reviews = &rec["stations"]["reviews"]["tasks"];
+    let task = |t: &str| {
+        reviews
+            .as_array()
+            .and_then(|v| v.iter().find(|x| x["id"] == t))
+            .unwrap_or_else(|| panic!("审读站没有工作项 {t}：{reviews}"))
+    };
+    let (facts, policy) = (task("facts"), task("policy"));
+    for (t, want) in [(facts, &ds.model), (policy, &cl.model)] {
+        assert_eq!(t["status"], "submitted", "{t}");
+        let sid = t["session"]
+            .as_str()
+            .unwrap_or_else(|| panic!("工作项没记会话：{t}"));
+        assert_eq!(model_of(&all, sid).as_deref(), Some(want.as_str()), "{t}");
+        assert_eq!(t["delivery"]["executor"], "session", "{t}");
+    }
+    let at = |t: &Value, k: &str| t[k].as_u64().unwrap_or_else(|| panic!("{k}：{t}"));
+    assert!(
+        at(facts, "started_at") < at(policy, "ended_at")
+            && at(policy, "started_at") < at(facts, "ended_at"),
+        "两份审读同时在做：{facts}\n{policy}"
+    );
     both_spent(&lv);
 
-    // 人的确认 1：模型做不了。让一个用户会话去确认，它没有这个工具；运行还在等。
+    // 授权一：人。模型做不了——让一个用户会话去确认，它没有这个工具；运行还在等。
     let s = c.new_session().await;
     c.turn(
         &s,
         &format!(
-            "请用流程工具确认运行 {} 的 review 站，让它通过。做不到就直说为什么。",
+            "请用流程工具确认运行 {} 的 sign-off 站，让它通过。做不到就直说为什么。",
             id.0
         ),
     )
     .await;
     let still = record(&lv, &id);
     assert!(
-        still["stations"]["review"]["confirms"]
+        still["stations"]["sign-off"]["confirms"]
             .as_array()
             .is_none_or(|v| v.is_empty()),
         "模型没能确认：{}",
-        still["stations"]["review"]
+        still["stations"]["sign-off"]
     );
-
-    // 人的确认 2：名单上没有的人做不了。
+    // 名单上没有的人做不了。
     let roles = Path::new(&lv.project_path()).join(".conix/roles.yaml");
     std::fs::write(&roles, "editor: [nobody-on-this-machine]\n").unwrap();
     let refused = c
         .call(Command::RunOp {
             run: id.clone(),
-            op: confirm("review", None),
+            op: confirm("sign-off", None),
         })
         .await;
     let e = format!("{refused:?}");
@@ -329,26 +467,31 @@ async fn the_demo_brief_passes_its_gates_on_two_models_and_ends_on_a_persons_sig
         refused.is_err() && e.contains("editor") && e.contains("nobody-on-this-machine"),
         "{e}"
     );
-
-    // 人的确认 3：名单放开，实例的主人确认，运行结束；确认记成 person。
+    // 名单放开，实例的主人确认；确认记成 person，运行走到发布。
     std::fs::write(&roles, "editor: []\n").unwrap();
     c.ok(Command::RunOp {
         run: id.clone(),
-        op: confirm("review", Some("看过了，签发")),
-    })
-    .await;
-    wait_run(&mut c, &id, "签发后结束", |v| {
-        v.summary.status == RunStatus::Finished
+        op: confirm("sign-off", Some("看过了，签发")),
     })
     .await;
     let rec = record(&lv, &id);
-    let confirms = rec["stations"]["review"]["confirms"]
+    let last = rec["stations"]["sign-off"]["confirms"]
         .as_array()
+        .and_then(|v| v.last())
+        .cloned()
         .expect("确认记录");
-    let last = confirms.last().unwrap();
     assert_eq!(last["by"]["kind"], "person", "{last}");
     assert_eq!(last["pass"], true, "{last}");
     assert_eq!(last["reason"], "看过了，签发", "{last}");
+    passed(&rec, "sign-off", "untouched");
+
+    // 授权二：MCP。发布站在外部审批系统建单，那边批了才过。
+    let rid = approve_outside(&lv, &id, "publish").await;
+    wait_run(&mut c, &id, "批了之后结束", |v| {
+        v.summary.status == RunStatus::Finished
+    })
+    .await;
+    approved_outside(&record(&lv, &id), "publish", &rid);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -418,7 +561,7 @@ async fn the_demo_publish_asks_the_outside_approval_system() {
     )
     .await;
     // 两站都不开会话：check 是声明的门禁，approve 是外部审批。
-    let v = wait_run(&mut c, &id, "走到外部审批", |v| {
+    wait_run(&mut c, &id, "走到外部审批", |v| {
         station(v, "check").status == StationStatus::Passed
             && matches!(
                 station(v, "approve").status,
@@ -428,72 +571,12 @@ async fn the_demo_publish_asks_the_outside_approval_system() {
     .await;
     let rec = record(&lv, &id);
     passed(&rec, "check", "publish-ready");
-    // 等审批那一条出口有结论：建好单在等，或者引擎调不了 MCP 工具。
-    let mut approval = Value::Null;
-    for _ in 0..240 {
-        let rec = record(&lv, &id);
-        let c = check(&rec, "approve", "confirm by editor").clone();
-        let requested = rec["stations"]["approve"]["approvals"]
-            .as_array()
-            .is_some_and(|a| !a.is_empty());
-        if c["status"] == "error" || requested {
-            approval = rec;
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(500)).await;
-    }
-    assert!(!approval.is_null(), "外部审批没有动静：{:#?}", v.stations);
-    let c_rec = check(&approval, "approve", "confirm by editor");
-    if c_rec["status"] == "error" {
-        let detail = c_rec["detail"].as_str().unwrap_or_default();
-        assert!(
-            detail.contains("Agix#111"),
-            "调不了 MCP 工具时写明缺什么：{c_rec}"
-        );
-        eprintln!(
-            "pending: the engine has no mcp.callTool yet (harnixai/Agix#111); the approval was not made"
-        );
-        return;
-    }
-    // 引擎能调 MCP 工具了：单建好了，在演示的审批系统里批。
-    let req = &approval["stations"]["approve"]["approvals"][0]["request"];
-    let rid = req["id"]
-        .as_str()
-        .unwrap_or_else(|| panic!("建单的结果里没有 id：{req}"));
-    let st = std::process::Command::new("python3")
-        .args(["tools/approvals_mcp.py", "approve", rid])
-        .current_dir(lv.project_path())
-        .status()
-        .unwrap();
-    assert!(st.success());
+    let rid = approve_outside(&lv, &id, "approve").await;
     wait_run(&mut c, &id, "批了之后结束", |v| {
         v.summary.status == RunStatus::Finished
     })
     .await;
-    let rec = record(&lv, &id);
-    let last = rec["stations"]["approve"]["confirms"]
-        .as_array()
-        .and_then(|v| v.last())
-        .cloned()
-        .expect("确认记录");
-    assert_eq!(
-        (last["via"].as_str(), last["by"]["kind"].as_str()),
-        (Some("mcp"), Some("mcp")),
-        "{last}"
-    );
-    // 流程写了 `link: url`：记的是单的链接，链到这张单。
-    assert!(
-        last["ref"]
-            .as_str()
-            .is_some_and(|r| r.ends_with(&format!("#{rid}"))),
-        "{last}"
-    );
-    assert_eq!(
-        last["by"]["id"].as_str(),
-        std::env::var("USER").ok().as_deref(),
-        "审批系统答的审批人：{last}"
-    );
-    assert_eq!(last["pass"], true, "{last}");
+    approved_outside(&record(&lv, &id), "approve", &rid);
 }
 
 #[tokio::test(flavor = "multi_thread")]

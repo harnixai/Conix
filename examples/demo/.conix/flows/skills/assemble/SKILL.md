@@ -3,7 +3,7 @@ name: assemble
 description: 把各节汇总成一份简报。
 ---
 
-读 `${output_dir}/outline.json` 和 `${output_dir}/sections/` 下的每一节，写 `${output_dir}/brief.md`：
+读 `${output_dir}/outline.yaml` 和 `${output_dir}/sections/` 下的每一节，写 `${output_dir}/brief.md`：
 
 ```
 # <提纲里的 title>
@@ -27,6 +27,15 @@ description: 把各节汇总成一份简报。
 
 - 每一节的标题必须和提纲里的 `title` 完全一样，单独一行 `## <title>`。
 - 全文 300 到 3000 字。不要留 TODO、TBD。
+- 不用治理文件（`governance/policy.yaml`）禁用的说法；不写笔记里没有的数字和结论。
 - 写完不要再改分节稿和提纲。
+
+交付之前自己查一次篇幅（出口的门禁跑的就是它）：
+
+```sh
+python3 tools/notesctl.py stats <brief.md 的路径>
+```
+
+打印的 `verdict` 不是 `pass` 就按 `summary` 改好再查。
 
 交付 `{"file": "<brief.md 的路径>", "summary": "<摘要那几句>"}`。
