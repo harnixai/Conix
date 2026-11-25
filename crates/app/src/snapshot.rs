@@ -31,13 +31,12 @@ pub fn render_text(frame: &FrameState, size: Size) -> String {
 
 /// 与 `tests/snapshots/<name>.txt` 比较；`CONIX_UPDATE_SNAPSHOTS=1` 时改写它。
 pub fn assert_snapshot(name: &str, actual: &str) {
-    // 欢迎框里的版本每次发布都变：换成等宽的占位，快照不用跟着重写。
+    // 欢迎框里的版本每次发布都变：换成定长的占位，快照不用跟着重写。占位不能跟版本一样宽：版本从 0.1.9 到
+    // 0.1.10 就变宽了，所以占位后面补空白占住多出来的宽度，框的右边线不动（版本至少 x.y.z 五个字符）。
     let v = model::short_version();
-    let placeholder: String = v
-        .chars()
-        .map(|c| if c == '.' { '.' } else { 'x' })
-        .collect();
-    let actual = actual.replace(&format!("Conix {v}"), &format!("Conix {placeholder}"));
+    let placeholder = "x.x.x";
+    let pad = " ".repeat(v.len().saturating_sub(placeholder.len()));
+    let actual = actual.replace(&format!("Conix {v}"), &format!("Conix {placeholder}{pad}"));
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests/snapshots")
         .join(format!("{name}.txt"));
