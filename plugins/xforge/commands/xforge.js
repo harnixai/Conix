@@ -320,7 +320,9 @@ function bashProblem(cmd, e) {
 }
 
 function underNoise(path) {
-  return NOISE.some((n) => path.startsWith(n));
+  // 宿主的制品目录（Conix：运行的目录、流程包的数据与归档，docs/design/layout.md）也不是变更的改动。
+  const artifacts = C.input && typeof C.input.artifacts_dir === "string" && C.input.artifacts_dir ? `${C.input.artifacts_dir}/` : null;
+  return NOISE.some((n) => path.startsWith(n)) || (artifacts !== null && path.startsWith(artifacts));
 }
 
 async function gateUnclaimed(ch) {

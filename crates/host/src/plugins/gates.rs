@@ -52,6 +52,8 @@ impl PluginCalls {
                 "outputs": outputs,
                 "workspace": workspace,
                 "project_root": run.project_root,
+                // 项目的制品目录名（docs/design/layout.md）：插件判"改了什么"时不算它。
+                "artifacts_dir": self.engine.get().and_then(|e| e.layout()).and_then(|l| l.artifacts.clone()),
             }),
             workspace,
         )

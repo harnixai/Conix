@@ -397,7 +397,7 @@ XForge 原来的文件格式（回执、投影、审计链、多方案）第一�
 
 变更 id：`<YYYYMMDD>-<由标题得的 ASCII 短名>`，重名加 `-2`、`-3`。
 
-**插件函数**（Conix 给的 `input`：`{gate | step, run, flow, station, inputs, outputs, workspace, project_root, item?}`；
+**插件函数**（Conix 给的 `input`：`{gate | step, run, flow, station, inputs, outputs, workspace, project_root, artifacts_dir, item?}`；
 变更 id 一律从 `outputs.open.change` 取）：
 
 | 函数 | 做什么 |
