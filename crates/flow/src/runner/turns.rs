@@ -370,10 +370,10 @@ pub(crate) fn corrections_for(v: &crate::RunView, station: &str, task: &str) -> 
                     out.push(format!("{} ({})", c.label, parts.join("; ")));
                 }
             }
-            "gate" if only => out.push(if c.detail.is_empty() {
+            "gate" if only => out.push(if c.detail.is_empty() && c.findings.is_empty() {
                 c.label.clone()
             } else {
-                format!("{} ({})", c.label, c.detail)
+                format!("{} ({})", c.label, c.explain())
             }),
             _ => {}
         }
@@ -729,7 +729,8 @@ mod tests {
             status: CheckStatus::Fail,
             detail: detail.into(),
             at: 0,
-        };
+            ..Default::default()
+};
         let one = "{name: f, stations: [{id: a, executor: {kind: session, scene: harnix}, skill: s, output: {type: object}, exit: [{kind: output}]}]}";
         let many = "{name: f, stations: [{id: a, tasks: [{id: x, executor: {kind: session, scene: harnix}, skill: s}, {id: y, executor: {kind: external}}], output: {type: object}, exit: [{kind: output}]}]}";
         // Its own output: yes; another task's part of the same check: no.

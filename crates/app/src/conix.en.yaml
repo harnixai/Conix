@@ -67,3 +67,8 @@ jobs:
 # settings.json defines no providers; the CONIX_MODEL environment variable wins. Unset = Agix's default.
 # engine:
 #   model: claude-sonnet-4-6
+
+# Flows. A command gate (kind: command) runs a command on this machine: trusted runs them in trusted
+# projects only (the default); off never runs them.
+# flows:
+#   command_gates: trusted

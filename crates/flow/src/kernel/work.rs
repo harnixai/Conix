@@ -112,6 +112,7 @@ pub(crate) fn task_work(
             guard: rec.def.guard,
             root: workspace.as_ref().and_then(|p| p.to_str()),
             output_dir: rec.output_dir.as_deref(),
+            reworked: rec.stations.get(sid).and_then(|s| s.reworked.as_ref()),
         })),
         _ => None,
     };

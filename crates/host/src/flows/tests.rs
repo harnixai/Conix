@@ -269,6 +269,7 @@ async fn a_flow_jobs_flow_is_resolved_and_its_inputs_checked() {
             worktrees_dir: dir.path().join(".wkts"),
             workspaces_dir: dir.path().join("ws"),
             policies_file: None,
+            command_gates: true,
         },
     )
     .await
@@ -311,6 +312,7 @@ async fn project_runs_span_flows_and_an_ended_run_is_run_again() {
             worktrees_dir: dir.path().join(".wkts"),
             workspaces_dir: dir.path().join("ws"),
             policies_file: None,
+            command_gates: true,
         },
     )
     .await

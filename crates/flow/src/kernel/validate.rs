@@ -992,7 +992,7 @@ pub fn part_problems(kind: PartKind, name: &str, text: &str, packs: &dyn Packs) 
             Err(e) => out.push(format!("not a gate: {e}")),
             Ok(g) => {
                 named(&g.name, &mut out);
-                out.extend(gate_problems(&g, &packs.catalog()));
+                out.extend(gate_problems(&g, packs));
             }
         },
         PartKind::Hook => match super::def::parse_part::<HookDef>(text, "hook") {
@@ -1002,14 +1002,57 @@ pub fn part_problems(kind: PartKind, name: &str, text: &str, packs: &dyn Packs) 
                 out.extend(hook_problems(&h));
             }
         },
+        PartKind::Script => {
+            if text.trim().is_empty() {
+                out.push("it is empty".to_string());
+            }
+            #[cfg(feature = "script")]
+            out.extend(crate::runner::script::problems(text));
+        }
     }
     out
 }
 
-fn gate_problems(g: &GateDef, catalog: &Catalog) -> Vec<String> {
+fn gate_problems(g: &GateDef, packs: &dyn Packs) -> Vec<String> {
+    use super::parts::MAX_SCRIPT_SECONDS;
+    let catalog = packs.catalog();
     let mut out = vec![];
+    // Which fields go with which kind (and, for `check`, with which checker): one that is set on
+    // a gate it does not go with is a mistake the author should hear about, not a silent no-op.
     let tool_fields = g.tool.is_some() || !g.args.is_null() || !g.assert.is_empty();
-    let command_fields = g.command.is_some() || g.cwd.is_some() || g.timeout_seconds.is_some();
+    let command_only = g.command.is_some() || g.cwd.is_some() || !g.env.is_empty() || g.result.is_some();
+    let check_fields = g.check.is_some()
+        || !g.paths.is_empty()
+        || g.non_empty.is_some()
+        || !g.not_containing.is_empty()
+        || g.file.is_some()
+        || g.read_as.is_some()
+        || g.schema.is_some()
+        || !g.matches.is_empty()
+        || !g.not_matches.is_empty()
+        || !g.value.is_null();
+    let script_fields = g.script.is_some() || g.function.is_some() || !g.params.is_null();
+    let others = |out: &mut Vec<String>, kind: &str, tool: bool, command: bool, check: bool, script: bool, timeout: bool| {
+        let mut extra = vec![];
+        if tool && tool_fields {
+            extra.push("tool, args and assert go with a tool gate");
+        }
+        if command && command_only {
+            extra.push("command, cwd, env and result go with a command gate");
+        }
+        if check && check_fields {
+            extra.push("check and its fields go with a check gate");
+        }
+        if script && script_fields {
+            extra.push("script, function and params go with a script gate");
+        }
+        if timeout && g.timeout_seconds.is_some() {
+            extra.push("timeout_seconds goes with a command or script gate");
+        }
+        for e in extra {
+            out.push(format!("a {kind} gate: {e}"));
+        }
+    };
     match g.kind {
         GateKind::Tool => {
             match &g.tool {
@@ -1031,9 +1074,7 @@ fn gate_problems(g: &GateDef, catalog: &Catalog) -> Vec<String> {
                     ));
                 }
             }
-            if command_fields {
-                out.push("command, cwd and timeout_seconds go with a command gate".to_string());
-            }
+            others(&mut out, "tool", false, true, true, true, true);
         }
         GateKind::Command => {
             if !catalog.command_gates {
@@ -1045,28 +1086,126 @@ fn gate_problems(g: &GateDef, catalog: &Catalog) -> Vec<String> {
             if g.timeout_seconds.is_some_and(|t| t == 0 || t > MAX_GATE_SECONDS) {
                 out.push(format!("timeout_seconds must be between 1 and {MAX_GATE_SECONDS}"));
             }
-            if tool_fields {
-                out.push("tool, args and assert go with a tool gate".to_string());
+            for e in &g.env {
+                let name = e.strip_suffix('*').unwrap_or(e);
+                let ok = !name.is_empty()
+                    && name.chars().next().is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+                    && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+                if !ok {
+                    out.push(format!("env {e:?}: a variable name, which may end in *"));
+                }
             }
+            others(&mut out, "command", true, false, true, true, false);
+        }
+        GateKind::Check => {
+            check_problems(g, &mut out);
+            others(&mut out, "check", true, true, false, true, true);
+        }
+        GateKind::Script => {
+            match (&g.script, &g.function) {
+                (Some(_), Some(_)) => out.push("a script gate runs a script or a function, not both".to_string()),
+                (None, None) => out.push("a script gate names its script (or a function of the application)".to_string()),
+                (Some(sc), None) => {
+                    if packs.part(PartKind::Script, sc).is_none() {
+                        out.push(format!("there is no script {sc} (scripts/{sc}.js)"));
+                    }
+                }
+                (None, Some(f)) => {
+                    if !catalog.gates.contains(f) {
+                        out.push(format!("the application has no function {f} for gates"));
+                    }
+                }
+            }
+            if g.timeout_seconds.is_some_and(|t| t == 0 || t > MAX_SCRIPT_SECONDS) {
+                out.push(format!("timeout_seconds must be between 1 and {MAX_SCRIPT_SECONDS}"));
+            }
+            others(&mut out, "script", true, true, true, false, false);
         }
         GateKind::Host => {
             if !catalog.gates.contains(&g.name) {
                 out.push(format!("the application has no check named {}", g.name));
             }
-            if tool_fields || command_fields {
+            if tool_fields || command_only || check_fields || script_fields || g.timeout_seconds.is_some() {
                 out.push("a host gate has nothing but its name, title and description".to_string());
             }
         }
     }
-    for r in refs_in_value(&g.args).iter().chain(
-        g.cwd.iter().flat_map(|c| refs_in(c).into_iter().map(String::from).collect::<Vec<_>>()).collect::<Vec<_>>().iter(),
-    ) {
+    let mut refs = refs_in_value(&g.args);
+    refs.extend(refs_in_value(&g.value));
+    refs.extend(refs_in_value(&g.params));
+    for s in g.cwd.iter().chain(g.file.iter()).chain(g.paths.iter()) {
+        refs.extend(refs_in(s).into_iter().map(String::from));
+    }
+    for r in refs {
         let root = r.split(['.', '[']).next().unwrap_or("");
         if !ROOTS.contains(&root) {
             out.push(format!("reference {r}: unknown root {root:?}"));
         }
     }
     out
+}
+
+/// A `check` gate's own problems: its checker, the fields that checker needs, and nothing it
+/// does not take.
+fn check_problems(g: &GateDef, out: &mut Vec<String>) {
+    use super::parts::CheckKind as K;
+    let Some(kind) = g.check else {
+        out.push("a check gate says which check: files, schema, text, output or sealed".to_string());
+        return;
+    };
+    // (field, set?, the checkers it goes with)
+    let fields: [(&str, bool, &[K]); 9] = [
+        ("paths", !g.paths.is_empty(), &[K::Files]),
+        ("non_empty", g.non_empty.is_some(), &[K::Files]),
+        ("not_containing", !g.not_containing.is_empty(), &[K::Files]),
+        ("file", g.file.is_some(), &[K::Schema, K::Text]),
+        ("as", g.read_as.is_some(), &[K::Schema]),
+        ("schema", g.schema.is_some(), &[K::Schema, K::Output]),
+        ("matches", !g.matches.is_empty(), &[K::Text]),
+        ("not_matches", !g.not_matches.is_empty(), &[K::Text]),
+        ("value", !g.value.is_null(), &[K::Output]),
+    ];
+    let name = serde_json::to_value(kind).ok().and_then(|v| v.as_str().map(String::from)).unwrap_or_default();
+    for (field, set, with) in fields {
+        if set && !with.contains(&kind) {
+            out.push(format!("check {name} takes no {field}"));
+        }
+    }
+    match kind {
+        K::Files => {
+            if g.paths.is_empty() {
+                out.push("check files needs paths".to_string());
+            }
+        }
+        K::Schema | K::Text => {
+            if g.file.as_deref().is_none_or(|f| f.trim().is_empty()) {
+                out.push(format!("check {name} needs a file"));
+            }
+        }
+        K::Output | K::Sealed => {}
+    }
+    if matches!(kind, K::Schema | K::Output) {
+        match &g.schema {
+            None => out.push(format!("check {name} needs a schema")),
+            Some(s) => {
+                if let Err(e) = jsonschema::meta::validate(s) {
+                    out.push(format!("schema: {e}"));
+                } else if let Err(e) = jsonschema::validator_for(s) {
+                    out.push(format!("schema: {e}"));
+                }
+            }
+        }
+    }
+    if kind == K::Text {
+        if g.matches.is_empty() && g.not_matches.is_empty() {
+            out.push("check text needs matches or not_matches".to_string());
+        }
+        for re in g.matches.iter().chain(&g.not_matches) {
+            if let Err(e) = regex::Regex::new(re) {
+                out.push(format!("{re:?} is not a regular expression: {e}"));
+            }
+        }
+    }
 }
 
 fn hook_problems(h: &HookDef) -> Vec<String> {

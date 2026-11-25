@@ -109,6 +109,7 @@ pub async fn run(name: String, project: PathBuf) -> Result<()> {
             worktrees_dir: host::flows::worktrees_root(&project),
             workspaces_dir: state.flow_workspaces(),
             policies_file: Some(state.run_policies()),
+            command_gates: cfg.flows.command_gates != config::CommandGates::Off,
         },
     )
     .await;

@@ -159,12 +159,72 @@ pub struct TaskContext<'a> {
     pub root: Option<&'a str>,
     /// Where the run's deliverables go, resolved.
     pub output_dir: Option<&'a str>,
+    /// Why this round started over, when a rework started it.
+    pub reworked: Option<&'a super::run::ReworkRec>,
 }
 
 /// What a sub-agent task's sub-agent is named by (the `Agent` tool's `description`), so the
 /// module can tell it apart among the main session's tasks.
 pub fn agent_tag(run: &str, station: &str, task: &str) -> String {
     format!("flow:{run}/{station}/{task}")
+}
+
+/// Why the round started over: what was not met where, so the session fixes that and not
+/// something else.
+fn reworked_text(r: &super::run::ReworkRec) -> String {
+    let mut s = match &r.from {
+        Some(from) => format!("- This round starts over because station `{from}` was not met:\n"),
+        None => format!("- This round starts over: {}\n", r.reason),
+    };
+    for c in &r.unmet {
+        s.push_str(&format!("  - {}: {}\n", c.label, c.explain()));
+    }
+    s
+}
+
+/// What a `check` gate asks for, said plainly: the session can make sure of it before handing in.
+fn check_text(g: &GateDef) -> String {
+    use super::parts::CheckKind as K;
+    let list = |v: &[String]| v.iter().map(|p| format!("`{p}`")).collect::<Vec<_>>().join(", ");
+    let schema = || g.schema.as_ref().map(|v| format!("```json\n{}\n```", pretty(v))).unwrap_or_default();
+    match g.check {
+        Some(K::Files) => {
+            let mut t = format!("It checks that each of {} names a file", list(&g.paths));
+            if g.non_empty != Some(false) {
+                t.push_str(" that is not empty");
+            }
+            if !g.not_containing.is_empty() {
+                t.push_str(&format!(" and holds none of {}", list(&g.not_containing)));
+            }
+            t.push('.');
+            t
+        }
+        Some(K::Schema) => format!(
+            "It reads every file of `{}`{} and checks it against this JSON Schema:\n\n{}",
+            g.file.as_deref().unwrap_or_default(),
+            g.read_as
+                .map(|a| format!(" (as {})", serde_json::to_value(a).ok().and_then(|v| v.as_str().map(String::from)).unwrap_or_default()))
+                .unwrap_or_default(),
+            schema()
+        ),
+        Some(K::Text) => {
+            let mut parts = vec![];
+            if !g.matches.is_empty() {
+                parts.push(format!("match each of {}", list(&g.matches)));
+            }
+            if !g.not_matches.is_empty() {
+                parts.push(format!("match none of {}", list(&g.not_matches)));
+            }
+            format!("Every file of `{}` must {} (regular expressions).", g.file.as_deref().unwrap_or_default(), parts.join(" and "))
+        }
+        Some(K::Output) => format!(
+            "It checks {} against this JSON Schema:\n\n{}",
+            if g.value.is_null() { "the run's context".to_string() } else { format!("`{}`", g.value) },
+            schema()
+        ),
+        Some(K::Sealed) => "It checks that no file an earlier gate of this run read has changed since.".into(),
+        None => String::new(),
+    }
 }
 
 pub fn render(t: &TaskContext) -> String {
@@ -185,6 +245,9 @@ pub fn render(t: &TaskContext) -> String {
     ));
     if let Some(item) = t.item {
         s.push_str(&format!("- Your item:\n\n```json\n{}\n```\n", pretty(item)));
+    }
+    if let Some(r) = t.reworked {
+        s.push_str(&reworked_text(r));
     }
     if t.executor.is_some_and(Executor::in_main) {
         s.push_str(
@@ -259,7 +322,11 @@ pub fn render(t: &TaskContext) -> String {
                 "- Gate `{gate}`: {what} It runs `{}` once your output is in.\n",
                 g.command.as_deref().unwrap_or_default()
             )),
-            GateKind::Host => s.push_str(&format!("- Gate `{gate}`: {what}\n")),
+            GateKind::Check => s.push_str(&format!("- Gate `{gate}`: {what} {}\n", check_text(g))),
+            GateKind::Script if g.script.is_some() => s.push_str(&format!(
+                "- Gate `{gate}`: {what} A script reads the run's files once your output is in.\n"
+            )),
+            GateKind::Script | GateKind::Host => s.push_str(&format!("- Gate `{gate}`: {what}\n")),
         }
     }
     s.push_str(&permissions_text(t.permissions, t.guarded, t.guard, t.root));
@@ -406,6 +473,7 @@ mod tests {
             guard: Guard::Strict,
             root: None,
             output_dir: None,
+            reworked: None,
         }
     }
 

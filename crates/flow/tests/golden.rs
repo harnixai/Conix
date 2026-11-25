@@ -148,7 +148,7 @@ async fn play(case: &Path) -> (Value, String) {
             Step::Advance { ms } => clock.advance(*ms),
             Step::Gate { station, gate, pass, detail } => {
                 let round = eng.record(&run).await.unwrap().stations[station].round;
-                eng.gate_result(&run, station, round, gate, GateResult { pass: *pass, detail: detail.clone() }).await.expect(&at);
+                eng.gate_result(&run, station, round, gate, if *pass { GateResult::passed(detail.clone()) } else { GateResult::failed(detail.clone()) }).await.expect(&at);
             }
         }
     }

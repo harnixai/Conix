@@ -173,6 +173,7 @@ async fn xforge_installs_offers_both_flows_and_carries_a_change_from_open_to_arc
             worktrees_dir: project_path.join(".wkts"),
             workspaces_dir: home.path().join("ws"),
             policies_file: None,
+            command_gates: true,
         },
     )
     .await

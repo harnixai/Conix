@@ -144,6 +144,14 @@
       ],
       "entered_at": 1794787202000,
       "left_at": 1794787203000,
+      "reworked": {
+        "at": 1794787202000,
+        "by": {
+          "id": "golden",
+          "kind": "device"
+        },
+        "reason": "the wrong version"
+      },
       "round": 3,
       "rounds_total": 3,
       "status": "passed",

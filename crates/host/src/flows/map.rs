@@ -224,13 +224,7 @@ pub(crate) fn run_view(v: &harnix_flow::RunView) -> port::RunView {
             let unmet = v.unmet.get(&s.id).map(|checks| {
                 checks
                     .iter()
-                    .map(|c| {
-                        if c.detail.is_empty() {
-                            c.label.clone()
-                        } else {
-                            c.detail.clone()
-                        }
-                    })
+                    .map(|c| c.explain())
                     .collect::<Vec<_>>()
                     .join("; ")
             });

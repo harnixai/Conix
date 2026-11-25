@@ -633,6 +633,7 @@ impl<'a> M<'a> {
         r.left_at = None;
         r.checks.clear();
         r.forced = None;
+        r.reworked = None;
         let round = r.round;
         if let Some(why) = skip {
             r.status = StationStatus::Skipped;
@@ -699,7 +700,8 @@ impl<'a> M<'a> {
                                 status: CheckStatus::Fail,
                                 detail: foreach_problem(items, &other),
                                 at: now,
-                            }];
+                                ..Default::default()
+}];
                             self.emit("station.entered", Some(sid), None, json!({"round": round}));
                             self.emit("station.unmet", Some(sid), None, json!({"round": round}));
                             self.log(
@@ -1014,7 +1016,8 @@ impl<'a> M<'a> {
                         status: CheckStatus::Fail,
                         detail: foreach_problem(&items, &other),
                         at: now,
-                    }),
+                        ..Default::default()
+}),
                 }
             }
         }
@@ -1023,7 +1026,7 @@ impl<'a> M<'a> {
                 TaskStatus::Failed => t.error.clone().unwrap_or_else(|| "failed".into()),
                 TaskStatus::Cancelled => "cancelled".into(),
                 _ => continue,
-            };
+};
             checks.push(CheckRec {
                 cond: None,
                 kind: "task".into(),
@@ -1032,11 +1035,14 @@ impl<'a> M<'a> {
                 status: CheckStatus::Fail,
                 detail,
                 at: now,
+                ..Default::default()
             });
         }
         for (i, c) in st.exit.iter().enumerate() {
             use super::def::ExitCond as C;
             let mut at = now;
+            // A gate's result as it came in: its findings, evidence and metrics go on with it.
+            let mut carried: Option<CheckRec> = None;
             let (status, detail) = match c {
                 C::Output { .. } => {
                     let mut bad = vec![];
@@ -1058,7 +1064,7 @@ impl<'a> M<'a> {
                 }
                 C::Gate { gate, .. } => match self.rec.parts.gates.get(gate).cloned() {
                     None => (
-                        CheckStatus::Fail,
+                        CheckStatus::Error,
                         format!("gate {gate} was not in the packs when the run started"),
                     ),
                     Some(g) if g.kind == GateKind::Tool => {
@@ -1070,7 +1076,8 @@ impl<'a> M<'a> {
                                 None => (CheckStatus::Pass, String::new()),
                                 Some(d) => (CheckStatus::Fail, d),
                             },
-                            Err(e) => (CheckStatus::Fail, format!("{tool} failed: {e}")),
+                            // The tool did not answer: nothing the station can fix.
+                            Err(e) => (CheckStatus::Error, format!("{tool} failed: {e}")),
                         }
                     }
                     Some(_) => match r
@@ -1080,6 +1087,7 @@ impl<'a> M<'a> {
                 {
                     Some(k) => {
                         at = k.at;
+                        carried = Some(k.clone());
                         (k.status, k.detail.clone())
                     }
                     None => {
@@ -1121,7 +1129,8 @@ impl<'a> M<'a> {
                         )
                     }
                 }
-            };
+};
+            let carried = carried.unwrap_or_default();
             checks.push(CheckRec {
                 cond: Some(i),
                 kind: c.kind().into(),
@@ -1130,9 +1139,12 @@ impl<'a> M<'a> {
                 status,
                 detail,
                 at,
+                findings: carried.findings,
+                evidence: carried.evidence,
+                metrics: carried.metrics,
             });
         }
-        let fail = checks.iter().any(|c| c.status == CheckStatus::Fail);
+        let fail = checks.iter().any(|c| matches!(c.status, CheckStatus::Fail | CheckStatus::Error));
         let wait = checks.iter().any(|c| c.status == CheckStatus::Wait);
         self.st(sid).checks = checks;
         if fail {
@@ -1145,13 +1157,17 @@ impl<'a> M<'a> {
             let unmet: Vec<CheckRec> = self.rec.stations[sid]
                 .checks
                 .iter()
-                .filter(|c| c.status == CheckStatus::Fail)
+                .filter(|c| matches!(c.status, CheckStatus::Fail | CheckStatus::Error))
                 .cloned()
                 .collect();
             let data = json!({"round": round, "unmet": unmet});
             self.emit("station.unmet", Some(sid), None, data.clone());
             self.log("unmet", Some(sid), None, data);
-            self.on_unmet(sid);
+            // A gate that did not conclude is not the station's to fix: no automatic rework, a
+            // person looks at it and runs the gates again.
+            if !unmet.iter().any(|c| c.status == CheckStatus::Error) {
+                self.on_unmet(sid, unmet);
+            }
             true
         } else if wait {
             self.st(sid).status = StationStatus::Working;
@@ -1173,7 +1189,7 @@ impl<'a> M<'a> {
     }
 
     /// `on_unmet`: rework automatically while under `max` and the rework limit.
-    fn on_unmet(&mut self, sid: &str) -> bool {
+    fn on_unmet(&mut self, sid: &str, unmet: Vec<CheckRec>) -> bool {
         let Some(u) = self.def.station(sid).and_then(|s| s.on_unmet.clone()) else {
             return false;
         };
@@ -1184,6 +1200,11 @@ impl<'a> M<'a> {
         let by = std::mem::replace(&mut self.by, Actor::flow("auto"));
         self.rework(&u.rework_to, None, &format!("on_unmet of {sid}"));
         self.by = by;
+        // The round that starts over is told what was not met, findings and all.
+        if let Some(r) = self.st(&u.rework_to).reworked.as_mut() {
+            r.from = Some(sid.to_string());
+            r.unmet = unmet;
+        }
         true
     }
 
@@ -1239,6 +1260,8 @@ impl<'a> M<'a> {
         self.emit("station.reworked", Some(to), None, data.clone());
         self.log("rework", Some(to), None, data);
         self.enter(to, partial);
+        let rec = super::run::ReworkRec { by: self.by.clone(), at: now, reason: reason.to_string(), from: None, unmet: vec![] };
+        self.st(to).reworked = Some(rec);
     }
 
     // ── run level ───────────────────────────────────────────────────────────

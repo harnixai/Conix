@@ -20,7 +20,9 @@ name = "harnix_flow"
 # (`tests/crate-metadata.mjs`); `tests/deps.rs` keeps Harnix and Agix out.
 
 [features]
-default = ["runner", "webhooks"]
+default = ["runner", "webhooks", "script"]
+# Script gates (`kind: script` with a `script` part), run in an embedded QuickJS.
+script = ["runner", "dep:rquickjs"]
 # The runner: carrying a run's work out in sessions a host provides (`runner::SessionHost`),
 # gates, hooks, worktrees. Off, the crate is the kernel alone.
 runner = ["dep:tokio-util", "dep:futures", "tokio/time", "tokio/process", "tokio/macros", "tokio/io-util"]
@@ -46,6 +48,10 @@ tokio       = { version = "1", features = ["rt", "sync"] }
 tracing     = "0.1"
 # The file store's flush to disk (`fsync`) on macOS; the local date of an output directory's name.
 libc        = "0.2"
+# `check: text` gates (Conix, docs/design/flows.md §2.1).
+regex       = "1"
+# The script gates' runtime (feature `script`; Conix, docs/design/flows.md §2.3).
+rquickjs    = { version = "0.12", default-features = false, features = ["std"], optional = true }
 # The runner's tasks, tracked and told to stop.
 tokio-util  = { version = "0.7", features = ["rt"], optional = true }
 # A session read as a stream of frames.

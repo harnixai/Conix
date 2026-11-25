@@ -80,8 +80,8 @@ pub use kernel::parts::{
 };
 pub use kernel::protocol::{agent_tag, ask_rules, skill_body, STRUCTURED_OUTPUT_TOOL};
 pub use kernel::run::{
-    run_schema, Actor, BoundSession, CheckRec, CheckStatus, ConfirmRec, ForcedRec, History, Lease, ParentRef,
-    AskRec, PauseRec, Phase, RunQuery, RunRecord, RunStatus, RunSummary, RunView, StationRec,
+    run_schema, Actor, BoundSession, CheckRec, CheckStatus, ConfirmRec, Evidence, Finding, ForcedRec, GateVerdict, History, Lease, ParentRef, Severity,
+    AskRec, PauseRec, Phase, ReworkRec, RunQuery, RunRecord, RunStatus, RunSummary, RunView, StationRec,
     StationStatus, TaskRec, TaskStatus, Trigger, Usage, Workspace, WorktreeEnd, WorktreeOutcome,
     WorktreeRec, AGENT_KIND, DEVICE_KIND, FLOW_KIND,
 };

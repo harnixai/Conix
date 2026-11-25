@@ -63,3 +63,7 @@ jobs:
 # CONIX_MODEL 环境变量优先。不写就用 Agix 的缺省。
 # engine:
 #   model: claude-sonnet-4-6
+
+# 流程。命令门禁（kind: command）会在这台机器上执行命令：trusted 是受信的项目里才跑（缺省），off 一律不跑。
+# flows:
+#   command_gates: trusted

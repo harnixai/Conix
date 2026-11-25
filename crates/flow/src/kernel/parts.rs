@@ -30,10 +30,12 @@ pub enum PartKind {
     Policy,
     Gate,
     Hook,
+    /// A `script` gate's JavaScript (`scripts/<name>.js`), run by the library's own runtime.
+    Script,
 }
 
 impl PartKind {
-    pub const ALL: [PartKind; 5] = [Self::Skill, Self::Rule, Self::Policy, Self::Gate, Self::Hook];
+    pub const ALL: [PartKind; 6] = [Self::Skill, Self::Rule, Self::Policy, Self::Gate, Self::Hook, Self::Script];
 
     pub fn as_str(self) -> &'static str {
         match self {
@@ -42,6 +44,7 @@ impl PartKind {
             Self::Policy => "policy",
             Self::Gate => "gate",
             Self::Hook => "hook",
+            Self::Script => "script",
         }
     }
 
@@ -57,6 +60,7 @@ impl PartKind {
             Self::Policy => "policies",
             Self::Gate => "gates",
             Self::Hook => "hooks",
+            Self::Script => "scripts",
         }
     }
 
@@ -66,6 +70,7 @@ impl PartKind {
             Self::Skill => format!("{name}/SKILL.md"),
             Self::Rule => format!("{name}.md"),
             Self::Policy | Self::Gate | Self::Hook => format!("{name}.yaml"),
+            Self::Script => format!("{name}.js"),
         }
     }
 }
@@ -640,19 +645,85 @@ pub fn glob(pattern: &str, text: &str, path: bool) -> bool {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum GateKind {
-    /// Call a read-only, idempotent application tool and assert on its result; judged on the spot.
-    Tool,
-    /// Run a command where the run works; passes on exit status 0. Only where the application
-    /// turned command gates on.
+    /// A declared check the library runs itself (`check`: files, schema, text, output, sealed).
+    Check,
+    /// Run a command where the run works: passes on exit status 0, or by the result it prints
+    /// (`result: json`). Only where the application turned command gates on.
     Command,
-    /// The application's own check (`Gates`), by the gate's name.
+    /// JavaScript: a `script` part run by the library's own runtime, or — `function` — the
+    /// application's own code by name (`Gates`).
+    Script,
+    /// Call a read-only, idempotent application tool and assert on its result; judged on the spot.
+    /// From before the fork; kept so that definitions written for it still read.
+    Tool,
+    /// The application's own check (`Gates`), by the gate's name: `script` with `function` set to
+    /// the gate's name. From before the fork; kept so that definitions written for it still read.
     Host,
+}
+
+/// What a `check` gate checks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "snake_case")]
+pub enum CheckKind {
+    /// Every one of `paths` matches a file, none of them empty or still holding a forbidden string.
+    Files,
+    /// Every file of `file`, read `as` a value, satisfies `schema`.
+    Schema,
+    /// Every file of `file` matches each of `matches` and none of `not_matches`.
+    Text,
+    /// `value` (a value of the run's context) satisfies `schema`.
+    Output,
+    /// Every file the run's gates have read so far is still as it was then.
+    Sealed,
+}
+
+/// How a `schema` check reads its files.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "snake_case")]
+pub enum ReadAs {
+    Json,
+    Yaml,
+    /// One JSON value a line, read as an array.
+    Jsonl,
+    /// A Markdown file's YAML front matter, read as an object.
+    Frontmatter,
+}
+
+impl ReadAs {
+    /// By the file's extension: `.md` is front matter, `.jsonl` lines, `.yaml`/`.yml` YAML, the rest JSON.
+    pub fn of(path: &str) -> Self {
+        let ext = path.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default();
+        match ext.as_str() {
+            "md" | "markdown" => Self::Frontmatter,
+            "jsonl" | "ndjson" => Self::Jsonl,
+            "yaml" | "yml" => Self::Yaml,
+            _ => Self::Json,
+        }
+    }
+}
+
+/// How a command gate's result is read.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "snake_case")]
+pub enum CommandResult {
+    /// 0 passes, anything else does not.
+    #[default]
+    ExitCode,
+    /// What it prints (all of stdout, else its last line that is not blank) is a gate result.
+    Json,
 }
 
 /// The longest a command gate may run.
 pub const MAX_GATE_SECONDS: u64 = 3600;
 /// How long a command gate runs when it does not say.
 pub const DEFAULT_GATE_SECONDS: u64 = 600;
+/// The longest a script gate may run.
+pub const MAX_SCRIPT_SECONDS: u64 = 600;
+/// How long a script gate runs when it does not say.
+pub const DEFAULT_SCRIPT_SECONDS: u64 = 30;
 
 /// A gate: a named deterministic check a `gate` exit refers to.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -686,9 +757,64 @@ pub struct GateDef {
     /// `command`: where it runs; the run's workspace when absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,
-    /// `command`: how long it may run (default 600, at most 3600).
+    /// `command`, `script`: how long it may run (a command: default 600, at most 3600; a
+    /// script: default 30, at most 600).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_seconds: Option<u64>,
+    /// `command`: the environment variables it is given besides the basics; a name may end in `*`.
+    /// None by default. The application's own deny list wins over it (`RunnerConfig::env_deny`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub env: Vec<String>,
+    /// `command`: how its result is read (`exit_code` when absent).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub result: Option<CommandResult>,
+    /// `check`: which check.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub check: Option<CheckKind>,
+    /// `check: files`: paths or globs (references resolved); each must match a file.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub paths: Vec<String>,
+    /// `check: files`: an empty file (whitespace only) does not count; true when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub non_empty: Option<bool>,
+    /// `check: files`: a file holding any of these (a template's marker, say) does not count.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub not_containing: Vec<String>,
+    /// `check: schema | text`: a path or glob (references resolved); every file it matches is checked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file: Option<String>,
+    /// `check: schema`: how its files are read; by extension when absent.
+    #[serde(default, rename = "as", skip_serializing_if = "Option::is_none")]
+    pub read_as: Option<ReadAs>,
+    /// `check: schema | output`: the JSON Schema to satisfy.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(type = "Record<string, unknown>"))]
+    pub schema: Option<Value>,
+    /// `check: text`: regular expressions every file must match.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub matches: Vec<String>,
+    /// `check: text`: regular expressions no file may match.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub not_matches: Vec<String>,
+    /// `check: output`: the value to check — a reference (`${stations.a.output}`) or a value
+    /// holding references; the whole run context when absent.
+    #[serde(default, skip_serializing_if = "Value::is_null")]
+    #[cfg_attr(feature = "ts", ts(type = "unknown"))]
+    pub value: Value,
+    /// `script`: the script part (`scripts/<name>.js`) to run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub script: Option<String>,
+    /// `script`: instead of a script, the application's own code by this name (`Gates`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub function: Option<String>,
+    /// `script`: what the script is given as `input.params` (references resolved).
+    #[serde(default, skip_serializing_if = "Value::is_null")]
+    #[cfg_attr(feature = "ts", ts(type = "unknown"))]
+    pub params: Value,
+    /// `warn`: a passing result with a warning in it does not pass. Only the verdict counts when
+    /// absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fail_on: Option<super::run::Severity>,
 }
 
 impl GateDef {
@@ -696,6 +822,22 @@ impl GateDef {
         self.timeout_seconds
             .unwrap_or(DEFAULT_GATE_SECONDS)
             .clamp(1, MAX_GATE_SECONDS)
+    }
+
+    pub fn script_seconds(&self) -> u64 {
+        self.timeout_seconds
+            .unwrap_or(DEFAULT_SCRIPT_SECONDS)
+            .clamp(1, MAX_SCRIPT_SECONDS)
+    }
+
+    /// The application's code a gate names: a `host` gate's own name, a `script` gate's
+    /// `function`. `None` for every other gate.
+    pub fn host_function(&self) -> Option<&str> {
+        match self.kind {
+            GateKind::Host => Some(&self.name),
+            GateKind::Script => self.function.as_deref(),
+            _ => None,
+        }
     }
 
     /// A name for people: the title, else the name.
@@ -773,11 +915,15 @@ pub struct Pinned {
     pub policies: BTreeMap<String, PolicyDef>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub gates: BTreeMap<String, GateDef>,
+    /// Script name → source, for the `script` gates: a script edited while the run goes on does
+    /// not change how its gates judge.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub scripts: BTreeMap<String, String>,
 }
 
 impl Pinned {
     pub fn is_empty(&self) -> bool {
-        self.policies.is_empty() && self.gates.is_empty()
+        self.policies.is_empty() && self.gates.is_empty() && self.scripts.is_empty()
     }
 }
 
@@ -797,6 +943,8 @@ pub fn uses(def: &FlowDef, kind: PartKind, name: &str) -> bool {
                 .any(|e| matches!(e, super::def::ExitCond::Gate { gate, .. } if gate == name))
         }),
         PartKind::Hook => false,
+        // A gate names a script, a flow never does.
+        PartKind::Script => false,
     }
 }
 
@@ -813,6 +961,11 @@ pub fn pin(def: &FlowDef, packs: &dyn super::host::Packs) -> Pinned {
         for e in &s.exit {
             if let super::def::ExitCond::Gate { gate, .. } = e {
                 if let Some(g) = packs.gate(gate) {
+                    if let Some(name) = g.script.as_ref().filter(|_| g.kind == GateKind::Script) {
+                        if let Some((text, _)) = packs.part(PartKind::Script, name) {
+                            out.scripts.insert(name.clone(), text);
+                        }
+                    }
                     out.gates.insert(gate.clone(), g);
                 }
             }
@@ -827,7 +980,7 @@ pub fn part_schema(kind: PartKind) -> Option<Value> {
         PartKind::Policy => serde_json::to_value(schemars::schema_for!(PolicyDef)),
         PartKind::Gate => serde_json::to_value(schemars::schema_for!(GateDef)),
         PartKind::Hook => serde_json::to_value(schemars::schema_for!(HookDef)),
-        PartKind::Skill | PartKind::Rule => return None,
+        PartKind::Skill | PartKind::Rule | PartKind::Script => return None,
     };
     v.ok()
 }

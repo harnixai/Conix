@@ -638,10 +638,7 @@ impl Sandbox {
                         &station,
                         round,
                         &gate,
-                        GateResult {
-                            pass,
-                            detail: detail.into(),
-                        },
+                        if pass { GateResult::passed(detail) } else { GateResult::failed(detail) },
                     )
                     .await;
                 let stepped = Stepped {

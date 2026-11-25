@@ -58,7 +58,8 @@ name: risks-closed
 kind: check
 check: schema
 file: "${output_dir}/risks.jsonl"
-format: jsonl              # yaml | json | jsonl | frontmatter；缺省按扩展名（.md 是 frontmatter）
+as: jsonl                  # yaml | json | jsonl | frontmatter；缺省按扩展名（.md 是 frontmatter）。
+                           # 不叫 format：定义文件的 format 是定义格式的版本号
 schema:                    # JSON Schema；jsonl 读成数组，yaml / json 读成那个值，frontmatter 读成头部的对象
   type: array
   minItems: 1
@@ -71,7 +72,7 @@ schema:                    # JSON Schema；jsonl 读成数组，yaml / json 读�
 | 检查器 | 字段 | 不过的时候 |
 |---|---|---|
 | `files` | `paths`（glob 可）、`non_empty`、`not_containing` | 每个没匹配到、为空、含禁止串的文件一条 finding |
-| `schema` | `file`（glob 可，每个文件各校验）、`format`、`schema` | 解析不了的一条；schema 每个错误一条，带 JSON 指针 |
+| `schema` | `file`（glob 可，每个文件各校验）、`as`、`schema` | 解析不了的一条；schema 每个错误一条，带 JSON 指针 |
 | `text` | `file`（glob 可）、`matches`、`not_matches`（正则数组） | 每个没匹配上的 `matches`、每处匹配上的 `not_matches` 一条，带行号 |
 | `output` | `value`（引用，缺省整个运行上下文）、`schema` | 同 `schema`；用来判前面站交上来的值，比如程序步骤算出的覆盖率 |
 | `sealed` | 无 | 这次运行到目前为止记下的每份证据重新算 hash，不一致的一条 |
@@ -157,7 +158,7 @@ export default function (input, flow) {
 |---|---|---|
 | `pass` | 证据够 | 这一条出口过 |
 | `fail` | 证据不够 | 站未达标；有 `on_unmet` 就自动打回，`findings` 随打回交给那一站的会话 |
-| `error` | 门禁本身没跑成：超时、出错、路径出界、返回值不合规 | 站未达标，**不自动打回**（模型修不了门禁）；人看过后"重试"重新跑门禁 |
+| `error` | 门禁本身没跑成：超时、出错、路径出界、返回值不合规 | 站未达标，**不自动打回**（模型修不了门禁）；人看过后"重试"重新跑门禁（`Engine::rerun_gates`；TUI 的重试在没有失败任务时就是它） |
 
 - `severity` 是 `error`（缺省）或 `warn`。门禁可以写 `fail_on: warn`：有 warn 也算不过；缺省只看 `verdict`。
 - 证据与结论进运行记录（这一条出口的 `CheckRec`）和事件日志（`gate_result`），事后能复核。
@@ -256,9 +257,10 @@ exit: [{kind: children, require: all}]   # all（缺省）| any | 正整数：�
 
 | 内容 | 位置 |
 |---|---|
-| 门禁定义、检查器、脚本件 | `crates/flow/src/kernel/parts.rs`、`kernel/checks.rs`（新）、`kernel/validate.rs` |
-| 门禁结果、`CheckRec` 的证据 | `kernel/host.rs`（`GateResult`）、`kernel/run.rs`、`kernel/engine.rs`（`gate_result`） |
-| 执行 `check` / `command` / `script` | `runner/gate.rs`、`runner/script.rs`（新，rquickjs） |
+| 门禁定义、脚本件、校验 | `crates/flow/src/kernel/parts.rs`、`kernel/validate.rs` |
+| 门禁结果、`CheckRec` 的证据、重跑门禁 | `kernel/host.rs`（`GateResult`）、`kernel/run.rs`、`kernel/engine.rs`（`gate_result`、`rerun_gates`） |
+| 执行 `check` / `command` / `script` | `runner/gate.rs`；`runner/files.rs`（限在工作目录里读、记证据）、`runner/checks.rs`、`runner/script.rs`（rquickjs，与 Agix 同一版本） |
+| 打回时告诉会话为什么 | `kernel/run.rs`（`StationRec::reworked`）、`kernel/protocol.rs` |
 | 确认、轮询审批 | `kernel/def.rs`（`ExitCond::Confirm`）、`kernel/txn.rs`、`runner/approvals.rs`（新） |
 | 受管流程 | `packs.rs`（`ProjectPacks`、`DirPacks`）、`kernel/run.rs`（`governed`） |
 | 子流程结果、`children`、交付 | `kernel/def.rs`、`kernel/txn.rs`、`runner/tools.rs`（`flow_submit`） |

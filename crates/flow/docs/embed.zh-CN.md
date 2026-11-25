@@ -321,6 +321,26 @@ cargo run -p harnix-flow --example flowctl -- show <state-dir> <run>
 
 一节一个 `FLOW_API_VERSION`，新的在上。
 
+### Conix 的分叉（基于 `FLOW_API_VERSION = 1`）
+
+Conix 在 Harnix 0.4.7 分叉了这个库，先把站的治理（门禁、确认、交付）做出来再提回来（Conix 的
+`docs/design/flows.md`）。版本号不动，免得和 Harnix 自己的下一个撞；宿主要改的都列在这里。
+
+- **门禁分三类**（`GateKind::Check`、`Command`、`Script`；`Tool`、`Host` 照旧能读）：`check` 是声明，派工器自己判
+  （`CheckKind`：`files`、`schema`、`text`、`output`、`sealed`；`ReadAs`）；`script` 在内嵌的 QuickJS 里跑脚本件
+  （`PartKind::Script`，`scripts/<名>.js`，随运行钉进 `Pinned::scripts`；feature `script`，缺省开），或者用 `function`
+  指宿主的代码（`Gates` 收到的是这个名字，`GateDef::host_function`）。`GateDef` 新字段：`check`、`paths`、`non_empty`、
+  `not_containing`、`file`、`as`、`schema`、`matches`、`not_matches`、`value`、`script`、`function`、`params`、`env`、
+  `result`、`fail_on`。
+- **`GateResult` 改成 `{verdict, summary, findings, evidence, metrics}`**（破坏性：用 `GateResult::passed` /
+  `failed` / `errored` 构造）；旧的 `{pass, detail}` 仍能反序列化。`GateVerdict`、`Finding`、`Severity`、`Evidence`
+  （新，在根上）。`CheckRec` 带上 `findings`、`evidence`、`metrics`，`CheckRec::explain` 把不对的地方说成一段；
+  `CheckStatus::Error` 是门禁没得出结论：站未达标，但不自动打回。**`Engine::rerun_gates`**（`Op::RerunGates`）把一站没过的门禁
+  重跑；`flow_retry` 不带 `task` 时调它。
+- **命令门禁**：`env` 列出透传的变量（缺省一个不传），`RunnerConfig::env_deny` 是永远不传的；`result: json` 按命令打印的结果判。
+  起不来、超时算 `error`。
+- **`StationRec::reworked`**（`ReworkRec`，新，在根上）：这一轮为什么重来；`on_unmet` 打回的还带当时没过的检查，任务的协议讲给会话。
+
 ### `FLOW_API_VERSION = 1`
 
 库的第一版：内核、存储、流程包、试运行从 `harnix-ext-flow` 搬出来；`DEFINITION_FORMAT = 1`、`RUN_FORMAT = 1`。首次发布之前，

@@ -23,3 +23,4 @@ workspace 的成员。为什么分叉、改成什么样见 `docs/design/flows.md
 
 | 改动 | 设计 | Conix 提交 | 已提给 Harnix |
 |---|---|---|---|
+| 门禁分 check / command / script 三类；统一的门禁结果（verdict、findings、evidence、metrics）与 `CheckStatus::Error`；`rerun_gates`；命令门禁的 `env` 白名单与 `result: json`；打回时把没过的检查告诉新一轮（`StationRec::reworked`）；脚本件 `scripts/*.js` | flows.md §2–§3 | （本次） | 否 |

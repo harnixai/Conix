@@ -263,18 +263,104 @@ pub struct PauseRec {
     pub at: u64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum CheckStatus {
     Pass,
     Fail,
     /// Not decided yet: a gate running, a confirmation or children outstanding.
+    #[default]
     Wait,
+    /// A gate that did not get to a conclusion (a timeout, a script that threw, a path out of
+    /// bounds): the station is unmet, but it is not reworked automatically — no session can fix
+    /// a gate. Running the gates again is a person's (`Engine::rerun_gates`).
+    Error,
+}
+
+/// A gate's conclusion (docs/design/flows.md §3, in Conix).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "snake_case")]
+pub enum GateVerdict {
+    Pass,
+    Fail,
+    Error,
+}
+
+impl GateVerdict {
+    pub fn status(self) -> CheckStatus {
+        match self {
+            Self::Pass => CheckStatus::Pass,
+            Self::Fail => CheckStatus::Fail,
+            Self::Error => CheckStatus::Error,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "snake_case")]
+pub enum Severity {
+    #[default]
+    Error,
+    Warn,
+}
+
+/// One thing a gate found wrong.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct Finding {
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub rule: String,
+    #[serde(default)]
+    pub severity: Severity,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line: Option<u64>,
+    pub message: String,
+}
+
+impl Finding {
+    pub fn new(rule: impl Into<String>, message: impl Into<String>) -> Self {
+        Self { rule: rule.into(), severity: Severity::Error, path: None, line: None, message: message.into() }
+    }
+
+    pub fn at(mut self, path: impl Into<String>) -> Self {
+        self.path = Some(path.into());
+        self
+    }
+
+    pub fn line(mut self, line: u64) -> Self {
+        self.line = Some(line);
+        self
+    }
+
+    /// One line for people and for the session sent back to fix it.
+    pub fn line_text(&self) -> String {
+        let at = match (&self.path, self.line) {
+            (Some(p), Some(l)) => format!("{p}:{l}: "),
+            (Some(p), None) => format!("{p}: "),
+            _ => String::new(),
+        };
+        let warn = if self.severity == Severity::Warn { "warning: " } else { "" };
+        format!("{at}{warn}{}", self.message)
+    }
+}
+
+/// A file a gate's conclusion rests on, as it was when the gate read it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct Evidence {
+    /// Relative to the run's workspace.
+    pub path: String,
+    pub sha256: String,
+    pub size: u64,
 }
 
 /// The latest result of one exit condition (or of the tasks, `cond: None`).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct CheckRec {
     /// Index into the station's `exit`; `None` for the station's tasks themselves.
@@ -287,6 +373,37 @@ pub struct CheckRec {
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub detail: String,
     pub at: u64,
+    /// A gate's findings, evidence and metrics (`GateResult`), kept with its conclusion.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub findings: Vec<Finding>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub evidence: Vec<Evidence>,
+    #[serde(default, skip_serializing_if = "serde_json::Map::is_empty")]
+    #[cfg_attr(feature = "ts", ts(type = "Record<string, unknown>"))]
+    pub metrics: serde_json::Map<String, Value>,
+}
+
+/// How many findings an explanation spells out; the rest are counted.
+const FINDINGS_SHOWN: usize = 10;
+
+impl CheckRec {
+    /// What is wrong, in one piece: the detail, then the findings (a few, the rest counted).
+    /// What a person reads in the station, and what a session sent back to fix it is told.
+    pub fn explain(&self) -> String {
+        let mut parts = vec![];
+        if !self.detail.is_empty() {
+            parts.push(self.detail.clone());
+        }
+        parts.extend(self.findings.iter().take(FINDINGS_SHOWN).map(Finding::line_text));
+        if self.findings.len() > FINDINGS_SHOWN {
+            parts.push(format!("{} more", self.findings.len() - FINDINGS_SHOWN));
+        }
+        if parts.is_empty() {
+            self.label.clone()
+        } else {
+            parts.join("; ")
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -344,6 +461,25 @@ pub struct StationRec {
     /// Tokens of tasks a later round no longer has (a skip, other items), still spent.
     #[serde(default, skip_serializing_if = "Usage::is_empty")]
     pub spent: Usage,
+    /// Why this round started over, when a rework started it: what the session doing it again is
+    /// told first.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reworked: Option<ReworkRec>,
+}
+
+/// A round started by a rework: by whom, why, and — sent back by a station left unmet — what
+/// was not met there.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct ReworkRec {
+    pub by: Actor,
+    pub at: u64,
+    pub reason: String,
+    /// The station whose unmet checks sent it back (`on_unmet`); `None` for a rework asked for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unmet: Vec<CheckRec>,
 }
 
 impl StationRec {
@@ -362,6 +498,7 @@ impl StationRec {
             entered_at: None,
             left_at: None,
             spent: Usage::default(),
+            reworked: None,
         }
     }
 

@@ -32,6 +32,23 @@ pub struct Config {
     /// 通知出口（architecture §8.10），原样交给实例去解析（`host::notify::NotifyConfig`）。
     pub notify: serde_yaml::Value,
     pub engine: EngineSection,
+    pub flows: FlowsSection,
+}
+
+/// 流程（design/flows.md §2.2）。只在全局配置里：项目里的配置不能决定这台机器跑不跑命令。
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+pub struct FlowsSection {
+    pub command_gates: CommandGates,
+}
+
+/// 命令门禁跑不跑：`trusted`（缺省，受信的项目里跑，与 Agix 对项目 hook 的规矩一致）、`off`（这台机器一律不跑）。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CommandGates {
+    #[default]
+    Trusted,
+    Off,
 }
 
 /// 引擎的进程参数（architecture §8.11）：不是 Agix 的设置键，所以放在 `conix.yaml` 而不是 settings.json。

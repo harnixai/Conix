@@ -92,6 +92,7 @@ async fn a_plugin_is_installed_enabled_and_its_flow_runs_on_its_functions() {
             worktrees_dir: project_path.join(".wkts"),
             workspaces_dir: home.path().join("ws"),
             policies_file: None,
+            command_gates: true,
         },
     )
     .await

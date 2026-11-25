@@ -33,12 +33,16 @@
 pub mod host;
 pub mod testing;
 
+mod checks;
 mod dispatch;
+mod files;
 mod gate;
 mod git;
 mod hooks;
 mod main;
 mod project;
+#[cfg(feature = "script")]
+pub(crate) mod script;
 mod session;
 mod state;
 mod tools;
@@ -110,6 +114,9 @@ pub struct RunnerConfig {
     pub guarded: Vec<String>,
     /// Whether `command` gates may run: they run a command on this machine.
     pub command_gates: bool,
+    /// Environment variables a command gate is never given, whatever its `env` says: the
+    /// application's secrets (a model provider's key). A name may end in `*`.
+    pub env_deny: Vec<String>,
     /// The lease the runner holds on the tasks it carries out (renewed while it works).
     pub lease_ms: u64,
     /// How often expired leases are looked for.
@@ -140,6 +147,7 @@ impl Default for RunnerConfig {
             project_profiles: BTreeSet::new(),
             guarded: DEFAULT_GUARDED.iter().map(|s| s.to_string()).collect(),
             command_gates: false,
+            env_deny: vec![],
             lease_ms: DEFAULT_LEASE_MS,
             tick_ms: 1000,
             hook_headers: "X-Flow".into(),

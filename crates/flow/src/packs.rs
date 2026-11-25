@@ -581,8 +581,8 @@ fn part_names(dir: &Path, kind: PartKind) -> BTreeSet<String> {
             match kind {
                 PartKind::Skill => e.path().join("SKILL.md").is_file().then_some(n),
                 _ => {
-                    let ext = if kind == PartKind::Rule { ".md" } else { ".yaml" };
-                    n.strip_suffix(ext).filter(|s| !s.starts_with('.')).map(String::from)
+                    let ext = kind.file("");
+                    n.strip_suffix(ext.as_str()).filter(|s| !s.starts_with('.')).map(String::from)
                 }
             }
         })

@@ -17,7 +17,7 @@ use serde_json::Value;
 
 use super::def::{Executor, FlowDef};
 use super::parts::{GateDef, Granted, HookDef, PartKind, PolicyDef};
-use super::run::{Actor, History, RunQuery, RunRecord, RunSummary};
+use super::run::{Actor, Evidence, Finding, GateVerdict, History, RunQuery, RunRecord, RunSummary, Severity};
 
 // ── storage ──────────────────────────────────────────────────────────────────
 
@@ -330,6 +330,10 @@ pub enum Op {
         station: String,
         task: String,
     },
+    /// Running a station's gates again (`Engine::rerun_gates`).
+    RerunGates {
+        station: String,
+    },
     Cancel,
     /// Pausing a run, or resuming it (xops-03 §3).
     Pause,
@@ -386,6 +390,7 @@ impl Op {
             Self::Rework { .. } => "rework",
             Self::Release { .. } => "release",
             Self::Retry { .. } => "retry",
+            Self::RerunGates { .. } => "rerun_gates",
             Self::Cancel => "cancel",
             Self::AttachSession { .. } => "attach_session",
             Self::EditFlow { .. } => "edit_flow",
@@ -439,11 +444,102 @@ impl Tools for NoTools {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+/// What a gate concluded (docs/design/flows.md §3, in Conix): the same shape from every kind of
+/// gate. `fail` is evidence that falls short — the station's to fix; `error` is a gate that did
+/// not get to a conclusion — a person's to look at, never reworked automatically.
+#[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
 pub struct GateResult {
-    pub pass: bool,
+    pub verdict: GateVerdict,
     #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub detail: String,
+    pub summary: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub findings: Vec<Finding>,
+    /// What the conclusion rests on. A gate the library runs itself (`check`, `script`) records
+    /// the files it read here, whatever the gate's own code says.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub evidence: Vec<Evidence>,
+    #[serde(default, skip_serializing_if = "serde_json::Map::is_empty")]
+    #[cfg_attr(feature = "ts", ts(type = "Record<string, unknown>"))]
+    pub metrics: serde_json::Map<String, Value>,
+}
+
+/// The shape before the fork, `{pass, detail}`, still read: a host's checks written for it keep
+/// working. `verdict` wins when both are there.
+impl<'de> Deserialize<'de> for GateResult {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Raw {
+            #[serde(default)]
+            verdict: Option<GateVerdict>,
+            #[serde(default)]
+            pass: Option<bool>,
+            #[serde(default)]
+            summary: Option<String>,
+            #[serde(default)]
+            detail: Option<String>,
+            #[serde(default)]
+            findings: Vec<Finding>,
+            #[serde(default)]
+            evidence: Vec<Evidence>,
+            #[serde(default)]
+            metrics: serde_json::Map<String, Value>,
+        }
+        let r = Raw::deserialize(d)?;
+        let verdict = match (r.verdict, r.pass) {
+            (Some(v), _) => v,
+            (None, Some(true)) => GateVerdict::Pass,
+            (None, Some(false)) => GateVerdict::Fail,
+            (None, None) => return Err(serde::de::Error::missing_field("verdict")),
+        };
+        Ok(Self {
+            verdict,
+            summary: r.summary.or(r.detail).unwrap_or_default(),
+            findings: r.findings,
+            evidence: r.evidence,
+            metrics: r.metrics,
+        })
+    }
+}
+
+impl GateResult {
+    fn of(verdict: GateVerdict, summary: impl Into<String>) -> Self {
+        Self {
+            verdict,
+            summary: summary.into(),
+            findings: vec![],
+            evidence: vec![],
+            metrics: serde_json::Map::new(),
+        }
+    }
+
+    pub fn passed(summary: impl Into<String>) -> Self {
+        Self::of(GateVerdict::Pass, summary)
+    }
+
+    pub fn failed(summary: impl Into<String>) -> Self {
+        Self::of(GateVerdict::Fail, summary)
+    }
+
+    /// The gate did not get to a conclusion.
+    pub fn errored(summary: impl Into<String>) -> Self {
+        Self::of(GateVerdict::Error, summary)
+    }
+
+    pub fn is_pass(&self) -> bool {
+        self.verdict == GateVerdict::Pass
+    }
+
+    /// Applied a gate's `fail_on: warn`: a passing result with a warning in it does not pass.
+    pub fn strict(mut self, fail_on: Option<Severity>) -> Self {
+        if fail_on == Some(Severity::Warn)
+            && self.verdict == GateVerdict::Pass
+            && self.findings.iter().any(|f| f.severity == Severity::Warn)
+        {
+            self.verdict = GateVerdict::Fail;
+        }
+        self
+    }
 }
 
 /// Runs the application's own checks — `host` gates, by name (called by the module for a

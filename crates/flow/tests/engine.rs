@@ -814,10 +814,7 @@ async fn gate_results_are_per_round() {
         gate: "lint".into()
     }));
     assert_eq!(status(&h, &run, "lint").await, StationStatus::Working);
-    let fail = GateResult {
-        pass: false,
-        detail: "3 warnings".into(),
-    };
+    let fail = GateResult::failed("3 warnings");
     let wrong = h
         .eng
         .gate_result(&run, "lint", 7, "lint", fail.clone())
@@ -853,10 +850,7 @@ async fn gate_results_are_per_round() {
             "lint",
             2,
             "lint",
-            GateResult {
-                pass: true,
-                detail: String::new(),
-            },
+            GateResult::passed(""),
         )
         .await
         .unwrap();
@@ -1055,10 +1049,7 @@ fn operations_are_send(e: &Engine) {
         "s",
         1,
         "g",
-        GateResult {
-            pass: true,
-            detail: String::new(),
-        },
+        GateResult::passed(""),
     ));
 }
 
@@ -1143,10 +1134,7 @@ async fn dispatched_work_includes_gates_still_waiting() {
             "lint",
             1,
             "lint",
-            GateResult {
-                pass: true,
-                detail: String::new(),
-            },
+            GateResult::passed(""),
         )
         .await
         .unwrap();

@@ -3,7 +3,7 @@
 {"at":1794787200000,"by":{"id":"dispatch","kind":"flow"},"detail":{"attempt":1,"by":{"id":"dispatch","kind":"flow"}},"op":"claim","run":"demo-write-1","seq":3,"station":"draft","task":"draft"}
 {"at":1794787200000,"by":{"id":"dispatch","kind":"flow"},"detail":{"session":"s1"},"op":"attach_main","run":"demo-write-1","seq":4}
 {"at":1794787201000,"by":{"id":"dispatch","kind":"flow"},"op":"submit","run":"demo-write-1","seq":5,"station":"draft","task":"draft"}
-{"at":1794787201000,"by":{"id":"gate","kind":"flow"},"detail":{"detail":"drafts/draft.md is there","gate":"draft-exists","pass":true,"round":1},"op":"gate_result","run":"demo-write-1","seq":6,"station":"draft"}
+{"at":1794787201000,"by":{"id":"gate","kind":"flow"},"detail":{"detail":"drafts/draft.md is there","evidence":[],"findings":[],"gate":"draft-exists","metrics":{},"pass":true,"round":1,"verdict":"pass"},"op":"gate_result","run":"demo-write-1","seq":6,"station":"draft"}
 {"at":1794787201000,"by":{"id":"gate","kind":"flow"},"detail":{"forced":false,"round":1},"op":"pass","run":"demo-write-1","seq":7,"station":"draft"}
 {"at":1794787201000,"by":{"id":"gate","kind":"flow"},"detail":{"round":1,"tasks":["review"]},"op":"enter","run":"demo-write-1","seq":8,"station":"review"}
 {"at":1794787201000,"by":{"id":"dispatch","kind":"flow"},"detail":{"attempt":1,"by":{"id":"dispatch","kind":"flow"}},"op":"claim","run":"demo-write-1","seq":9,"station":"review","task":"review"}
@@ -16,7 +16,7 @@
 {"at":1794787202000,"by":{"id":"golden","kind":"device"},"detail":{"round":2,"tasks":["draft"]},"op":"enter","run":"demo-write-1","seq":16,"station":"draft"}
 {"at":1794787202000,"by":{"id":"dispatch","kind":"flow"},"detail":{"attempt":1,"by":{"id":"dispatch","kind":"flow"}},"op":"claim","run":"demo-write-1","seq":17,"station":"draft","task":"draft"}
 {"at":1794787203000,"by":{"id":"dispatch","kind":"flow"},"op":"submit","run":"demo-write-1","seq":18,"station":"draft","task":"draft"}
-{"at":1794787203000,"by":{"id":"gate","kind":"flow"},"detail":{"detail":"","gate":"draft-exists","pass":true,"round":2},"op":"gate_result","run":"demo-write-1","seq":19,"station":"draft"}
+{"at":1794787203000,"by":{"id":"gate","kind":"flow"},"detail":{"detail":"","evidence":[],"findings":[],"gate":"draft-exists","metrics":{},"pass":true,"round":2,"verdict":"pass"},"op":"gate_result","run":"demo-write-1","seq":19,"station":"draft"}
 {"at":1794787203000,"by":{"id":"gate","kind":"flow"},"detail":{"forced":false,"round":2},"op":"pass","run":"demo-write-1","seq":20,"station":"draft"}
 {"at":1794787203000,"by":{"id":"gate","kind":"flow"},"detail":{"round":2,"tasks":["review"]},"op":"enter","run":"demo-write-1","seq":21,"station":"review"}
 {"at":1794787203000,"by":{"id":"dispatch","kind":"flow"},"detail":{"attempt":1,"by":{"id":"dispatch","kind":"flow"}},"op":"claim","run":"demo-write-1","seq":22,"station":"review","task":"review"}

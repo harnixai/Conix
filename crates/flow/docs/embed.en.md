@@ -437,6 +437,33 @@ The promise:
 
 One section per `FLOW_API_VERSION`, newest first.
 
+### The Conix fork (on `FLOW_API_VERSION = 1`)
+
+Conix forked the library at Harnix 0.4.7 to work out the governance of stations — gates, confirmations,
+deliveries — before proposing it back (Conix `docs/design/flows.md`). The version number is left as it
+is so as not to collide with Harnix's own next one; what changes for a host is listed here.
+
+- **Gates in three kinds** (`GateKind::Check`, `Command`, `Script`; `Tool` and `Host` still read):
+  `check` gates are declared and judged by the runner itself (`CheckKind`: `files`, `schema`, `text`,
+  `output`, `sealed`; `ReadAs`); `script` gates run a script part (`PartKind::Script`,
+  `scripts/<name>.js`, pinned with the run in `Pinned::scripts`) in an embedded QuickJS (feature
+  `script`, on by default), or with `function` name the host's code (`Gates`, which now receives that
+  name — `GateDef::host_function`). New `GateDef` fields: `check`, `paths`, `non_empty`,
+  `not_containing`, `file`, `as`, `schema`, `matches`, `not_matches`, `value`, `script`, `function`,
+  `params`, `env`, `result`, `fail_on`.
+- **`GateResult` is `{verdict, summary, findings, evidence, metrics}`** (breaking: built with
+  `GateResult::passed` / `failed` / `errored`); the old `{pass, detail}` still deserializes.
+  `GateVerdict`, `Finding`, `Severity`, `Evidence` (new, at the root). `CheckRec` keeps `findings`,
+  `evidence` and `metrics`, and `CheckRec::explain` says what is wrong in one piece;
+  `CheckStatus::Error` is a gate that did not conclude: the station is unmet but not reworked
+  automatically. **`Engine::rerun_gates`** (`Op::RerunGates`) runs a station's gates that did not pass
+  again; `flow_retry` without `task` calls it.
+- **Command gates**: `env` names the variables passed (none by default), `RunnerConfig::env_deny`
+  the ones never passed; `result: json` reads the result the command prints. A command that could
+  not start or ran out of time is an `error`.
+- **`StationRec::reworked`** (`ReworkRec`, new at the root): why a round started over, and — from
+  `on_unmet` — the checks not met; the task's protocol tells the session.
+
 ### `FLOW_API_VERSION = 1`
 
 The library's first version: the kernel, stores, packs and dry runs move out of `harnix-ext-flow`;

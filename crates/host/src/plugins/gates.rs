@@ -106,11 +106,9 @@ impl Gates for PluginGates {
             ),
             Err(_) => (None, false, super::CALL_TIMEOUT_MS),
         };
+        // 门禁没跑起来（没有插件提供、插件出错、超时）都是 error：不是这一站能改好的，不自动打回。
         let Some((_, function)) = found else {
-            return GateResult {
-                pass: false,
-                detail: format!("no enabled plugin provides the gate `{gate}`"),
-            };
+            return GateResult::errored(format!("no enabled plugin provides the gate `{gate}`"));
         };
         let (mut input, cwd) = self.0.input(run, station);
         input["gate"] = json!(gate);
@@ -119,17 +117,13 @@ impl Gates for PluginGates {
         match self.0.call(&function, input, cwd, writes, timeout).await {
             Ok(v) => match serde_json::from_value::<GateResult>(v.clone()) {
                 Ok(g) => g,
-                Err(_) => GateResult {
-                    pass: false,
-                    detail: format!("{function} answered {v}, not {{pass, detail}}"),
-                },
+                Err(_) => GateResult::errored(format!(
+                    "{function} answered {v}, not a gate result ({{verdict, summary, findings}} or {{pass, detail}})"
+                )),
             },
             Err(e) => {
                 tracing::warn!(run = %run.id, station, gate, "{e}");
-                GateResult {
-                    pass: false,
-                    detail: e,
-                }
+                GateResult::errored(e)
             }
         }
     }

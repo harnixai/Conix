@@ -1174,6 +1174,46 @@ impl Engine {
         })
     }
 
+    /// Run a station's gates again: the ones of this round that did not pass (an `error` — a gate
+    /// that did not get to a conclusion — or a `fail` someone has since seen to by hand). Their
+    /// results are dropped and the station judged afresh, which hands them out again.
+    pub async fn rerun_gates(&self, run: &str, station: &str, by: Actor) -> Result<Outcome> {
+        transact!(self, by.clone(), |t| {
+            t.load(run).await?;
+            let rec = t.get(run);
+            let (def, st) = open_station(rec, station)?;
+            if !matches!(st.status, StationStatus::Working | StationStatus::Unmet) || !st.tasks_settled() {
+                return invalid(format!("station {station} is not waiting on its gates"));
+            }
+            let sdef = def.station(station).cloned();
+            let is_gate = |c: &CheckRec| {
+                c.cond
+                    .and_then(|i| sdef.as_ref().and_then(|s| s.exit.get(i)))
+                    .is_some_and(|e| matches!(e, ExitCond::Gate { .. }))
+            };
+            let round = st.round;
+            let again: Vec<String> = st
+                .checks
+                .iter()
+                .filter(|c| c.round == round && is_gate(c) && matches!(c.status, CheckStatus::Fail | CheckStatus::Error))
+                .map(|c| c.label.clone())
+                .collect();
+            if again.is_empty() {
+                return invalid(format!("station {station} has no gate to run again"));
+            }
+            self.authorize(&Op::RerunGates { station: station.into() }, &by, Some(rec))?;
+            let mut m = t.m(run);
+            if let Some(s) = m.rec.stations.get_mut(station) {
+                s.checks.retain(|c| !(c.round == round && is_gate(c) && matches!(c.status, CheckStatus::Fail | CheckStatus::Error)));
+                s.status = StationStatus::Working;
+            }
+            m.log("rerun_gates", Some(station), None, json!({"gates": again, "round": round}));
+            m.judge_later(station);
+            t.settle().await?;
+            Ok(json!({"run": run, "gates": again}))
+        })
+    }
+
     // ── stations ─────────────────────────────────────────────────────────────
 
     /// Confirm (`pass`) or reject a station with a `confirm` exit, once its tasks are in.
@@ -1406,6 +1446,9 @@ impl Engine {
                 return Ok(json!({"applied": false}));
             }
             let now = t.fx.now;
+            let fail_on = rec.parts.gates.get(gate).and_then(|g| g.fail_on);
+            // The transaction may run again on a conflict: the result is taken afresh each time.
+            let result = result.clone().strict(fail_on);
             let mut m = t.m(run);
             let mut applied = false;
             if let Some(s) = m.rec.stations.get_mut(station) {
@@ -1415,23 +1458,26 @@ impl Engine {
                         .and_then(|i| sdef.exit.get(i))
                         .is_some_and(|e| matches!(e, ExitCond::Gate { gate: g, .. } if g == gate));
                     if is_gate && c.round == round && c.status == CheckStatus::Wait {
-                        c.status = if result.pass {
-                            CheckStatus::Pass
-                        } else {
-                            CheckStatus::Fail
-                        };
-                        c.detail = result.detail.clone();
+                        c.status = result.verdict.status();
+                        c.detail = result.summary.clone();
+                        c.findings = result.findings.clone();
+                        c.evidence = result.evidence.clone();
+                        c.metrics = result.metrics.clone();
                         c.at = now;
                         applied = true;
                     }
                 }
             }
             if applied {
+                // The whole result goes into the log: what was found and what it rests on, for
+                // whoever checks the run afterwards.
                 m.log(
                     "gate_result",
                     Some(station),
                     None,
-                    json!({"gate": gate, "round": round, "pass": result.pass, "detail": result.detail}),
+                    json!({"gate": gate, "round": round, "pass": result.is_pass(), "verdict": result.verdict,
+                           "detail": result.summary, "findings": result.findings, "evidence": result.evidence,
+                           "metrics": result.metrics}),
                 );
                 m.judge_later(station);
                 t.settle().await?;
@@ -1620,7 +1666,8 @@ pub fn view(mut record: RunRecord) -> RunView {
                 status: CheckStatus::Wait,
                 detail: "waiting for a release".into(),
                 at: s.entered_at.unwrap_or(0),
-            });
+                ..Default::default()
+});
         } else if !s.tasks_settled() {
             let done = s
                 .tasks
@@ -1635,6 +1682,7 @@ pub fn view(mut record: RunRecord) -> RunView {
                 status: CheckStatus::Wait,
                 detail: format!("{done} of {} tasks submitted", s.tasks.len()),
                 at: s.entered_at.unwrap_or(0),
+                ..Default::default()
             });
         }
         unmet.insert(id.clone(), list);

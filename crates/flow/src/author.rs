@@ -370,8 +370,8 @@ const TOOLS: &[Row] = &[
     },
     Row {
         name: TOOL_RETRY,
-        description: "Put a failed task of a run back to work with a fresh retry budget. Only when the user asks.",
-        schema: || run_input(&["station", "task"], json!({"station": {"type": "string"}, "task": {"type": "string"}})),
+        description: "Put a failed task of a run back to work with a fresh retry budget; without `task`, run the station's gates that did not pass again (one that errored, or one fixed by hand). Only when the user asks.",
+        schema: || run_input(&["station"], json!({"station": {"type": "string"}, "task": {"type": "string"}})),
         read_only: false,
         does: Does::Act(Act::Retry),
     },
@@ -787,10 +787,10 @@ impl Cx<'_> {
                     .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect());
                 engine.rework(&run, to, tasks, reason.as_deref().unwrap_or("sent back in conversation"), who).await
             }
-            Act::Retry => {
-                let task = str_of(input, "task").unwrap_or_default();
-                engine.retry(&run, &station, task, who).await
-            }
+            Act::Retry => match str_of(input, "task") {
+                Some(task) => engine.retry(&run, &station, task, who).await,
+                None => engine.rerun_gates(&run, &station, who).await,
+            },
             Act::Release => engine.release(&run, &station, who).await,
         };
         let o = r.map_err(|e| format!("not done: {e}"))?;

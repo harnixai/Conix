@@ -58,7 +58,21 @@ pub struct FlowsConfig {
     pub workspaces_dir: PathBuf,
     /// 作业起的运行在会话上多出的限制：`state/conix/run-policies.json`（[`policy`]）。
     pub policies_file: Option<PathBuf>,
+    /// 命令门禁跑不跑（`conix.yaml` 的 `flows.command_gates`）；跑也只在受信的项目里（流程库自己判）。
+    pub command_gates: bool,
 }
+
+/// 命令门禁的子进程永远拿不到的环境变量，门禁的 `env` 写了也不给：模型 provider 的密钥、Conix 与 Agix 自己的。
+pub const GATE_ENV_DENY: &[&str] = &[
+    "*_API_KEY",
+    "*_AUTH_TOKEN",
+    "ANTHROPIC_*",
+    "OPENAI_*",
+    "DEEPSEEK_*",
+    "GEMINI_*",
+    "CONIX_*",
+    "AGIX_*",
+];
 
 /// 项目所在仓库的根下的 [`WORKTREES_DIR`]；不在仓库里就是项目下的（那样的运行开不出 worktree）。
 pub fn worktrees_root(project: &Path) -> PathBuf {
@@ -142,6 +156,8 @@ pub async fn start(hub: &Hub, cfg: FlowsConfig) -> anyhow::Result<Arc<Flows>> {
         main_profile: Some(SCENE.into()),
         project_profiles: BTreeSet::from([SCENE.to_string()]),
         hook_headers: "X-Conix".into(),
+        command_gates: cfg.command_gates,
+        env_deny: GATE_ENV_DENY.iter().map(|s| s.to_string()).collect(),
         ..RunnerConfig::default()
     };
     let mounted = hub.mounted_plugins().await;
@@ -385,6 +401,7 @@ impl Flows {
             RunOp::Release { station } => e.release(run, &station.0, by).await,
             RunOp::Force { station, reason } => e.force(run, &station.0, reason, by).await,
             RunOp::Rework { to } => e.rework(run, &to.0, None, "rework from Conix", by).await,
+            // 有失败的任务就重做任务；没有就把没过的门禁重跑一遍（门禁 error 之后人看过了，或文件手工改好了）。
             RunOp::Retry { station } => {
                 let rec = e.record(run).await.map_err(flow_err)?;
                 let task = rec
@@ -395,11 +412,11 @@ impl Flows {
                             .iter()
                             .find(|t| t.status == harnix_flow::TaskStatus::Failed)
                     })
-                    .map(|t| t.id.clone())
-                    .ok_or_else(|| {
-                        PortError::Failed(format!("station {} has no failed task", station.0))
-                    })?;
-                e.retry(run, &station.0, &task, by).await
+                    .map(|t| t.id.clone());
+                match task {
+                    Some(task) => e.retry(run, &station.0, &task, by).await,
+                    None => e.rerun_gates(run, &station.0, by).await,
+                }
             }
         };
         self.runner.settle(r).await.map(|_| ()).map_err(flow_err)
