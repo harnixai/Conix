@@ -69,7 +69,8 @@ use crate::kernel::run::{Actor, RunRecord, WorktreeEnd};
 use crate::packs::{MemPacks, ProjectPacks, ProjectTrust};
 
 pub use host::{
-    Decision, Frame, HostError, Note, OpenSpec, Opened, SessionHost, SessionId, SessionInfo, ToolSpec, TurnEnd, Watch,
+    AgentTask, AgentTaskStatus, Decision, Frame, HostError, Note, OpenSpec, Opened, SessionHost, SessionId, SessionInfo,
+    ToolSpec, TurnEnd, Watch,
 };
 pub use hooks::{HookTransport, QUEUE_KEPT};
 pub use state::{Binding, TaskKey};

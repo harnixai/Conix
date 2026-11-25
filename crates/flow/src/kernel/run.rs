@@ -165,6 +165,39 @@ pub struct TaskRec {
     /// (xops-04 §3).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub asking: Option<AskRec>,
+    /// Who handed the output in, and as what (docs/design/flows.md §6.4, in Conix).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delivery: Option<DeliveryRec>,
+}
+
+/// How a task's output came in: who handed it in, when, as which kind of executor — and for a
+/// sub-agent task, the sub-agent's own task it came from.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct DeliveryRec {
+    pub by: Actor,
+    pub at: u64,
+    /// The executor's kind (`session`, `agent`, `program`, `external`, `subflow`).
+    pub executor: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent: Option<AgentDelivery>,
+}
+
+/// The sub-agent task a sub-agent station's output came from, as the host saw it end.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct AgentDelivery {
+    /// The engine's task id.
+    pub task: String,
+    /// Its own session (the sub-agent's side chain), when the host knows it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session: Option<String>,
+    /// How it ended, as the host says (`done`…); `unknown` when the host cannot tell.
+    pub status: String,
+    /// Whether the host could check it: a host that cannot is taken at its word.
+    pub verified: bool,
+    #[serde(default, skip_serializing_if = "Usage::is_empty")]
+    pub usage: Usage,
 }
 
 /// A call held for a person (xops-04 §3).
@@ -193,6 +226,7 @@ impl TaskRec {
             ended_at: None,
             usage: Usage::default(),
             asking: None,
+            delivery: None,
         }
     }
 

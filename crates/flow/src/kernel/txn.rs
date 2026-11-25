@@ -901,11 +901,14 @@ impl<'a> M<'a> {
     /// A task handed in its output (already checked against the contract).
     pub fn task_submitted(&mut self, sid: &str, tid: &str, output: Value) {
         let now = self.now();
+        let by = self.by.clone();
+        let executor = self.spec(sid, tid).map_or_else(String::new, |s| s.executor.kind().to_string());
         if let Some(t) = self.task_mut(sid, tid) {
             t.ended_at = Some(now);
             t.status = TaskStatus::Submitted;
             t.output = Some(output);
             t.error = None;
+            t.delivery = Some(super::run::DeliveryRec { by, at: now, executor, agent: None });
         }
         self.emit("task.submitted", Some(sid), Some(tid), Value::Null);
         self.log("submit", Some(sid), Some(tid), Value::Null);
@@ -1022,8 +1025,11 @@ impl<'a> M<'a> {
                 }
             }
         }
+        // A `children` exit short of `all` counts the failed children itself.
+        let partial = st.exit.iter().any(|e| matches!(e, super::def::ExitCond::Children { require: Some(q), .. } if !q.is_all()));
         for t in &r.tasks {
             let detail = match t.status {
+                TaskStatus::Failed if partial => continue,
                 TaskStatus::Failed => t.error.clone().unwrap_or_else(|| "failed".into()),
                 TaskStatus::Cancelled => "cancelled".into(),
                 _ => continue,
@@ -1054,6 +1060,7 @@ impl<'a> M<'a> {
                                     bad.push(format!("task {}: {e}", t.id));
                                 }
                             }
+                            (TaskStatus::Failed, _) if partial => {}
                             _ => bad.push(format!("task {}: no output", t.id)),
                         }
                     }
@@ -1155,6 +1162,24 @@ impl<'a> M<'a> {
                                 (CheckStatus::Wait, "awaiting confirmation".into())
                             }
                         }
+                    }
+                }
+                C::Children { require: Some(q), .. } if !q.is_all() => {
+                    let delivered = r.tasks.iter().filter(|t| t.status == TaskStatus::Submitted).count();
+                    let needed = q.needed(r.tasks.len());
+                    if delivered >= needed {
+                        (CheckStatus::Pass, format!("{delivered} of {} children delivered", r.tasks.len()))
+                    } else {
+                        let failed: Vec<&str> =
+                            r.tasks.iter().filter(|t| t.status != TaskStatus::Submitted).map(|t| t.id.as_str()).collect();
+                        (
+                            CheckStatus::Fail,
+                            format!(
+                                "{delivered} of {} children delivered, {needed} needed; not delivered: {}",
+                                r.tasks.len(),
+                                failed.join(", ")
+                            ),
+                        )
                     }
                 }
                 C::Children { .. } => {
@@ -1318,18 +1343,31 @@ impl<'a> M<'a> {
         self.emit("run.finished", None, None, Value::Null);
         self.log("finish", None, None, Value::Null);
         if let Some(p) = self.rec.parent.clone() {
+            let result = self.child_result();
+            self.fx.cross.push_back(Cross::ChildDone {
+                child: self.rec.id.clone(),
+                parent: p,
+                result,
+            });
+        }
+    }
+
+    /// What this run, as a child, hands its parent task: the flow's `result`, or every station's
+    /// output. A `result` short of its schema fails the parent's task, saying where.
+    fn child_result(&self) -> std::result::Result<Value, String> {
+        let Some(r) = &self.def.result else {
             let stations: serde_json::Map<String, Value> = self
                 .def
                 .stations
                 .iter()
                 .map(|s| (s.id.clone(), station_output(&self.def, self.rec, &s.id)))
                 .collect();
-            self.fx.cross.push_back(Cross::ChildDone {
-                child: self.rec.id.clone(),
-                parent: p,
-                result: Ok(json!({"run": self.rec.id, "stations": stations})),
-            });
-        }
+            return Ok(json!({"run": self.rec.id, "stations": stations}));
+        };
+        let value = super::refs::resolve(&r.from, &self.ctx(None, None));
+        check_output(r.schema.as_ref(), &value)
+            .map_err(|e| format!("child run {}'s result does not satisfy flow {}'s result schema: {e}", self.rec.id, self.def.name))?;
+        Ok(value)
     }
 
     pub fn cancel_run(&mut self, reason: &str) {

@@ -243,11 +243,14 @@ exit: [{kind: children, require: all}]   # all（缺省）| any | 正整数：�
 
 ### 6.3 子 Agent 的交付要有出处
 
-`agent` 站由主 Agent 派 Agix 子 Agent 去做、再 `flow_submit`。交付时 `flow_submit` 要带 `agent_task`（那个子 Agent 的任务 id）：
+`agent` 站由主 Agent 派 Agix 子 Agent 去做、再 `flow_submit`。Agix 前台的 `Agent` 调用结果里没有任务 id（只有后台任务的才有），
+模型给不出，所以不让模型报：派活时协议定下子 Agent 的 description（`flow:<运行>/<站>/<任务>`），`flow_submit` 时派工器问宿主
+主会话里叫这个名字的子 Agent（`SessionHost::agent_tasks`）：
 
-- 宿主核实：任务属于这次运行的主会话、是 `agent` 任务、已经正常结束（Conix 从会话的任务表里查，Agix 0.4.4 的帧带
-  `task_id`）。没带、对不上、没跑完的交付被拒，告诉模型缺什么。
-- 记进任务：`TaskRec.delivery{agent_task, agent_session, status, usage}`。
+- 有一个答完了的：收下，任务 id、侧链会话、用量记进 `delivery.agent`。
+- 还在跑：不收，叫它等答完（工具结果偶尔比任务结束的帧先到，派工器先等几秒）。
+- 一个都没有、都失败了：不收，告诉它用这个 description 调 `Agent`。
+- 宿主分不出（缺省）：照旧收下，`delivery.agent` 为空。
 
 ### 6.4 交付的记录
 

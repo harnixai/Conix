@@ -103,6 +103,29 @@ pub fn validate(def: &FlowDef, packs: &dyn Packs) -> Vec<Problem> {
     if def.stations.is_empty() {
         c.flow("a flow needs at least one station");
     }
+    if let Some(r) = &def.result {
+        if let Some(schema) = &r.schema {
+            schema_problems(&mut c, None, "result.schema", schema);
+        }
+        for x in refs_in_value(&r.from) {
+            let mut parts = x.split(['.', '[']);
+            let root = parts.next().unwrap_or("");
+            // The result is read when the run is over: every station is before it, and no task's.
+            match root {
+                "inputs" | "stations" | "run" | "subject" | "output_dir" => {}
+                _ => {
+                    c.flow(format!("result: reference {x}: a result may refer to run, subject, inputs, stations and output_dir"));
+                    continue;
+                }
+            }
+            let name = parts.next();
+            match (root, name) {
+                ("inputs", Some(k)) if !def.inputs.contains_key(k) => c.flow(format!("result: reference {x}: no input {k}")),
+                ("stations", Some(k)) if def.station(k).is_none() => c.flow(format!("result: reference {x}: no station {k}")),
+                _ => {}
+            }
+        }
+    }
     if let Some(n) = def.rework_limit {
         if n == 0 || n > MAX_REWORK_LIMIT {
             c.flow(format!(
@@ -402,6 +425,18 @@ fn station_problems(c: &mut Ctx, s: &Station, cyclic: bool) {
             }
             ExitCond::Children { .. } if !has_subflow => {
                 c.at(id, "a children exit only goes with a subflow executor");
+            }
+            ExitCond::Children { require: Some(super::def::Require::AtLeast(n)), .. } => {
+                let tasks = match &work {
+                    Work::Tasks(t) => Some(t.len()),
+                    Work::One(_) => Some(1),
+                    _ => None,
+                };
+                if *n == 0 {
+                    c.at(id, "children require: at least 1 (or `any`, `all`)");
+                } else if let Some(k) = tasks.filter(|k| *n as usize > *k) {
+                    c.at(id, format!("children require: {n}, but the station has only {k} task(s)"));
+                }
             }
             ExitCond::Gate { gate, .. } => match c.packs.part(PartKind::Gate, gate) {
                 None => c.at(id, format!("gate {gate} is not in the packs")),

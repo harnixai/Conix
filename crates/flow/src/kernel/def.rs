@@ -72,6 +72,10 @@ pub struct FlowDef {
     /// otherwise; a run of no project works in its own directory whatever this says.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workspace: Option<super::run::Workspace>,
+    /// What a run of it as a child hands its parent task; absent: `{run, stations: {<id>:
+    /// output}}`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub result: Option<FlowResult>,
     pub stations: Vec<Station>,
 }
 
@@ -474,11 +478,59 @@ pub enum ExitCond {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         timeout: Option<String>,
     },
-    /// Every child run of the station finished.
+    /// The station's child runs finished, enough of them delivering (`require`, default all).
     Children {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         label: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        require: Option<Require>,
     },
+}
+
+/// How many of a station's child runs must deliver (docs/design/flows.md §6.2, in Conix):
+/// `all`, `any`, or at least a number. Short of `all`, a child that failed is no failure of the
+/// station by itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(untagged)]
+pub enum Require {
+    AtLeast(u32),
+    Word(RequireWord),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "lowercase")]
+pub enum RequireWord {
+    All,
+    Any,
+}
+
+impl Require {
+    /// How many of `of` must deliver.
+    pub fn needed(self, of: usize) -> usize {
+        match self {
+            Require::Word(RequireWord::All) => of,
+            Require::Word(RequireWord::Any) => 1.min(of),
+            Require::AtLeast(n) => n as usize,
+        }
+    }
+
+    pub fn is_all(self) -> bool {
+        self == Require::Word(RequireWord::All)
+    }
+}
+
+/// What a flow run as a child hands its parent task (docs/design/flows.md §6.1, in Conix):
+/// `from` with its references resolved, checked against `schema`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct FlowResult {
+    #[cfg_attr(feature = "ts", ts(type = "unknown"))]
+    pub from: Value,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(type = "unknown"))]
+    pub schema: Option<Value>,
 }
 
 /// Who decides a confirmation.
@@ -598,7 +650,7 @@ impl ExitCond {
                 who.as_ref()
                     .map_or("confirm".to_string(), |w| format!("confirm by {w}")),
             ),
-            Self::Children { label } => (label, "children finished".to_string()),
+            Self::Children { label, .. } => (label, "children finished".to_string()),
         };
         label.clone().unwrap_or(made)
     }

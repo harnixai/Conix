@@ -266,6 +266,37 @@ impl std::fmt::Display for HostError {
 
 impl std::error::Error for HostError {}
 
+/// A sub-agent task the host saw in a session: what a sub-agent station's output is checked
+/// against before the main session's `flow_submit` of it is taken (docs/design/flows.md §6.4,
+/// in Conix).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AgentTask {
+    /// The engine's task id.
+    pub id: String,
+    /// The sub-agent's own session (its side chain), when known.
+    pub session: Option<String>,
+    pub status: AgentTaskStatus,
+    pub usage: crate::kernel::run::Usage,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AgentTaskStatus {
+    Running,
+    Done,
+    /// Failed or stopped: no answer came of it.
+    Failed,
+}
+
+impl AgentTaskStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            AgentTaskStatus::Running => "running",
+            AgentTaskStatus::Done => "done",
+            AgentTaskStatus::Failed => "failed",
+        }
+    }
+}
+
 /// The sessions a host provides to the runner.
 #[async_trait::async_trait]
 pub trait SessionHost: Send + Sync {
@@ -287,6 +318,12 @@ pub trait SessionHost: Send + Sync {
     async fn note(&self, id: &SessionId, note: Note) -> Result<(), HostError>;
     /// Whether the project at `root` is trusted (an `Err` counts as not).
     async fn project_trusted(&self, root: &Path) -> Result<bool, HostError>;
+    /// The sub-agent tasks of session `id` named `tag` ([`crate::agent_tag`], the `Agent` tool's
+    /// `description`), oldest first. `None`: the host cannot tell, and a sub-agent station's
+    /// submission is taken at the session's word (the default).
+    async fn agent_tasks(&self, _id: &SessionId, _tag: &str) -> Result<Option<Vec<AgentTask>>, HostError> {
+        Ok(None)
+    }
     /// The run is over: whatever the host made for it alone can go. Nothing by default.
     async fn run_over(&self, _run: &str) {}
 }

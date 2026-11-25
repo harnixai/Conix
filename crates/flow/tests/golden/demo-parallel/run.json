@@ -170,6 +170,14 @@
       "tasks": [
         {
           "attempt": 1,
+          "delivery": {
+            "at": 1794787201500,
+            "by": {
+              "id": "dispatch",
+              "kind": "flow"
+            },
+            "executor": "agent"
+          },
           "ended_at": 1794787201500,
           "id": "code",
           "lease": {
@@ -217,6 +225,14 @@
       "tasks": [
         {
           "attempt": 1,
+          "delivery": {
+            "at": 1794787201000,
+            "by": {
+              "id": "dispatch",
+              "kind": "flow"
+            },
+            "executor": "session"
+          },
           "ended_at": 1794787201000,
           "id": "collect",
           "lease": {
@@ -264,6 +280,14 @@
       "tasks": [
         {
           "attempt": 1,
+          "delivery": {
+            "at": 1794787201500,
+            "by": {
+              "id": "dispatch",
+              "kind": "flow"
+            },
+            "executor": "agent"
+          },
           "ended_at": 1794787201500,
           "id": "docs",
           "lease": {

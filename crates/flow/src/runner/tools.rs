@@ -11,10 +11,11 @@ use std::sync::Weak;
 
 use serde_json::{json, Value};
 
-use super::host::{Note, SessionId, ToolSpec};
+use super::host::{AgentTaskStatus, Note, SessionId, ToolSpec};
 use super::state::Binding;
 use super::Runner;
-use crate::kernel::run::Actor;
+use crate::kernel::def::Executor;
+use crate::kernel::run::{Actor, AgentDelivery};
 use crate::kernel::FlowError;
 
 pub const TOOL_STATE: &str = "flow_state";
@@ -167,10 +168,15 @@ async fn state(rn: &Runner, b: &Binding) -> ToolReply {
 
 async fn submit(rn: &std::sync::Arc<Runner>, b: &Binding, session: &SessionId, input: Value) -> ToolReply {
     let output = input.get("output").cloned().unwrap_or(Value::Null);
-    let result = rn
-        .engine()
-        .submit(&b.run, &b.station, &b.task, &b.token, output, Actor::agent(session.clone()))
-        .await;
+    let by = Actor::agent(session.clone());
+    let agent = match sub_agent(rn, b, session).await {
+        Ok(a) => a,
+        Err(why) => return ToolReply::error(why),
+    };
+    let result = match agent {
+        Some(a) => rn.engine().submit_from_agent(&b.run, &b.station, &b.task, &b.token, output, by, a).await,
+        None => rn.engine().submit(&b.run, &b.station, &b.task, &b.token, output, by).await,
+    };
     match result {
         Ok(o) => {
             let status = o.value.get("station").cloned().unwrap_or(Value::Null);
@@ -187,6 +193,60 @@ async fn submit(rn: &std::sync::Arc<Runner>, b: &Binding, session: &SessionId, i
         Err(e) => ToolReply::error(format!("Not accepted: {e}. Your claim on this task is no longer current; stop working on it.")),
     }
 }
+
+/// For a sub-agent task: the sub-agent the output came from, which must have ended with an
+/// answer — otherwise the main session did the task itself, or hands in before it is done.
+/// `Ok(None)`: not a sub-agent task, or the host cannot tell.
+async fn sub_agent(rn: &Runner, b: &Binding, session: &SessionId) -> Result<Option<AgentDelivery>, String> {
+    let rec = rn.engine().record(&b.run).await.map_err(|e| e.to_string())?;
+    let is_agent = rec
+        .def
+        .station(&b.station)
+        .and_then(|s| s.task_spec(&b.task))
+        .is_some_and(|t| matches!(t.executor, Executor::Agent { .. }));
+    if !is_agent {
+        return Ok(None);
+    }
+    let tag = crate::agent_tag(&b.run, &b.station, &b.task);
+    // The `Agent` tool's result can reach the model a moment before the host hears the task end.
+    let mut seen = None;
+    for i in 0..SUB_AGENT_SETTLE_TRIES {
+        if i > 0 {
+            tokio::time::sleep(SUB_AGENT_SETTLE_STEP).await;
+        }
+        let tasks = match rn.host().agent_tasks(session, &tag).await {
+            Ok(Some(t)) => t,
+            Ok(None) => return Ok(None),
+            Err(e) => return Err(format!("Not accepted: the sub-agent could not be looked up ({e}); try again.")),
+        };
+        if let Some(t) = tasks.iter().rev().find(|t| t.status == AgentTaskStatus::Done) {
+            return Ok(Some(AgentDelivery {
+                task: t.id.clone(),
+                session: t.session.clone(),
+                status: t.status.as_str().into(),
+                verified: true,
+                usage: t.usage,
+            }));
+        }
+        let running = tasks.iter().any(|t| t.status == AgentTaskStatus::Running);
+        seen = Some(running);
+        if !running {
+            break;
+        }
+    }
+    Err(match seen {
+        Some(true) => format!(
+            "Not accepted: the sub-agent `{tag}` is still working. Wait for its answer, check it against the contract, then call {TOOL_SUBMIT}."
+        ),
+        _ => format!(
+            "Not accepted: this task is a sub-agent's, and no sub-agent named `{tag}` has answered. Call the `Agent` tool with \
+             `description: \"{tag}\"` to have it done, then hand in its result."
+        ),
+    })
+}
+
+const SUB_AGENT_SETTLE_TRIES: u32 = 6;
+const SUB_AGENT_SETTLE_STEP: std::time::Duration = std::time::Duration::from_millis(500);
 
 async fn propose(rn: &Runner, b: &Binding, session: &SessionId, input: Value) -> ToolReply {
     let kind = input.get("kind").and_then(Value::as_str).unwrap_or("");
@@ -228,7 +288,11 @@ mod tests {
         {id: b, exit: [{kind: confirm}]}]}";
 
     async fn bound() -> (Arc<Runner>, Arc<ScriptedHost>, String, Binding) {
-        let packs = MemPacks::new().scene("flow-harnix").skill("do", "Do it.").flow(FLOW);
+        bound_to(FLOW).await
+    }
+
+    async fn bound_to(flow: &str) -> (Arc<Runner>, Arc<ScriptedHost>, String, Binding) {
+        let packs = MemPacks::new().scene("flow-harnix").skill("do", "Do it.").flow(flow);
         let engine = Arc::new(Engine::new(Arc::new(MemStore::new()), Arc::new(packs)).with_submit_scenes(["flow-harnix"]));
         let host = ScriptedHost::new();
         let rn = Runner::for_tests(engine.clone(), host.clone());
@@ -282,5 +346,46 @@ mod tests {
         // The station passed: the session serves no task any more.
         let over = rn.tools().call(&id, TOOL_STATE, json!({})).await;
         assert!(over.is_error && over.text.contains("not working on a flow task"), "{}", over.text);
+    }
+
+    const AGENT_FLOW: &str = "{name: f, main: {scene: flow-harnix}, stations: [\
+        {id: a, executor: {kind: agent}, skill: do, output: {type: object, required: [n]}, exit: [{kind: output}]},\
+        {id: b, exit: [{kind: confirm}]}]}";
+
+    fn agent(id: &str, status: AgentTaskStatus) -> crate::runner::AgentTask {
+        let usage = crate::Usage { output_tokens: 7, ..Default::default() };
+        crate::runner::AgentTask { id: id.into(), session: Some(format!("side-{id}")), status, usage }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_sub_agent_tasks_output_is_taken_once_its_sub_agent_has_answered() {
+        let (rn, host, id, b) = bound_to(AGENT_FLOW).await;
+        let tag = crate::agent_tag(&b.run, &b.station, &b.task);
+        host.tells_agent_tasks();
+        // Done without a sub-agent: refused, told how.
+        let out = rn.tools().call(&id, TOOL_SUBMIT, json!({"output": {"n": 1}})).await;
+        assert!(out.is_error && out.text.contains(&format!("description: \"{tag}\"")), "{}", out.text);
+        host.agent_task(&tag, agent("t1", AgentTaskStatus::Failed));
+        host.agent_task(&tag, agent("t2", AgentTaskStatus::Running));
+        let out = rn.tools().call(&id, TOOL_SUBMIT, json!({"output": {"n": 1}})).await;
+        assert!(out.is_error && out.text.contains("still working"), "{}", out.text);
+        host.agent_task(&tag, agent("t3", AgentTaskStatus::Done));
+        let out = rn.tools().call(&id, TOOL_SUBMIT, json!({"output": {"n": 1}})).await;
+        assert!(!out.is_error, "{}", out.text);
+        let rec = rn.engine().record(&b.run).await.unwrap();
+        let d = rec.stations["a"].task(&b.task).unwrap().delivery.clone().unwrap();
+        assert_eq!(d.executor, "agent");
+        let a = d.agent.unwrap();
+        assert_eq!((a.task.as_str(), a.session.as_deref(), a.verified, a.usage.output_tokens), ("t3", Some("side-t3"), true, 7));
+    }
+
+    #[tokio::test]
+    async fn a_host_that_cannot_tell_sub_agents_takes_the_sessions_word() {
+        let (rn, _host, id, b) = bound_to(AGENT_FLOW).await;
+        let out = rn.tools().call(&id, TOOL_SUBMIT, json!({"output": {"n": 1}})).await;
+        assert!(!out.is_error, "{}", out.text);
+        let rec = rn.engine().record(&b.run).await.unwrap();
+        let d = rec.stations["a"].task(&b.task).unwrap().delivery.clone().unwrap();
+        assert!(d.agent.is_none() && d.by.kind == crate::AGENT_KIND);
     }
 }

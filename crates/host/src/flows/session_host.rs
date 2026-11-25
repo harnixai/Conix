@@ -8,10 +8,11 @@ use std::path::Path;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use harnix_flow::runner::{
-    Decision, Frame, HostError, Note, OpenSpec, Opened, SessionHost, SessionId, SessionInfo, Watch,
+    AgentTask, AgentTaskStatus, Decision, Frame, HostError, Note, OpenSpec, Opened, SessionHost,
+    SessionId, SessionInfo, Watch,
 };
 use harnix_flow::{Engine, ask_rules};
-use port::{Origin, RunId, StationId};
+use port::{Origin, RunId, StationId, TaskKind, TaskStatus as PortTaskStatus};
 use serde_json::{Value, json};
 
 use super::frames::Translator;
@@ -336,6 +337,40 @@ impl SessionHost for ConixSessionHost {
             .append_entry(id, &note.event, note.payload)
             .await
             .map_err(host_error)
+    }
+
+    /// 主会话的任务表里，description 带这个标记的子 Agent。引擎的 `Agent` 工具前台调用时结果里没有任务 id，
+    /// 模型给不出来，所以按派活时定下的 description 找，不让模型报。
+    async fn agent_tasks(
+        &self,
+        id: &SessionId,
+        tag: &str,
+    ) -> Result<Option<Vec<AgentTask>>, HostError> {
+        let hub = self.hub()?;
+        Ok(Some(
+            hub.tasks_of(id)
+                .into_iter()
+                .filter(|t| t.kind == TaskKind::Agent && t.label.contains(tag))
+                .map(|t| AgentTask {
+                    id: t.id.0,
+                    session: t.agent_session.map(|s| s.0),
+                    status: match t.status {
+                        PortTaskStatus::Done => AgentTaskStatus::Done,
+                        PortTaskStatus::Running | PortTaskStatus::Waiting => {
+                            AgentTaskStatus::Running
+                        }
+                        PortTaskStatus::Failed | PortTaskStatus::Stopped => AgentTaskStatus::Failed,
+                    },
+                    usage: harnix_flow::Usage {
+                        input_tokens: t.usage.input,
+                        output_tokens: t.usage.output,
+                        cache_read_input_tokens: t.usage.cache_read,
+                        cache_creation_input_tokens: t.usage.cache_write,
+                        turns: 0,
+                    },
+                })
+                .collect(),
+        ))
     }
 
     async fn project_trusted(&self, root: &Path) -> Result<bool, HostError> {

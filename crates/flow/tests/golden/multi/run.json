@@ -110,6 +110,14 @@
       "tasks": [
         {
           "attempt": 1,
+          "delivery": {
+            "at": 1794787200500,
+            "by": {
+              "id": "dispatch",
+              "kind": "flow"
+            },
+            "executor": "session"
+          },
           "ended_at": 1794787200500,
           "id": "core",
           "item": "core",
@@ -129,6 +137,14 @@
         },
         {
           "attempt": 1,
+          "delivery": {
+            "at": 1794787200500,
+            "by": {
+              "id": "dispatch",
+              "kind": "flow"
+            },
+            "executor": "session"
+          },
           "ended_at": 1794787200500,
           "id": "ui",
           "item": "ui",
@@ -172,6 +188,14 @@
       "tasks": [
         {
           "attempt": 1,
+          "delivery": {
+            "at": 1794787200000,
+            "by": {
+              "id": "dispatch",
+              "kind": "flow"
+            },
+            "executor": "program"
+          },
           "ended_at": 1794787200000,
           "id": "collect",
           "lease": {
@@ -212,6 +236,14 @@
       "tasks": [
         {
           "attempt": 1,
+          "delivery": {
+            "at": 1794787201000,
+            "by": {
+              "id": "dispatch",
+              "kind": "flow"
+            },
+            "executor": "program"
+          },
           "ended_at": 1794787201000,
           "id": "summary",
           "lease": {
@@ -229,6 +261,14 @@
         },
         {
           "attempt": 1,
+          "delivery": {
+            "at": 1794787201000,
+            "by": {
+              "id": "dispatch",
+              "kind": "flow"
+            },
+            "executor": "external"
+          },
           "ended_at": 1794787201000,
           "id": "sign",
           "lease": {

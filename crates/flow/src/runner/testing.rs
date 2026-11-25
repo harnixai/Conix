@@ -84,6 +84,8 @@ struct State {
     /// Every `open` is refused with this.
     refusing: Option<String>,
     unavailable: bool,
+    /// Tag → the sub-agent tasks seen under it; `None` until one is scripted: the host cannot tell.
+    agent_tasks: Option<HashMap<String, Vec<super::host::AgentTask>>>,
 }
 
 /// A [`SessionHost`] that answers from scripts, and remembers everything asked of it.
@@ -144,6 +146,18 @@ impl ScriptedHost {
     }
 
     /// Every spec opened, in order (an `open` that found its key already counts).
+    /// A sub-agent task seen under `tag` (from then on the host tells, for every tag).
+    pub fn agent_task(&self, tag: &str, task: super::host::AgentTask) -> &Self {
+        self.lock().agent_tasks.get_or_insert_with(HashMap::new).entry(tag.to_string()).or_default().push(task);
+        self
+    }
+
+    /// Tell sub-agent tasks apart, none seen yet.
+    pub fn tells_agent_tasks(&self) -> &Self {
+        self.lock().agent_tasks.get_or_insert_with(HashMap::new);
+        self
+    }
+
     pub fn opened(&self) -> Vec<OpenSpec> {
         self.lock().opened.clone()
     }
@@ -391,6 +405,10 @@ impl SessionHost for ScriptedHost {
         g.live(id)?;
         g.notes.push((id.clone(), note));
         Ok(())
+    }
+
+    async fn agent_tasks(&self, _id: &SessionId, tag: &str) -> Result<Option<Vec<super::host::AgentTask>>, HostError> {
+        Ok(self.lock().agent_tasks.as_ref().map(|m| m.get(tag).cloned().unwrap_or_default()))
     }
 
     async fn project_trusted(&self, root: &Path) -> Result<bool, HostError> {

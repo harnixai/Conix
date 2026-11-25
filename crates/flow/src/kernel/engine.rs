@@ -1008,6 +1008,36 @@ impl Engine {
         output: Value,
         by: Actor,
     ) -> Result<Outcome> {
+        self.submit_with(run, station, task, token, output, by, None).await
+    }
+
+    /// [`Engine::submit`] for a sub-agent task, with the sub-agent task the output came from
+    /// (`flow_submit`'s `agent_task`, as the host saw it end): kept in the task's delivery.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn submit_from_agent(
+        &self,
+        run: &str,
+        station: &str,
+        task: &str,
+        token: &str,
+        output: Value,
+        by: Actor,
+        agent: super::run::AgentDelivery,
+    ) -> Result<Outcome> {
+        self.submit_with(run, station, task, token, output, by, Some(agent)).await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn submit_with(
+        &self,
+        run: &str,
+        station: &str,
+        task: &str,
+        token: &str,
+        output: Value,
+        by: Actor,
+        agent: Option<super::run::AgentDelivery>,
+    ) -> Result<Outcome> {
         transact!(self, by.clone(), |t| {
             t.load(run).await?;
             let now = t.fx.now;
@@ -1037,7 +1067,13 @@ impl Engine {
             check_output(sdef.and_then(|s| s.output).as_ref(), &output).map_err(|e| {
                 FlowError::Contract(format!("output does not satisfy the contract: {e}"))
             })?;
-            t.m(run).task_submitted(station, task, output.clone());
+            let mut m = t.m(run);
+            m.task_submitted(station, task, output.clone());
+            if let Some(a) = agent.clone() {
+                if let Some(d) = m.task_mut(station, task).and_then(|x| x.delivery.as_mut()) {
+                    d.agent = Some(a);
+                }
+            }
             t.settle().await?;
             Ok(json!({"run": run, "station": t.get(run).stations[station].status}))
         })

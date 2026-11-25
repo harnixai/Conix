@@ -188,6 +188,14 @@
       "tasks": [
         {
           "attempt": 1,
+          "delivery": {
+            "at": 1794787203000,
+            "by": {
+              "id": "dispatch",
+              "kind": "flow"
+            },
+            "executor": "session"
+          },
           "ended_at": 1794787203000,
           "id": "review",
           "lease": {

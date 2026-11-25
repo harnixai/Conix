@@ -93,6 +93,10 @@ fn all_packs() -> MemPacks {
         .flow(
             "name: parent\ninputs: {items: {schema: {type: array}}}\nstations: [{id: split, foreach: '${inputs.items}', executor: {kind: subflow, flow: child}, exit: [{kind: children}]}]",
         )
+        .flow("name: rchild\nresult: {from: {verdict: '${stations.do.output.v}', of: '${subject}'}, schema: {type: object, required: [verdict], properties: {verdict: {enum: [ok]}}}}\nstations: [{id: do, executor: {kind: program, step: work}, output: {type: object}, exit: [{kind: output}]}]")
+        .flow(
+            "name: rparent\ninputs: {items: {schema: {type: array}}}\nstations: [{id: split, foreach: '${inputs.items}', executor: {kind: subflow, flow: rchild}, exit: [{kind: children, require: any}]}]",
+        )
         .flow(
             "name: chat\nstations:\n  - {id: one, executor: {kind: session, scene: harnix, session: per_run}, skill: analyze, output: {type: object}, exit: [{kind: confirm}]}\n  - {id: two, executor: {kind: session, scene: harnix, session: per_run}, skill: report, output: {type: object}, exit: [{kind: confirm}]}",
         )
@@ -733,6 +737,34 @@ async fn subflow_station_passes_when_every_child_finished() {
     let out = task(&h, &run, "split", "y").await.output.unwrap();
     assert_eq!(out["run"], json!("child-2"));
     assert_eq!(out["stations"]["do"], json!({"done": "y"}));
+}
+
+#[tokio::test]
+async fn a_childs_declared_result_is_what_its_parent_task_gets_and_any_child_may_do() {
+    let h = h();
+    let (run, o) = start_with(&h, "rparent", json!({"items": ["x", "y"]})).await;
+    let js = jobs(&o);
+    submit(&h, &js[0], json!({"v": "ok"})).await;
+    assert_eq!(
+        task(&h, &run, "split", "x").await.output,
+        Some(json!({"verdict": "ok", "of": "x"}))
+    );
+    let o = submit(&h, &js[1], json!({"v": "bad"})).await;
+    let failed = task(&h, &run, "split", "y").await;
+    assert_eq!(failed.status, TaskStatus::Failed);
+    assert!(
+        failed.error.as_deref().unwrap_or("").contains("result schema"),
+        "{:?}",
+        failed.error
+    );
+    // One of two delivered is enough for `require: any`.
+    assert!(
+        o.events.iter().any(|e| e.kind == "run.finished" && e.run == run),
+        "{:?}",
+        kinds(&o)
+    );
+    let st = h.eng.get(&run).await.unwrap().record.stations["split"].clone();
+    assert!(st.checks.iter().all(|c| c.kind != "task"), "{:?}", st.checks);
 }
 
 #[tokio::test]

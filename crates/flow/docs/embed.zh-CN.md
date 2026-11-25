@@ -351,6 +351,15 @@ Conix 在 Harnix 0.4.7 分叉了这个库，先把站的治理（门禁、确认
   插件管着的流程和它所有的件，在每个项目里都是插件的——项目里同名的被挡下、存不进去；`RunRecord::governed` 标记这样的运行，
   `Engine::force` 拒绝它。
 
+- **交付**：每个任务交付时记 `TaskRec::delivery`（`DeliveryRec`：谁、什么时候、哪种执行者）。子 Agent 站（`kind: agent`）
+  由主会话 `flow_submit` 时，派工器先问宿主 **`SessionHost::agent_tasks(session, agent_tag(..))`**（`AgentTask`、
+  `AgentTaskStatus`；缺省 `None`：宿主分不出，照旧收下）：没有一个答完了的子 Agent 就不收，在跑的等它答完；收下时经
+  `Engine::submit_from_agent` 记进 `DeliveryRec::agent`（`AgentDelivery`：任务、侧链会话、用量）。`ScriptedHost::agent_task`、
+  `tells_agent_tasks` 供测试。
+- **子流程的结果**（`FlowDef::result`，`FlowResult{from, schema}`）：写了的，子运行结束时按 `from` 解析引用、按 `schema`
+  校验，交给父任务的就是它，不合规父任务失败；不写照旧是 `{run, stations}`。**`children` 出口的 `require`**（`Require`、
+  `RequireWord`：`all`（缺省）、`any`、至少几个）：不到 `all` 时，失败的子运行不单算这一站不过，由 `children` 数交付的个数。
+
 ### `FLOW_API_VERSION = 1`
 
 库的第一版：内核、存储、流程包、试运行从 `harnix-ext-flow` 搬出来；`DEFINITION_FORMAT = 1`、`RUN_FORMAT = 1`。首次发布之前，

@@ -478,6 +478,18 @@ is so as not to collide with Harnix's own next one; what changes for a host is l
   the plugin's in every project — a project's own of those names is withheld and cannot be saved;
   `RunRecord::governed` marks a run of one, and `Engine::force` refuses it.
 
+- **Deliveries**: every task records how its output came in, `TaskRec::delivery` (`DeliveryRec`: who, when,
+  which kind of executor). For a sub-agent station (`kind: agent`) the main session's `flow_submit` is taken only
+  once the host's **`SessionHost::agent_tasks(session, agent_tag(..))`** (`AgentTask`, `AgentTaskStatus`; default
+  `None`: the host cannot tell, and the submission is taken) shows a sub-agent that answered; one still running is
+  waited for. `Engine::submit_from_agent` keeps it in `DeliveryRec::agent` (`AgentDelivery`: task, side-chain
+  session, usage). `ScriptedHost::agent_task` and `tells_agent_tasks` are for tests.
+- **A subflow's result** (`FlowDef::result`, `FlowResult{from, schema}`): when written, a child run hands its parent
+  task `from` with its references resolved, checked against `schema` (short of it, the parent task fails); without
+  it, `{run, stations}` as before. **A `children` exit's `require`** (`Require`, `RequireWord`: `all` by default,
+  `any`, or at least a number): short of `all`, a failed child is not by itself the station's failure; `children`
+  counts the deliveries.
+
 ### `FLOW_API_VERSION = 1`
 
 The library's first version: the kernel, stores, packs and dry runs move out of `harnix-ext-flow`;

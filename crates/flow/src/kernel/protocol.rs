@@ -277,7 +277,8 @@ pub fn render(t: &TaskContext) -> String {
              with {} and a prompt that gives the sub-agent the task — the item, the contract, \
              the rules and the skill below — and tells it to reply with the result only. When it \
              answers, check its result against the contract and hand it in with `flow_submit`; if \
-             it falls short, call it again with what is missing.\n",
+             it falls short, call it again with what is missing. A submission is taken only once a \
+             sub-agent with that description has answered.\n",
             how.join(", ")
         ));
     }

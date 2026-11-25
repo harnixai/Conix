@@ -272,6 +272,30 @@ fn children_only_with_subflow() {
 }
 
 #[test]
+fn children_require_and_a_result_are_checked() {
+    assert_problem(
+        "name: x\nstations: [{id: a, executor: {kind: subflow, flow: x}, exit: [{kind: children, require: 2}]}]",
+        "only 1 task",
+    );
+    assert_problem(
+        "name: x\nstations: [{id: a, executor: {kind: subflow, flow: x}, exit: [{kind: children, require: 0}]}]",
+        "at least 1",
+    );
+    assert_problem(
+        "name: x\nresult: {from: '${item.k}'}\nstations: [{id: a, exit: [{kind: confirm}]}]",
+        "a result may refer to",
+    );
+    assert_problem(
+        "name: x\nresult: {from: '${stations.b.output}'}\nstations: [{id: a, exit: [{kind: confirm}]}]",
+        "no station b",
+    );
+    assert_problem(
+        "name: x\nresult: {from: 1, schema: {type: 12}}\nstations: [{id: a, exit: [{kind: confirm}]}]",
+        "result.schema is not a valid JSON Schema",
+    );
+}
+
+#[test]
 fn session_tasks_need_skill_and_scene() {
     assert_problem(
         "name: x\nstations: [{id: a, executor: {kind: session, scene: harnix}, exit: [{kind: confirm}]}]",

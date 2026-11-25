@@ -61,8 +61,8 @@ pub mod wire;
 
 pub use dryrun::{Mocks, Sandbox};
 pub use kernel::def::{
-    definition_schema, duration_ms, Assert, ConfirmVia, DecisionMap, Executor, ExitCond, McpApproval, McpCall, FlowDef, Guard, InputDef, MainSession,
-    OnUnmet, Retry, SessionBinding, Station, TaskSpec, Work, DEFAULT_OUTPUT_DIR, DEFAULT_REWORK_LIMIT,
+    definition_schema, duration_ms, Assert, ConfirmVia, DecisionMap, Executor, ExitCond, FlowResult, McpApproval, McpCall, FlowDef, Guard, InputDef, MainSession,
+    OnUnmet, Require, RequireWord, Retry, SessionBinding, Station, TaskSpec, Work, DEFAULT_OUTPUT_DIR, DEFAULT_REWORK_LIMIT,
     EFFORTS, MAIN_SESSION_KEY, MAX_REWORK_LIMIT,
 };
 pub use kernel::engine::{
@@ -80,8 +80,8 @@ pub use kernel::parts::{
 };
 pub use kernel::protocol::{agent_tag, ask_rules, skill_body, STRUCTURED_OUTPUT_TOOL};
 pub use kernel::run::{
-    run_schema, Actor, ApprovalRec, BoundSession, CheckRec, CheckStatus, ConfirmRec, Evidence, Finding, ForcedRec, GateVerdict, History, Lease, ParentRef, Severity,
-    AskRec, PauseRec, Phase, ReworkRec, RunQuery, RunRecord, RunStatus, RunSummary, RunView, StationRec,
+    run_schema, Actor, AgentDelivery, ApprovalRec, BoundSession, CheckRec, CheckStatus, ConfirmRec, Evidence, Finding, ForcedRec, GateVerdict, History, Lease, ParentRef, Severity,
+    AskRec, DeliveryRec, PauseRec, Phase, ReworkRec, RunQuery, RunRecord, RunStatus, RunSummary, RunView, StationRec,
     StationStatus, TaskRec, TaskStatus, Trigger, Usage, Workspace, WorktreeEnd, WorktreeOutcome,
     WorktreeRec, AGENT_KIND, DEVICE_KIND, FLOW_KIND,
 };
