@@ -27,7 +27,7 @@ fn os_user() -> String {
         .unwrap_or_else(|| uid.to_string())
 }
 
-/// 项目的 `.conix/flows/roles.yaml`：角色 → 能确认的操作系统用户名。进 git，改它要走代码评审；
+/// 项目的 `.conix/roles.yaml`：角色 → 能确认的操作系统用户名。进 git，改它要走代码评审；
 /// 读不到、读不懂就当没有（角色没列出来，任何人都行）。
 pub struct ConixAuthorizer {
     pub roles_file: PathBuf,

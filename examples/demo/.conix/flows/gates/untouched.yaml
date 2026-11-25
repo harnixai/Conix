@@ -1,0 +1,4 @@
+name: untouched
+title: 过了门禁的文件没被改过
+kind: check
+check: sealed

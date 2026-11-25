@@ -1,0 +1,7 @@
+name: brief-stats
+title: 简报的篇幅
+kind: command
+command: sh "$FLOW_WORKSPACE/tools/brief-stats.sh" brief.md
+cwd: "${output_dir}"
+result: json
+timeout_seconds: 30

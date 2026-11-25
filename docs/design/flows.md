@@ -175,13 +175,17 @@ exit:
 ```
 
 **确认是人的决定，任何工具调用都不能完成它。** 会话的工具表里没有 `flow_confirm`、`flow_force`、`flow_release`；
-授权（`ConixAuthorizer`）也只认人：会话里的模型（不论权限模式）、子 Agent 做这几件事一律拒绝，告诉它"这要人在流程标签里做"；
-运行里的会话本来就不能操作运行（沿用）。人在 TUI 里做的，
-记成 `Actor{kind: "person", id: <操作系统用户名>}`。
+授权（`ConixAuthorizer`）也只认人：会话里的模型（不论权限模式）、子 Agent 做这几件事一律拒绝，告诉它"请用户打 `/confirm`"这类；
+运行里的会话本来就不能操作运行（沿用）。
 
-**`via: person`**：在 TUI 里确认。实例的 socket 是 0600，接得进来的只有实例的主人，所以"人"就是这个操作系统用户。
-- `who` 写了角色：项目的 `.conix/flows/roles.yaml`（进 git，`reviewer: [alice, bob]`）里列了这个角色、主人不在里面，
-  就不能在本机确认——这种站要"别人"批，用 `via: mcp`。角色没列出来，任何人都行，界面上标"未指定"。
+**人怎么做**：流程标签不放操作键（interaction §5），这几件事又不能"在对话里说给模型"，所以是人在输入框里打的斜杠命令：
+`/confirm`、`/reject <理由>`、`/release`、`/force <理由>`，写法 `[运行] [站] [理由]`，运行与站不写时取选中的运行与唯一在等的站。
+命令不进会话，经端口（`RunOp`）直接发给实例，记成 `Actor{kind: "person", id: <操作系统用户名>}`。
+
+**`via: person`**：实例的 socket 是 0600，接得进来的只有实例的主人，所以"人"就是这个操作系统用户。
+- `who` 写了角色：项目的 `.conix/roles.yaml`（进 git，`reviewer: [alice, bob]`）里列了这个角色、主人不在里面，
+  就不能在本机确认——这种站要"别人"批，用 `via: mcp`。角色没列出来，任何人都行。文件不放在流程包目录
+  `.conix/flows/` 里：那里的每个 yaml 都当流程读。
 
 **`via: mcp`**：走外部审批系统（飞书、钉钉、Jira……）。
 
@@ -271,6 +275,9 @@ exit: [{kind: children, require: all}]   # all（缺省）| any | 正整数：�
 | Conix 的授权（人、角色、受管） | `crates/host/src/flows/authorize.rs`（新） |
 | Conix 的审批（MCP） | `crates/host/src/flows/approvals.rs`（新） |
 | `[x-conix] governed`、`command_gates` | `crates/host/src/plugins/mod.rs`、`crates/host/src/config` |
+| 人做的决定（`/confirm` 等） | `crates/model/src/flows.rs`（`person_op`）、`port::RunOp::Confirm{reject, reason}` |
+| 写流程的会话：试门禁、指南分章 | `crates/flow/src/author.rs`（`flow_gate_try`、`flow_guide {topic}`）、`runner/gate.rs`（`try_gate`）、`docs/guide/` |
+| 演示项目 | `examples/demo/`（流程、门禁、脚本、作业）；`crates/flow/tests/demo.rs` 不调模型地查它，`crates/conix/tests/live_demo.rs` 用真实模型跑它 |
 
 ## 8. 往回迁
 

@@ -78,6 +78,7 @@ Conix 的 `[x-conix]` 一段由 Conix 读：它带来的流程包、host 门禁�
 4. 运行走到验证站时停下等你确认；确认后归档：规格增量并进 `xforge/specs/`，变更拷进 `xforge/archive/`。
 
 模型直接写的只有 `xforge/changes/<id>/` 下的 `proposal.md`、`design.md`、`verification.md`；规格增量、台账、工作包
-只经 `xspec` / `xflow` 命令写（守卫挡住直接改）。门禁 `xforge-unclaimed` 跑 `git status`，`xforge-unit-tests` 跑
-manifest 里的验证命令：要在项目设置里给它们 `permissions.allow` 规则，没给时门禁不过并写明要哪条。
-数据格式与七道门禁的判定见 `docs/design/plugins.md` §6.6。
+只经 `xspec` / `xflow` 命令写（守卫挡住直接改）。写没写、台账有没有悬而未决、工作包做没做完这几道门禁是声明的
+（`check`），流程库自己判；规格增量、原则对照、改动范围、验证命令四道由插件判。`xforge-unclaimed` 跑 `git status`，
+`xforge-unit-tests` 跑 manifest 里的验证命令：要在项目设置里给它们 `permissions.allow` 规则，没给时门禁不过
+并写明要哪条。数据格式与每道门禁的判定见 `docs/design/plugins.md` §6.6。

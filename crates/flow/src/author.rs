@@ -523,6 +523,7 @@ impl Cx<'_> {
         }
         // The current flow, if it is still one of these packs'.
         let current = self.host.current(self.session).await.filter(|f| packs.flow(f).is_some());
+        let shared = packs.clone();
         let packs = packs.as_ref();
         match does {
             Does::List => {
@@ -606,7 +607,7 @@ impl Cx<'_> {
                 self.host.notice(Notice::Packs).await;
                 Ok(v)
             }
-            Does::DryRun => self.dry_run(input, current.as_deref()).await,
+            Does::DryRun => self.dry_run(input, current.as_deref(), shared).await,
             Does::GateTry => {
                 self.authorize(&Op::ReadFlows, None)?;
                 self.gate_try(input, packs, project.as_deref()).await
@@ -813,7 +814,8 @@ impl Cx<'_> {
         Ok(out)
     }
 
-    async fn dry_run(&self, input: &Value, current: Option<&str>) -> Answer {
+    /// A dry run over the packs the conversation reads: a project's flows are its own.
+    async fn dry_run(&self, input: &Value, current: Option<&str>, packs: Arc<dyn Packs>) -> Answer {
         let name = self.target(input, current)?;
         self.authorize(&Op::DryRun { flow: name.clone() }, None)?;
         let start = StartIn {
@@ -826,7 +828,7 @@ impl Cx<'_> {
             ..Default::default()
         };
         let sandbox = self.sandbox;
-        let run = sandbox.start(start, self.by.clone()).await.map_err(|e| format!("the dry run did not start: {e}"))?;
+        let run = sandbox.start_in(start, self.by.clone(), packs).await.map_err(|e| format!("the dry run did not start: {e}"))?;
         let progress = sandbox.run(&run).await;
         self.host.notice(Notice::DryRun { run: run.clone() }).await;
         let progress = progress.map_err(|e| e.to_string())?;

@@ -1,0 +1,8 @@
+name: digest-complete
+title: 至少有一份摘要
+kind: check
+check: output
+value: "${stations.each.output}"
+schema:
+  type: array
+  contains: {type: object, required: [path, line]}

@@ -194,12 +194,9 @@ pub async fn start(hub: &Hub, cfg: FlowsConfig) -> anyhow::Result<Arc<Flows>> {
             .with_submit_scenes(rcfg.profiles.clone())
             .with_main_scene(SCENE)
             .with_workspaces(cfg.workspaces_dir)
+            // 不放进流程包目录（`.conix/flows/`）：那里的每个 yaml 都当流程读。
             .with_authorizer(Arc::new(authorize::ConixAuthorizer {
-                roles_file: harnix_flow::project_pack_dir(
-                    std::path::Path::new(hub.project()),
-                    &layout,
-                )
-                .join("roles.yaml"),
+                roles_file: std::path::Path::new(hub.project()).join(".conix/roles.yaml"),
             }))
             .with_layout(layout),
     );

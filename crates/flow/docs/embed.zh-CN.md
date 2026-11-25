@@ -367,6 +367,9 @@ Conix 在 Harnix 0.4.7 分叉了这个库，先把站的治理（门禁、确认
 - **指南分章**（`GUIDE_TOPICS`、`guide_topic`）：`flow_guide {topic}` 给 `gates`、`confirm`、`deliver` 的整章，总览里只留
   要点并指过去；**`AuthorHost::guide_notes`** 让宿主在后面接上它自己的做法（谁确认、流程存在哪、打开了什么）。
 
+- **试运行用会话所在的流程包**：`Sandbox::start_in(input, by, packs)`；`flow_dry_run` 用会话读的那份（项目的流程、件），
+  不再只看应用自己的包——项目里的流程以前试运行时找不到。
+
 ### `FLOW_API_VERSION = 1`
 
 库的第一版：内核、存储、流程包、试运行从 `harnix-ext-flow` 搬出来；`DEFINITION_FORMAT = 1`、`RUN_FORMAT = 1`。首次发布之前，

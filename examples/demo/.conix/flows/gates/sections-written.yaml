@@ -1,0 +1,6 @@
+name: sections-written
+title: 每节都写好了
+kind: check
+check: files
+paths: ["${output_dir}/sections/*.md"]
+not_containing: ["TODO", "TBD", "（待补）"]

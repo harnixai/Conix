@@ -401,17 +401,24 @@ XForge 原来的文件格式（回执、投影、审计链、多方案）第一�
 | `xforge.check` | 按 `input.gate` 判一道门禁，回 `{pass, detail}` |
 | `xforge.command` | 宿主跑三个命令之一：`{argv: ["xflow", "plan", "list"], change?}` → 命令的结果（测试与以后的面板用） |
 
-**门禁**（`xforge.check`，只读）：
+**门禁**：能声明的由流程库自己判（`check`，design/flows.md §2），要读基线、跑命令的由插件判（`kind: script` +
+`function:`，经 `[x-conix.gates]` 落到 `xforge.check`）。插件的 `xflow check` 与归档前的检查用的是插件自己那份判法，
+所以要读基线、跑命令的这几道只写一份，在插件里。
 
-| 门禁 | 过的条件 |
-|---|---|
-| `xforge-structure` | 按站：`propose` 要 `proposal.md` 写过（没有模板标记、非空）且 `delta.yaml` 读得出；`design` 要 `design.md` 写过、`work-packages.yaml` 至少一个包且每个包有 `paths`；`verify` 要 `verification.md` 写过 |
-| `xforge-spec-delta` | 增量非空；每条字段齐；`added` 的编号在基线里没有、也不在 `retired` 里；`modified` / `removed` 的编号在基线里有 |
-| `xforge-constitution` | `constitution.md` 有原则时，`design.md` 里提到每个编号（`P1` …）；缺的列出来 |
-| `xforge-ledgers` | 三个台账里没有 `conclusion: open` 的条目 |
-| `xforge-integrated` | 工作包都 `done` |
-| `xforge-unclaimed` | `git status --porcelain` 里改过的路径都落在某个包的 `paths` 里或在 `xforge/` 下；不落的列出来 |
-| `xforge-unit-tests` | 每个写了 `verify` 的包，跑 `manifest.yaml` 里那条命令，退出码都是 0；整道门禁至多 10 分钟 |
+| 门禁 | 谁判 | 过的条件 |
+|---|---|---|
+| `xforge-proposal` | `check: files` | `proposal.md` 写过：非空、没有模板标记（`propose` 站） |
+| `xforge-design` | `check: files` | `design.md` 写过（`design` 站） |
+| `xforge-packages-planned` | `check: schema` | `work-packages.yaml` 至少一个包，每个包有 `paths`（`design` 站） |
+| `xforge-verification` | `check: files` | `verification.md` 写过（`verify` 站） |
+| `xforge-ledgers` | `check: schema` | 三个台账里没有 `conclusion: open` 的条目 |
+| `xforge-integrated` | `check: schema` | 工作包都 `done` |
+| `xforge-spec-delta` | 插件 | 增量读得出、非空；每条字段齐；`added` 的编号在基线里没有、也不在 `retired` 里；`modified` / `removed` 的编号在基线里有 |
+| `xforge-constitution` | 插件 | `constitution.md` 有原则时，`design.md` 里提到每个编号（`P1` …）；缺的列出来 |
+| `xforge-unclaimed` | 插件 | `git status --porcelain` 里改过的路径都落在某个包的 `paths` 里或在 `xforge/` 下；不落的列出来 |
+| `xforge-unit-tests` | 插件 | 每个写了 `verify` 的包，跑 `manifest.yaml` 里那条命令，退出码都是 0；整道门禁至多 10 分钟 |
+
+插件里还留着 `structure` 一道（按站判提案、设计、验证写没写），给 `xflow check` 用；流程里换成了上面四道声明的。
 
 不带会话的调用要问人的一律失败：`unclaimed`、`unit-tests` 跑的命令被拒时，`detail` 写明要在项目设置里给哪条
 `permissions.allow` 规则（如 `"Bash(git status:*)"`）。

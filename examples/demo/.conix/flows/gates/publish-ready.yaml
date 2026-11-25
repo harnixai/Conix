@@ -1,0 +1,5 @@
+name: publish-ready
+title: 要发布的简报在
+kind: check
+check: files
+paths: ["${inputs.brief}"]

@@ -252,11 +252,11 @@ fn guide_notes(topic: Option<&str>, zh: bool, command_gates: bool) -> Option<Str
         (Some("gates"), false) => format!("## In Conix\n\n- {cmd}\n- `flow_gate_try` is not read-only (a command gate runs a command): by the session's permission settings it may ask the user first."),
         (Some("confirm"), true) => "## 在 Conix 里\n\n\
             - 确认的人是实例的主人（操作系统用户），在输入框里打 `/confirm` 或 `/reject <理由>`。\n\
-            - `who` 的角色在项目的 `.conix/flows/roles.yaml` 里列出谁能确认（`reviewer: [alice, bob]`，按操作系统用户名）；没列出的角色任何人都行。主人不在名单里的站，要用 `via: mcp` 请名单上的人批。\n\
+            - `who` 的角色在项目的 `.conix/roles.yaml` 里列出谁能确认（`reviewer: [alice, bob]`，按操作系统用户名）；没列出的角色任何人都行。主人不在名单里的站，要用 `via: mcp` 请名单上的人批。\n\
             - `via: mcp` 的站只能由审批系统决定，用户在 Conix 里不能代批。它经 Agix 调 MCP 工具（`mcp.callTool`，harnixai/Agix#111）：引擎还不支持时，这条出口是 error。".to_string(),
         (Some("confirm"), false) => "## In Conix\n\n\
             - The one who confirms is the instance's owner (the OS user), typing `/confirm` or `/reject <reason>`.\n\
-            - A `who` role lists who may confirm in the project's `.conix/flows/roles.yaml` (`reviewer: [alice, bob]`, by OS user name); a role not listed: anyone. Where the owner is not listed, use `via: mcp` to have a listed person approve.\n\
+            - A `who` role lists who may confirm in the project's `.conix/roles.yaml` (`reviewer: [alice, bob]`, by OS user name); a role not listed: anyone. Where the owner is not listed, use `via: mcp` to have a listed person approve.\n\
             - A `via: mcp` station is decided by the approval system alone; the user cannot approve it in Conix. It calls MCP tools through Agix (`mcp.callTool`, harnixai/Agix#111): an engine without it makes this exit an error.".to_string(),
         _ => return None,
     };

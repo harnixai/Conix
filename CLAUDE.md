@@ -39,6 +39,7 @@ crates/flow/   流程库，分叉自 Harnix；不跟 Conix 的格式化（目录
 3rds/          拷进来的第三方代码；只有 INDEX.md 入库
 docs/reqs/     需求规格
 docs/design/   架构与交互设计
+examples/demo/ 演示项目：流程（三类门禁、确认、子流程、外部审批）与作业都有，LIVE 测试照原样跑它
 archive/       旧实现 AttaCode 的本地副本，不入库，只作参考
 .local/        过程文档（分析、评估、草稿），不入库
 ```

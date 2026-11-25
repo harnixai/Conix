@@ -1,0 +1,20 @@
+[
+  {
+    "id": "notes-check",
+    "name": "笔记巡检",
+    "cron": "0 9 * * *",
+    "kind": {
+      "simple": {
+        "prompt": "检查项目 notes/ 下的每一份笔记：有没有空文件、有没有 TODO 或 TBD、有没有没写一级标题的。不要改任何文件，用三五行回报结果。"
+      }
+    },
+    "guard": {"timeout_ms": 600000, "max_tokens": 200000}
+  },
+  {
+    "id": "weekly-brief",
+    "name": "每周简报",
+    "cron": "0 10 * * 1",
+    "kind": {"flow": {"flow": "brief", "subject": "服务可靠性：超时、重试与缓存", "inputs": {}}},
+    "guard": {"timeout_ms": 3600000}
+  }
+]

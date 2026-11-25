@@ -26,4 +26,5 @@ workspace 的成员。为什么分叉、改成什么样见 `docs/design/flows.md
 | 门禁分 check / command / script 三类；统一的门禁结果（verdict、findings、evidence、metrics）与 `CheckStatus::Error`；`rerun_gates`；命令门禁的 `env` 白名单与 `result: json`；打回时把没过的检查告诉新一轮（`StationRec::reworked`）；脚本件 `scripts/*.js` | flows.md §2–§3 | 9e18354 | 否 |
 | 确认：`timeout`（`duration_ms`，`tick` 与 `next_expiry` 算进去）、`via: mcp` 外部审批（`Approvals`、`WorkItem::Approval`、`approval_*`，单号记在 `StationRec::approvals`）；`ConfirmRec` 带 `via` 与 `ref`；受管流程（`DirPacks::with_governed`、`Packs::governed`、`Withheld::Governed`、`RunRecord::governed`，不能强制放行） | flows.md §4–§5 | 00d6545 | 否 |
 | 交付：`TaskRec::delivery`（`DeliveryRec`）；子 Agent 站的交付先经 `SessionHost::agent_tasks` 核实子 Agent 已答完（`AgentDelivery`、`Engine::submit_from_agent`）；子流程声明 `result`（`FlowResult`）；`children` 出口的 `require`（`Require`：all / any / 至少几个） | flows.md §6 | 0eb4c6e | 否 |
-| 试门禁 `flow_gate_try`（`TOOL_GATE_TRY`；同一段代码判、什么都不记）；指南分章 `flow_guide {topic}`（`GUIDE_TOPICS`、`guide_topic`：gates / confirm / deliver），总览指过去；`AuthorHost::guide_notes` 让宿主接上自己的做法 | flows.md §2–§6 | （本次） | 否 |
+| 试门禁 `flow_gate_try`（`TOOL_GATE_TRY`；同一段代码判、什么都不记）；指南分章 `flow_guide {topic}`（`GUIDE_TOPICS`、`guide_topic`：gates / confirm / deliver），总览指过去；`AuthorHost::guide_notes` 让宿主接上自己的做法 | flows.md §2–§6 | ad5c8bf | 否 |
+| 试运行用会话读的流程包（`Sandbox::start_in`）：项目里的流程以前试运行时找不到 | — | （本次） | 否 |

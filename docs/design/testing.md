@@ -201,6 +201,7 @@ mock 那一套不动，真实后端按层另加用例，全部离线、不调模
 | `live_prompts.rs` | 权限的拒绝与本会话总是允许、提问超时被引擎撤回、改文件的 `file_changes` 与 diff |
 | `live_limits.rs` | 一轮因 `turn.max_model_calls` 以 `MaxTurns` 收尾、因预算以 `Budget` 收尾 |
 | `live_config.rs` / `live_config_conix.rs` | 会话里配置自己：provider 的加、测、切、退；`config_show`、`conix_config_set`（校验、备份、jobs 当场生效）；排在前面的 provider 连不上时引擎换到下一个并推 `ProviderSwitched` |
+| `live_demo.rs` | 演示项目 `examples/demo` 照原样跑：`brief` 的三类门禁（`check`、`script`、`command`）都真判过、证据进运行记录，子 Agent 的交付核实过子 Agent，主会话在 DeepSeek、子 Agent 站与独立会话站在 Claude，两家都花了 token；签发站模型确认不了、`roles.yaml` 名单外的人被拒、实例主人确认后结束并记成 `person`。`digest` 的子运行交给父任务的是子流程声明的 `result`（`require: any`）。`publish` 的外部审批：引擎没有 `mcp.callTool`（Agix#111）时是 error 并写明缺什么，有了就建单、在演示审批系统里批、记下审批人与单号。演示的作业读得出、是停用的，简单作业立即跑一次有结果 |
 | `live_models.rs` | 一次运行用两个模型（DeepSeek 与 Anthropic）：一站生成、一站检视，各在自己的会话里、各走自己的 provider（正反各一次）；检视打回、人照结论退回生成站，两轮都还在各自的模型上（返工不带理由，第几轮该怎么写放在技能里）；主会话在 DeepSeek 上、子 Agent 站点名 Claude 的模型，子 Agent 的任务报它实际用的模型与 provider。看会话上记的模型、两家的用量记录（`<data_root>/quota/<id>.json`，只有带 `quota` 的 provider 才记）、运行时目录里的报告。`.env` 没有 `CLAUDE_API_KEY` / `CLAUDE_MODEL` 就跳过 |
 | `live_plugins.rs` | 插件：包装进去、启用、插件的流程能跑；xforge 从 open 到 archive |
 

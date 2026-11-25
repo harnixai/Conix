@@ -499,6 +499,10 @@ is so as not to collide with Harnix's own next one; what changes for a host is l
   `confirm` or `deliver`, the overview keeping the gist and pointing there; **`AuthorHost::guide_notes`** lets the
   host add how its own application does things (who confirms, where flows are saved, what is turned on).
 
+- **A dry run over the conversation's packs**: `Sandbox::start_in(input, by, packs)`; `flow_dry_run` uses the
+  packs the conversation reads (a project's flows and parts), not only the application's — a project's flow was
+  not found by a dry run before.
+
 ### `FLOW_API_VERSION = 1`
 
 The library's first version: the kernel, stores, packs and dry runs move out of `harnix-ext-flow`;

@@ -1,0 +1,7 @@
+name: brief-shape
+title: 简报的结构
+kind: check
+check: text
+file: "${output_dir}/brief.md"
+matches: ["(?m)^# ", "(?m)^## 摘要", "(?m)^## 结论", "(?m)^## 来源"]
+not_matches: ["TODO", "TBD"]

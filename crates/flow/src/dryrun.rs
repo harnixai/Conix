@@ -321,6 +321,12 @@ impl Sandbox {
     /// Start a dry run; its first work is queued, not taken. `value`: the run id. Starting one
     /// beyond [`KEEP`] drops the oldest.
     pub async fn start(&self, input: StartIn, by: Actor) -> Result<String> {
+        self.start_in(input, by, self.packs.clone()).await
+    }
+
+    /// [`Sandbox::start`] over other packs than the sandbox's own: a project's, whose flows and
+    /// parts the application's packs do not have.
+    pub async fn start_in(&self, input: StartIn, by: Actor, base: Arc<dyn Packs>) -> Result<String> {
         let extra = match (&input.flow, &input.yaml) {
             (_, Some(text)) => {
                 let def = FlowDef::parse(text)
@@ -342,7 +348,7 @@ impl Sandbox {
             (None, None) => unreachable!(),
         };
         let packs: Arc<dyn Packs> = Arc::new(SandboxPacks {
-            base: self.packs.clone(),
+            base,
             extra,
         });
         let seq = self.seq.clone();
