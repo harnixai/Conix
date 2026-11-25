@@ -800,3 +800,111 @@ fn def_action(s: &mut State, a: Action, name: &str) -> Option<Vec<Effect>> {
         _ => None,
     }
 }
+
+/// 只有人能做的站上的决定（design/flows.md §4–§5）：`/confirm`、`/reject`、`/release`、`/force`。会话里的模型
+/// 没有这几个工具，标签上也不放操作键（交互 §5），所以由人在输入框里打：打出来的就是人的决定，不经模型。
+///
+/// `[运行] [站] [理由]`：运行不写，是流程标签里选中的运行、或左边正对着的运行主会话；站不写，是这个运行里唯一
+/// 在等这件事的站。驳回与强制放行要写理由。
+pub(crate) fn person_op(s: &mut State, name: &str, arg: &str) -> Vec<Effect> {
+    let mut words: Vec<&str> = arg.split_whitespace().collect();
+    let known = |id: &str| s.domain.run_views.contains_key(&RunId(id.to_string()));
+    let run = match words.first() {
+        Some(w) if known(w) => Some(RunId(words.remove(0).to_string())),
+        _ => s.selected_run().map(|v| v.summary.id.clone()).or_else(|| {
+            let chat = s.ui.chat.as_ref()?;
+            s.domain
+                .run_views
+                .values()
+                .find(|v| {
+                    &v.main_session == chat
+                        || v.stations
+                            .iter()
+                            .any(|st| st.session.as_ref() == Some(chat))
+                })
+                .map(|v| v.summary.id.clone())
+        }),
+    };
+    let Some(view) = run.and_then(|r| s.domain.run_views.get(&r)).cloned() else {
+        s.notice(i18n::t!("flows.person_no_run", cmd = name), true);
+        return vec![];
+    };
+    let waits = |st: &port::StationView| match name {
+        "confirm" | "reject" => {
+            matches!(st.status, StationStatus::Working | StationStatus::Unmet)
+                && st.exit.iter().any(|e| e.starts_with("confirm"))
+        }
+        "release" => st.status == StationStatus::Held,
+        _ => st.status == StationStatus::Unmet,
+    };
+    let named = words.first().and_then(|w| {
+        view.stations
+            .iter()
+            .find(|st| st.id.0 == *w || st.title == *w)
+    });
+    let station = match named {
+        Some(st) => {
+            words.remove(0);
+            st.id.clone()
+        }
+        None => {
+            let candidates: Vec<&port::StationView> =
+                view.stations.iter().filter(|st| waits(st)).collect();
+            match candidates.as_slice() {
+                [one] => one.id.clone(),
+                [] => {
+                    s.notice(i18n::t!("flows.person_no_station", cmd = name), true);
+                    return vec![];
+                }
+                many => {
+                    let ids: Vec<&str> = many.iter().map(|st| st.id.0.as_str()).collect();
+                    s.notice(
+                        i18n::t!(
+                            "flows.person_which_station",
+                            cmd = name,
+                            stations = ids.join(", ")
+                        ),
+                        true,
+                    );
+                    return vec![];
+                }
+            }
+        }
+    };
+    let reason = words.join(" ");
+    let reason = (!reason.is_empty()).then_some(reason);
+    if matches!(name, "reject" | "force") && reason.is_none() {
+        s.notice(i18n::t!("flows.person_needs_reason", cmd = name), true);
+        return vec![];
+    }
+    let op = match name {
+        "confirm" => port::RunOp::Confirm {
+            station: station.clone(),
+            reject: false,
+            reason,
+        },
+        "reject" => port::RunOp::Confirm {
+            station: station.clone(),
+            reject: true,
+            reason,
+        },
+        "release" => port::RunOp::Release {
+            station: station.clone(),
+        },
+        _ => port::RunOp::Force {
+            station: station.clone(),
+            reason: reason.unwrap_or_default(),
+        },
+    };
+    let done = i18n::tr_args(
+        &format!("flows.person_done_{name}"),
+        &[("station", &station.0), ("run", &view.summary.id.0)],
+    );
+    vec![s.call(
+        Pending::Done(done),
+        Command::RunOp {
+            run: view.summary.id.clone(),
+            op,
+        },
+    )]
+}

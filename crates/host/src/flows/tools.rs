@@ -157,13 +157,16 @@ async fn unlocked(f: &Flows, flow: &str) -> Result<(), String> {
 pub(crate) struct ConixAuthorHost {
     pub(crate) flows: Weak<Flows>,
     created: Mutex<HashMap<SessionId, String>>,
+    /// `conix.yaml` 的 `flows.command_gates`：指南里照实说命令门禁跑不跑。
+    command_gates: bool,
 }
 
 impl ConixAuthorHost {
-    pub(crate) fn new(flows: Weak<Flows>) -> Self {
+    pub(crate) fn new(flows: Weak<Flows>, command_gates: bool) -> Self {
         Self {
             flows,
             created: Mutex::default(),
+            command_gates,
         }
     }
 
@@ -202,6 +205,10 @@ impl AuthorHost for ConixAuthorHost {
         None
     }
 
+    fn guide_notes(&self, topic: Option<&str>, zh: bool) -> Option<String> {
+        guide_notes(topic, zh, self.command_gates)
+    }
+
     async fn notice(&self, notice: Notice) {
         let Some(f) = self.flows.upgrade() else {
             return;
@@ -214,9 +221,68 @@ impl AuthorHost for ConixAuthorHost {
     }
 }
 
+/// 指南里留给"应用"的，在 Conix 里是怎样：流程存哪、谁确认、命令门禁开没开、外部审批靠什么。
+fn guide_notes(topic: Option<&str>, zh: bool, command_gates: bool) -> Option<String> {
+    let cmd = match (command_gates, zh) {
+        (true, true) => {
+            "命令门禁是打开的（`conix.yaml` 的 `flows.command_gates: trusted`）：项目受信就跑。"
+        }
+        (false, true) => {
+            "命令门禁关着（`conix.yaml` 的 `flows.command_gates: off`）：`kind: command` 的门禁存不进去，用 `check` 或 `script`。"
+        }
+        (true, false) => {
+            "Command gates are on (`flows.command_gates: trusted` in `conix.yaml`): they run in a trusted project."
+        }
+        (false, false) => {
+            "Command gates are off (`flows.command_gates: off` in `conix.yaml`): a `kind: command` gate is not saved; use `check` or `script`."
+        }
+    };
+    let text = match (topic, zh) {
+        (None, true) => format!(
+            "## 在 Conix 里\n\n- 流程和件存在项目的 `.conix/flows/`（文中的 `.harnix/` 在 Conix 里是 `.conix/`），随项目提交；项目受信才读、才写。\n\
+             - 确认、驳回、放行搁置的站、强制放行只能由用户做：你没有这些工具，需要时告诉用户在输入框里打 `/confirm`、`/reject <理由>`、`/release`、`/force <理由>`（可以带运行和站：`/confirm <运行> <站>`）。\n\
+             - {cmd}\n- 写门禁前读 `flow_guide {{topic: \"gates\"}}`；要人批的读 `flow_guide {{topic: \"confirm\"}}`。"
+        ),
+        (None, false) => format!(
+            "## In Conix\n\n- Flows and parts are saved in the project's `.conix/flows/` (`.harnix/` above is `.conix/` in Conix), committed with it; read and written only while the project is trusted.\n\
+             - Confirming, rejecting, releasing a held station and forcing are the user's: you have no tools for them; when one is needed, tell the user to type `/confirm`, `/reject <reason>`, `/release` or `/force <reason>` (a run and station may follow: `/confirm <run> <station>`).\n\
+             - {cmd}\n- Read `flow_guide {{topic: \"gates\"}}` before writing a gate, `flow_guide {{topic: \"confirm\"}}` when someone must approve."
+        ),
+        (Some("gates"), true) => format!("## 在 Conix 里\n\n- {cmd}\n- `flow_gate_try` 不是只读工具（命令门禁会跑命令），按会话的权限设置可能先问用户。"),
+        (Some("gates"), false) => format!("## In Conix\n\n- {cmd}\n- `flow_gate_try` is not read-only (a command gate runs a command): by the session's permission settings it may ask the user first."),
+        (Some("confirm"), true) => "## 在 Conix 里\n\n\
+            - 确认的人是实例的主人（操作系统用户），在输入框里打 `/confirm` 或 `/reject <理由>`。\n\
+            - `who` 的角色在项目的 `.conix/flows/roles.yaml` 里列出谁能确认（`reviewer: [alice, bob]`，按操作系统用户名）；没列出的角色任何人都行。主人不在名单里的站，要用 `via: mcp` 请名单上的人批。\n\
+            - `via: mcp` 的站只能由审批系统决定，用户在 Conix 里不能代批。它经 Agix 调 MCP 工具（`mcp.callTool`，harnixai/Agix#111）：引擎还不支持时，这条出口是 error。".to_string(),
+        (Some("confirm"), false) => "## In Conix\n\n\
+            - The one who confirms is the instance's owner (the OS user), typing `/confirm` or `/reject <reason>`.\n\
+            - A `who` role lists who may confirm in the project's `.conix/flows/roles.yaml` (`reviewer: [alice, bob]`, by OS user name); a role not listed: anyone. Where the owner is not listed, use `via: mcp` to have a listed person approve.\n\
+            - A `via: mcp` station is decided by the approval system alone; the user cannot approve it in Conix. It calls MCP tools through Agix (`mcp.callTool`, harnixai/Agix#111): an engine without it makes this exit an error.".to_string(),
+        _ => return None,
+    };
+    Some(text)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_guide_is_told_how_conix_does_what_it_leaves_to_the_application() {
+        let n = guide_notes(None, true, true).unwrap();
+        assert!(n.contains(".conix/flows/") && n.contains("trusted"), "{n}");
+        assert!(
+            guide_notes(Some("gates"), false, false)
+                .unwrap()
+                .contains("is not saved")
+        );
+        assert!(
+            guide_notes(Some("confirm"), true, true)
+                .unwrap()
+                .contains("roles.yaml")
+        );
+        assert!(guide_notes(Some("deliver"), true, true).is_none());
+    }
 
     #[test]
     fn the_librarys_tools_are_declared_with_numbers_accepted_for_flows() {

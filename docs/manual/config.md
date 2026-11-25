@@ -54,7 +54,7 @@
 ## conix.yaml
 
 不存在时会写一份带注释的缺省配置（按 `CONIX_LANG` 选中英文模板）。读不懂的项用缺省，原因在 `/doctor` 与日志里。
-`ui` 由 TUI 启动时读，`instance`、`jobs`、`notify`、`engine` 由实例启动时读；改了下次启动生效（会话里的配置工具另说，见总表下的说明）。
+`ui` 由 TUI 启动时读，`instance`、`jobs`、`flows`、`notify`、`engine` 由实例启动时读；改了下次启动生效（会话里的配置工具另说，见总表下的说明）。
 
 ```yaml
 ui:
@@ -83,6 +83,9 @@ jobs:
   daily_tokens: 50M         # 所有无人值守的工作一天合计；0 不限
   max_concurrent: 2         # 同时在跑的触发
 
+# flows:
+#   command_gates: trusted  # 命令门禁：trusted 受信的项目里才跑（缺省）| off 一律不跑
+
 # notify: …                 # 缺省不发，见 [通知](notify.md)
 
 # engine:
@@ -94,6 +97,7 @@ jobs:
 | `ui` | `language` / `initial_size` / `ratio` / `compact_tool_lines` / `syntax_theme` / `theme.preset` / `theme.colors` | 如上例 | 界面；时长、颜色、主题读不懂就退回缺省并报告 |
 | `instance` | `personal_project` | `<文档目录>/Conix` | 在家目录、它的上级或 `~/.conix` 里运行 `conix` 时进的项目（[实例](instances.md#个人项目)），第一次用就信任；`~` 开头按家目录展开。TUI 与实例启动时读 |
 | `jobs` | `defaults.*`、`limits.*`、`daily_tokens`、`max_concurrent` | 如上例 | 作业护栏；数字与 `2M`、`500k`、`30m` 都收 |
+| `flows` | `command_gates` | `trusted` | 流程的命令门禁（`kind: command`）在这台机器上执行命令：`trusted` 只在受信的项目里跑，`off` 一律不跑、也存不进去。见[流程](flows.md#门禁确认与交付) |
 | `notify` | `when`（`detached` 缺省 / `always`）、`min_level`（`info` / `warn` 缺省 / `error`）、`sinks[]`（`name`、`command`、`stdin`、`min_level`） | 不配就不发 | 只认这个全局文件 |
 | `engine` | `model` | 不写，用 Agix 的缺省 | 引擎自带 `anthropic` 的模型（相当于 `agixd --model`）；是进程参数而不是 Agix 的设置键，所以放这里 |
 

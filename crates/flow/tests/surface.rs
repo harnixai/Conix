@@ -286,6 +286,7 @@ const EXPORTS: &[(&str, &str)] = &[
     ("MemStore", "store"),
     ("GUIDE_EN", "const:&str"),
     ("GUIDE_ZH", "const:&str"),
+    ("GUIDE_TOPICS", "const:&[&str]"),
 ];
 
 /// How the stores and packs are built and what else their own impls offer: every public method of
@@ -523,6 +524,7 @@ const AUTHOR: &[(&str, &str)] = &[
     ("AuthorHost::set_project", "asyncfnset_project(&self,_session:&SessionId,_root:&str) = default"),
     ("AuthorHost::created", "asyncfncreated(&self,_session:&SessionId,_flow:&str)->Option<String> = default"),
     ("AuthorHost::notice", "asyncfnnotice(&self,_notice:Notice) = default"),
+    ("AuthorHost::guide_notes", "fnguide_notes(&self,_topic:Option<&str>,_zh:bool)->Option<String> = default"),
     ("Notice", "#[non_exhaustive]"),
     ("Notice::Packs", ""),
     ("Notice::Deleted", "{flow:String,gone:bool}"),
@@ -537,6 +539,7 @@ const AUTHOR: &[(&str, &str)] = &[
     ("TOOL_PART_SET", "const:&str"),
     ("TOOL_PART_DELETE", "const:&str"),
     ("TOOL_DRY_RUN", "const:&str"),
+    ("TOOL_GATE_TRY", "const:&str"),
     ("TOOL_START", "const:&str"),
     ("TOOL_GUIDE", "const:&str"),
     ("TOOL_RUNS", "const:&str"),

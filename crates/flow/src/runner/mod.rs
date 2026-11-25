@@ -37,7 +37,7 @@ mod approvals;
 mod checks;
 mod dispatch;
 mod files;
-mod gate;
+pub(crate) mod gate;
 mod git;
 mod hooks;
 mod main;

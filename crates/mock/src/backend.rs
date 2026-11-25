@@ -987,7 +987,7 @@ fn apply_run_op(view: &mut RunView, op: &RunOp) {
         RunOp::Pause => view.summary.status = RunStatus::Paused,
         RunOp::Resume => view.summary.status = RunStatus::Running,
         RunOp::Cancel => view.summary.status = RunStatus::Cancelled,
-        RunOp::Confirm { station: id }
+        RunOp::Confirm { station: id, .. }
         | RunOp::Release { station: id }
         | RunOp::Force { station: id, .. } => {
             if let Some(i) = station(view, id) {

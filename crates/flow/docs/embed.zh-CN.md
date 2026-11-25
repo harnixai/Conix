@@ -360,6 +360,13 @@ Conix 在 Harnix 0.4.7 分叉了这个库，先把站的治理（门禁、确认
   校验，交给父任务的就是它，不合规父任务失败；不写照旧是 `{run, stations}`。**`children` 出口的 `require`**（`Require`、
   `RequireWord`：`all`（缺省）、`any`、至少几个）：不到 `all` 时，失败的子运行不单算这一站不过，由 `children` 数交付的个数。
 
+- **试门禁**（`TOOL_GATE_TRY`，`flow_gate_try`）：编写会话里把一个门禁（存了的，或还没存的 `text`、`script`）在一份样例
+  （`files`）或项目里的目录上判一次，回完整的结果和日志，什么都不记。和运行里用的是同一段代码；`sealed` 只在运行里判，
+  命令门禁只在受信的项目里跑。
+
+- **指南分章**（`GUIDE_TOPICS`、`guide_topic`）：`flow_guide {topic}` 给 `gates`、`confirm`、`deliver` 的整章，总览里只留
+  要点并指过去；**`AuthorHost::guide_notes`** 让宿主在后面接上它自己的做法（谁确认、流程存在哪、打开了什么）。
+
 ### `FLOW_API_VERSION = 1`
 
 库的第一版：内核、存储、流程包、试运行从 `harnix-ext-flow` 搬出来；`DEFINITION_FORMAT = 1`、`RUN_FORMAT = 1`。首次发布之前，

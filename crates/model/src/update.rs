@@ -76,6 +76,8 @@ pub enum Effect {
 #[derive(Debug, Clone)]
 pub(crate) enum Pending {
     Ignore,
+    /// 做成了就在提示行说这一句。
+    Done(String),
     Hello,
     Sessions,
     Flows,
@@ -1330,6 +1332,10 @@ fn reply(s: &mut State, id: ReqId, r: Result<Reply, PortError>) -> Vec<Effect> {
         }
     };
     if matches!(what, Pending::Ignore) {
+        return vec![];
+    }
+    if let Pending::Done(text) = what {
+        s.notice(text, false);
         return vec![];
     }
     let d = &mut s.domain;

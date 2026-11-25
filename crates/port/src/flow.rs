@@ -156,11 +156,27 @@ pub struct StationTask {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RunOp {
-    Confirm { station: StationId },
-    Release { station: StationId },
-    Force { station: StationId, reason: String },
-    Rework { to: StationId },
-    Retry { station: StationId },
+    /// 人确认一站：`reject` 是驳回，`reason` 是理由（驳回要写）。
+    Confirm {
+        station: StationId,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        reject: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
+    },
+    Release {
+        station: StationId,
+    },
+    Force {
+        station: StationId,
+        reason: String,
+    },
+    Rework {
+        to: StationId,
+    },
+    Retry {
+        station: StationId,
+    },
     Pause,
     Resume,
     Cancel,

@@ -47,15 +47,15 @@ impl ConixAuthorizer {
 
 impl Authorizer for ConixAuthorizer {
     fn check(&self, op: &Op, by: &Actor, run: Option<&RunRecord>) -> Result<(), String> {
-        let what = match op {
-            Op::Confirm { .. } => "confirming a station",
-            Op::Force { .. } => "forcing a station past its conditions",
-            Op::Release { .. } => "releasing a held station",
+        let (what, typed) = match op {
+            Op::Confirm { .. } => ("confirming a station", "`/confirm` (or `/reject <reason>`)"),
+            Op::Force { .. } => ("forcing a station past its conditions", "`/force <reason>`"),
+            Op::Release { .. } => ("releasing a held station", "`/release`"),
             _ => return Ok(()),
         };
         if by.kind != PERSON_KIND {
             return Err(format!(
-                "{what} is a person's decision and no tool call makes it: ask the user to do it in Conix's Flows tab"
+                "{what} is a person's decision and no tool call makes it: ask the user to type {typed} in Conix"
             ));
         }
         let Op::Confirm { station, who, .. } = op else {

@@ -1,5 +1,13 @@
 # 流程标签：列表、运行的各站、状态文字。
 flows:
+  person_no_run: "/{cmd} 不知道是哪次运行：在流程标签里选中它，或写运行的 id：/{cmd} <运行> [站] [理由]"
+  person_no_station: "/{cmd}：这次运行没有在等这件事的站；写站名：/{cmd} [运行] <站> [理由]"
+  person_which_station: "/{cmd}：有几站都在等（{stations}），写是哪一站"
+  person_needs_reason: "/{cmd} 要写理由：/{cmd} [运行] [站] <理由>"
+  person_done_confirm: "已确认 {run} 的站 {station}"
+  person_done_reject: "已驳回 {run} 的站 {station}"
+  person_done_release: "已放行 {run} 的站 {station}"
+  person_done_force: "已强制放行 {run} 的站 {station}"
   progress_done: "{done}/{total} 站"
   progress: "站 {done}/{total} {current}"
   run:
@@ -11,7 +19,7 @@ flows:
     cancelled: "已取消"
   station:
     pending: "待进入"
-    held: "搁置 · a 放行"
+    held: "搁置 · /release 放行"
     working: "进行中"
     unmet: "未达标"
     passed: "已通过"

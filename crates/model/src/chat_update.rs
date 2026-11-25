@@ -17,7 +17,8 @@ const DETACH_ARM_MS: u64 = 800;
 /// 本地命令（交互 §4.5）：不联系后端，或只换个后端命令。
 const LOCAL: &[&str] = &[
     "help", "new", "rename", "sessions", "model", "goal", "btw", "trust", "doctor", "plugin",
-    "quit", "exit", "stop", "mouse", "events", "notify", "copy",
+    "confirm", "reject", "release", "force", "quit", "exit", "stop", "mouse", "events", "notify",
+    "copy",
 ];
 
 /// 补全候选的来源：项目里的文件（`@` 提及）。
@@ -760,6 +761,7 @@ fn local_command(s: &mut State, name: &str, arg: String) -> Option<Vec<Effect>> 
         "copy" => copy_block(s),
         "doctor" => vec![s.call(Pending::Doctor, Command::Doctor)],
         "plugin" => crate::plugins::command(s, &arg),
+        "confirm" | "reject" | "release" | "force" => crate::flows::person_op(s, name, &arg),
         _ => return None,
     })
 }

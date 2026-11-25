@@ -18,8 +18,9 @@
 //! | `flow_delete {flow?}` | no | delete a flow (a built-in one: its override) |
 //! | `flow_part_set {kind, name, text}` / `flow_part_delete {kind, name}` | no | change, delete a skill, rule, policy, gate or hook |
 //! | `flow_dry_run {flow?, inputs?, mocks?}` | yes | dry-run a flow, as far as it goes |
+//! | `flow_gate_try {gate?, text?, script?, files?, workspace?, station?, inputs?, outputs?, output_dir?}` | no | judge a gate once, as a run would, nothing recorded |
 //! | `flow_start {flow?, subject, inputs?, title?}` | no | start a flow for real |
-//! | `flow_guide {lang?}` | yes | the flow guide |
+//! | `flow_guide {topic?, lang?}` | yes | the flow guide, or one chapter of it (`gates`, `confirm`, `deliver`) |
 //! | `flow_runs {flow?}` / `flow_run {run?, flow?}` | yes | a flow's runs; one run |
 //! | `flow_pause` … `flow_release` `{run?, flow?, …}` | no | act on a run |
 //!
@@ -59,6 +60,7 @@ pub const TOOL_DELETE: &str = "flow_delete";
 pub const TOOL_PART_SET: &str = "flow_part_set";
 pub const TOOL_PART_DELETE: &str = "flow_part_delete";
 pub const TOOL_DRY_RUN: &str = "flow_dry_run";
+pub const TOOL_GATE_TRY: &str = "flow_gate_try";
 pub const TOOL_START: &str = "flow_start";
 pub const TOOL_GUIDE: &str = "flow_guide";
 pub const TOOL_RUNS: &str = "flow_runs";
@@ -125,6 +127,12 @@ pub trait AuthorHost: Send + Sync {
 
     /// Something the host may tell its own people about changed.
     async fn notice(&self, _notice: Notice) {}
+    /// What the host adds to the guide (`topic` `None`: the overview): how its own application does
+    /// what the guide leaves to "the application" — who confirms, where flows are saved, what is
+    /// turned on. Nothing by default.
+    fn guide_notes(&self, _topic: Option<&str>, _zh: bool) -> Option<String> {
+        None
+    }
 }
 
 /// What changed, for [`AuthorHost::notice`].
@@ -160,6 +168,7 @@ enum Does {
     PartSet,
     PartDelete,
     DryRun,
+    GateTry,
     Start,
     Guide,
     Runs,
@@ -297,6 +306,17 @@ const TOOLS: &[Row] = &[
         does: Does::DryRun,
     },
     Row {
+        name: TOOL_GATE_TRY,
+        description: "Judge a gate once, as a run would, and see its whole result (verdict, summary, findings, evidence, metrics, log); nothing is recorded. Write a gate, then try it on a sample that should pass and on one that should not: a gate that passes both checks nothing. The gate: `gate` (one in the packs) or `text` (its YAML, not saved yet), and `script` (a script gate's JS, not saved yet). What it judges: `files` ({path: text}, a sample made for this trial alone), else `workspace` (a directory in the project), else the project. What the run would have had: `station`, `inputs`, `outputs` ({station: output}, for `${stations.<id>.output}` and a script's `input.outputs`), `output_dir`. A command gate runs only in a trusted project.",
+        schema: || json!({"type": "object", "properties": {
+            "gate": {"type": "string"}, "text": {"type": "string"}, "script": {"type": "string"},
+            "files": {"type": "object", "additionalProperties": {"type": "string"}},
+            "workspace": {"type": "string"}, "station": {"type": "string"},
+            "inputs": {"type": "object"}, "outputs": {"type": "object"}, "output_dir": {"type": "string"}}}),
+        read_only: false,
+        does: Does::GateTry,
+    },
+    Row {
         name: TOOL_START,
         description: "Start a real run of a flow, named in `flow` (absent: the current one), for a subject. Only when the user asks for it.",
         schema: || json!({"type": "object", "required": ["subject"], "properties": {
@@ -307,8 +327,8 @@ const TOOLS: &[Row] = &[
     },
     Row {
         name: TOOL_GUIDE,
-        description: "The guide to flows: the objects (flow, station, work, task, executor, exit condition, rule, policy and permission, gate, hook, run, main session, sub-agent, lease, rework, dry run), what they mean, and how to define a flow, with examples. `lang`: en or zh-CN.",
-        schema: || json!({"type": "object", "properties": {"lang": {"enum": ["en", "zh-CN"]}}}),
+        description: "The guide to flows: the objects (flow, station, work, task, executor, exit condition, rule, policy and permission, gate, hook, run, main session, sub-agent, lease, rework, dry run), what they mean, and how to define a flow, with examples. Read it before writing a flow. `topic` gives one chapter in full: `gates` (writing check, script and command gates that hold — read it before writing any gate), `confirm` (confirmations by a person or an outside approval system, governed flows), `deliver` (how each executor hands in; sub-agent stations; a subflow's result and how many children must deliver). `lang`: en or zh-CN.",
+        schema: || json!({"type": "object", "properties": {"lang": {"enum": ["en", "zh-CN"]}, "topic": {"enum": ["gates", "confirm", "deliver"]}}}),
         read_only: true,
         does: Does::Guide,
     },
@@ -416,7 +436,18 @@ impl AuthorTools {
         };
         if row.does == Does::Guide {
             let zh = str_of(&input, "lang").is_some_and(|l| l.starts_with("zh"));
-            return ToolReply::text(if zh { crate::GUIDE_ZH } else { crate::GUIDE_EN });
+            let topic = str_of(&input, "topic");
+            let text = match topic {
+                None => if zh { crate::GUIDE_ZH } else { crate::GUIDE_EN },
+                Some(t) => match crate::guide_topic(t, zh) {
+                    Some(text) => text,
+                    None => return ToolReply::error(format!("no guide topic `{t}`: {}", crate::GUIDE_TOPICS.join(", "))),
+                },
+            };
+            return ToolReply::text(match self.host.guide_notes(topic, zh) {
+                Some(notes) => format!("{text}\n\n{notes}"),
+                None => text.to_string(),
+            });
         }
         let Some(rn) = self.runner.upgrade() else {
             return ToolReply::error("the flow runner has stopped");
@@ -576,6 +607,10 @@ impl Cx<'_> {
                 Ok(v)
             }
             Does::DryRun => self.dry_run(input, current.as_deref()).await,
+            Does::GateTry => {
+                self.authorize(&Op::ReadFlows, None)?;
+                self.gate_try(input, packs, project.as_deref()).await
+            }
             Does::Start => {
                 let name = self.target(input, current.as_deref())?;
                 let subject = str_of(input, "subject").ok_or("give the run's `subject`")?;
@@ -710,6 +745,74 @@ impl Cx<'_> {
         Ok(out)
     }
 
+    async fn gate_try(&self, input: &Value, packs: &dyn Packs, project: Option<&str>) -> Answer {
+        use crate::kernel::parts::GateDef;
+        let (gate, text): (GateDef, String) = match (str_of(input, "text"), str_of(input, "gate")) {
+            (Some(text), _) => {
+                let g = crate::kernel::def::parse_part::<GateDef>(text, "gate").map_err(|e| format!("the gate does not read: {e}"))?;
+                (g, text.to_string())
+            }
+            (None, Some(name)) => {
+                let (text, _) = packs.part(PartKind::Gate, name).ok_or_else(|| format!("there is no gate {name} in the packs"))?;
+                let g = packs.gate(name).ok_or_else(|| format!("gate {name} does not read"))?;
+                (g, text)
+            }
+            (None, None) => return Err("give the gate: `gate` (its name) or `text` (its YAML)".into()),
+        };
+        let inline = str_of(input, "script").map(String::from);
+        let mut problems: Vec<String> = part_problems(PartKind::Gate, &gate.name, &text, packs)
+            .into_iter()
+            .filter(|m| inline.is_none() || !m.starts_with("there is no script"))
+            .collect();
+        if let (Some(src), Some(name)) = (&inline, &gate.script) {
+            problems.extend(part_problems(PartKind::Script, name, src, packs).into_iter().map(|m| format!("script {name}: {m}")));
+        }
+        if !problems.is_empty() {
+            return Ok(json!({"problems": problems, "tried": false}));
+        }
+        let script = inline.or_else(|| gate.script.as_ref().and_then(|n| packs.part(PartKind::Script, n)).map(|(t, _)| t));
+        let trusted = match project {
+            Some(root) => self.rn.hear(root).await,
+            None => false,
+        };
+        let no_commands = match project {
+            None => Some("a command gate is tried only in a project: this conversation works in none".to_string()),
+            Some(root) if !trusted => Some(format!("the project {root} is not trusted: its command gates do not run")),
+            Some(_) => None,
+        };
+        let sample = match input.get("files").and_then(Value::as_object) {
+            Some(files) => Some(Sample::write(files)?),
+            None => None,
+        };
+        let ws = match (&sample, str_of(input, "workspace"), project) {
+            (Some(s), _, _) => s.0.clone(),
+            (None, Some(w), Some(root)) => inside(root, w)?,
+            (None, Some(_), None) => return Err("`workspace` is a directory in the project, and this conversation works in none: give `files`".into()),
+            (None, None, Some(root)) => std::path::PathBuf::from(root),
+            (None, None, None) => return Err("nothing to judge: give `files` (a sample), or work in a project".into()),
+        };
+        let trial = crate::runner::gate::Trial {
+            gate,
+            script,
+            ws: ws.clone(),
+            station: str_of(input, "station").unwrap_or("trial").to_string(),
+            inputs: input.get("inputs").cloned().unwrap_or_else(|| json!({})),
+            outputs: input.get("outputs").and_then(Value::as_object).cloned().unwrap_or_default(),
+            output_dir: str_of(input, "output_dir").map(String::from),
+            no_commands,
+        };
+        let tried = self.rn.try_gate(trial).await;
+        drop(sample);
+        let mut out = serde_json::to_value(&tried.result).map_err(|e| e.to_string())?;
+        out["judged"] = json!(if input.get("files").is_some() { "the sample given".to_string() } else { ws.display().to_string() });
+        if !tried.log.is_empty() {
+            let chars: Vec<char> = tried.log.chars().collect();
+            out["log"] = json!(chars[chars.len().saturating_sub(TRIAL_LOG_KEPT)..].iter().collect::<String>());
+        }
+        out["tried"] = json!(true);
+        Ok(out)
+    }
+
     async fn dry_run(&self, input: &Value, current: Option<&str>) -> Answer {
         let name = self.target(input, current)?;
         self.authorize(&Op::DryRun { flow: name.clone() }, None)?;
@@ -822,6 +925,64 @@ pub fn project_root(root: &str) -> Result<String, String> {
         Ok(m) if m.is_dir() => Ok(root.to_string()),
         _ => Err(format!("project_root {root:?} is not an existing directory")),
     }
+}
+
+/// How much of a trial's log the tool shows (the end of it).
+const TRIAL_LOG_KEPT: usize = 4000;
+/// The most files and bytes a trial's sample may have.
+const SAMPLE_FILES: usize = 200;
+const SAMPLE_BYTES: usize = 4 * 1024 * 1024;
+
+/// A trial's sample: a directory of its own, gone with it.
+struct Sample(std::path::PathBuf);
+
+impl Sample {
+    fn write(files: &serde_json::Map<String, Value>) -> Result<Self, String> {
+        if files.len() > SAMPLE_FILES {
+            return Err(format!("a sample has at most {SAMPLE_FILES} files"));
+        }
+        let total: usize = files.values().filter_map(Value::as_str).map(str::len).sum();
+        if total > SAMPLE_BYTES {
+            return Err(format!("a sample has at most {} MiB", SAMPLE_BYTES >> 20));
+        }
+        let n = SAMPLES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!("flow-gate-sample-{}-{n}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let me = Sample(dir);
+        for (path, text) in files {
+            let rel = std::path::Path::new(path);
+            if rel.is_absolute() || rel.components().any(|c| !matches!(c, std::path::Component::Normal(_))) {
+                return Err(format!("files: {path:?} is not a plain relative path"));
+            }
+            let text = text.as_str().ok_or_else(|| format!("files: {path:?} is not text"))?;
+            let full = me.0.join(rel);
+            std::fs::create_dir_all(full.parent().unwrap_or(&me.0))
+                .and_then(|_| std::fs::write(&full, text))
+                .map_err(|e| format!("the sample was not written: {e}"))?;
+        }
+        std::fs::create_dir_all(&me.0).map_err(|e| format!("the sample was not written: {e}"))?;
+        Ok(me)
+    }
+}
+
+impl Drop for Sample {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+static SAMPLES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// A directory a trial is given, which must be in the project: relative to it, or absolute in it.
+fn inside(root: &str, w: &str) -> Result<std::path::PathBuf, String> {
+    let root = std::fs::canonicalize(root).map_err(|e| format!("the project {root}: {e}"))?;
+    let p = std::path::Path::new(w);
+    let p = if p.is_absolute() { p.to_path_buf() } else { root.join(p) };
+    let p = std::fs::canonicalize(&p).map_err(|e| format!("workspace {w}: {e}"))?;
+    if !p.starts_with(&root) || !p.is_dir() {
+        return Err(format!("workspace {w} is not a directory in the project"));
+    }
+    Ok(p)
 }
 
 /// Parts about to be saved: (kind, name) → text.
@@ -1023,10 +1184,10 @@ mod tests {
         );
         let acts: Vec<&str> = TOOLS.iter().filter(|t| matches!(t.does, Does::Act(_))).map(|t| t.name).collect();
         assert_eq!(acts, RUN_TOOLS, "the run tools are the ones that act on a run");
-        assert_eq!(names.len(), 22);
+        assert_eq!(names.len(), 23);
         names.sort();
         names.dedup();
-        assert_eq!(names.len(), 22, "no name twice");
+        assert_eq!(names.len(), 23, "no name twice");
         for t in &specs {
             assert!(t.name.starts_with("flow_") && !t.description.is_empty(), "{}", t.name);
             assert_eq!(t.input_schema["type"], "object", "{}", t.name);

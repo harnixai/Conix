@@ -490,6 +490,15 @@ is so as not to collide with Harnix's own next one; what changes for a host is l
   `any`, or at least a number): short of `all`, a failed child is not by itself the station's failure; `children`
   counts the deliveries.
 
+- **Trying a gate** (`TOOL_GATE_TRY`, `flow_gate_try`): an authoring conversation judges a gate (saved, or `text`
+  and `script` not saved yet) once on a sample (`files`) or a directory of the project, and gets the whole result
+  and log; nothing is recorded. The same code as in a run; `sealed` is judged only in a run, and a command gate
+  runs only in a trusted project.
+
+- **The guide in chapters** (`GUIDE_TOPICS`, `guide_topic`): `flow_guide {topic}` gives the whole of `gates`,
+  `confirm` or `deliver`, the overview keeping the gist and pointing there; **`AuthorHost::guide_notes`** lets the
+  host add how its own application does things (who confirms, where flows are saved, what is turned on).
+
 ### `FLOW_API_VERSION = 1`
 
 The library's first version: the kernel, stores, packs and dry runs move out of `harnix-ext-flow`;

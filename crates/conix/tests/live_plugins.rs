@@ -258,6 +258,8 @@ async fn xforge_quick_goes_from_open_to_archive_with_a_real_model() {
         run: id.clone(),
         op: RunOp::Confirm {
             station: port::StationId("verify".into()),
+            reject: false,
+            reason: None,
         },
     })
     .await;

@@ -468,6 +468,8 @@ async fn the_reviewer_sends_the_draft_back_and_both_rounds_stay_on_their_models(
         run: id.clone(),
         op: RunOp::Confirm {
             station: StationId("review".into()),
+            reject: false,
+            reason: None,
         },
     })
     .await;

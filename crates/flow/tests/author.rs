@@ -134,7 +134,7 @@ fn the_specs_are_the_tables() {
     let b = bench(false, &[]);
     assert_eq!(b.tools.specs(), tool_specs().as_slice());
     let names: Vec<&str> = b.tools.specs().iter().map(|t| t.name.as_str()).collect();
-    assert_eq!(names.len(), 22);
+    assert_eq!(names.len(), 23);
     assert!(RUN_TOOLS.iter().all(|t| names.contains(t)));
     assert_eq!(names[0], TOOL_LIST);
 }
@@ -382,4 +382,72 @@ async fn reading_and_acting_on_a_run_are_asked_with_the_run() {
     assert!(!call(TOOL_PAUSE, id(&mine)).await.is_error);
     let r = call(TOOL_PAUSE, id(&theirs)).await;
     assert!(r.is_error && r.text.starts_with("not done: denied"), "{}", r.text);
+}
+
+#[tokio::test]
+async fn a_gate_is_tried_on_a_sample_and_nothing_is_recorded() {
+    let b = bench(false, &[]);
+    let gate = "name: report\nkind: check\ncheck: schema\nfile: out/report.json\nschema: {type: object, required: [verdict]}\n";
+    let good = b.ok("s1", TOOL_GATE_TRY, json!({"text": gate, "files": {"out/report.json": "{\"verdict\": \"ok\"}"}})).await;
+    assert_eq!((good["tried"].as_bool(), good["verdict"].as_str()), (Some(true), Some("pass")), "{good}");
+    assert_eq!(good["evidence"][0]["path"], "out/report.json");
+    let bad = b.ok("s1", TOOL_GATE_TRY, json!({"text": gate, "files": {"out/report.json": "{}"}})).await;
+    assert_eq!(bad["verdict"], "fail", "{bad}");
+    assert!(bad["findings"][0]["message"].as_str().unwrap().contains("verdict"), "{bad}");
+    // A gate that does not hold together is not tried.
+    let wrong = b.ok("s1", TOOL_GATE_TRY, json!({"text": "name: g\nkind: check\ncheck: text\nfile: a\nmatches: ['(']\n", "files": {}})).await;
+    assert_eq!(wrong["tried"], false, "{wrong}");
+    assert!(!wrong["problems"].as_array().unwrap().is_empty());
+    // A script not saved yet, with what the run would have had.
+    let script = "export default function (input, flow) {\n  const n = flow.read.json('n.json');\n  return n.v >= input.params.min ? {verdict: 'pass'} : {verdict: 'fail', summary: `only ${n.v} of ${input.outputs.plan.want}`};\n}\n";
+    let r = b.ok("s1", TOOL_GATE_TRY, json!({
+        "text": "name: enough\nkind: script\nscript: enough\nparams: {min: '${inputs.min}'}\n",
+        "script": script, "files": {"n.json": "{\"v\": 2}"}, "inputs": {"min": 3}, "outputs": {"plan": {"want": 3}}})).await;
+    assert_eq!(r["verdict"], "fail", "{r}");
+    assert_eq!(r["summary"], "only 2 of 3");
+    // An application without command gates says so before trying one.
+    let r = b.ok("s1", TOOL_GATE_TRY, json!({"text": "name: c\nkind: command\ncommand: 'true'\n", "files": {}})).await;
+    assert!(r["problems"][0].as_str().unwrap().contains("not turned on"), "{r}");
+    // Nothing to judge.
+    assert!(b.err("s1", TOOL_GATE_TRY, json!({"text": gate})).await.contains("nothing to judge"));
+    assert!(b.engine.list(RunQuery::default()).await.unwrap().is_empty());
+}
+
+/// The `yaml` and `js` blocks of a guide chapter.
+fn blocks<'a>(text: &'a str, lang: &str) -> Vec<&'a str> {
+    let fence = format!("```{lang}\n");
+    text.split(fence.as_str()).skip(1).filter_map(|b| b.split("\n```").next()).collect()
+}
+
+#[tokio::test]
+async fn the_guides_gates_hold_together_and_its_script_judges() {
+    for zh in [false, true] {
+        let text = guide_topic("gates", zh).unwrap();
+        let script = blocks(text, "js")[0];
+        let packs = MemPacks::new().part(PartKind::Script, "req-covered", script).command_gates();
+        let mut gates = 0;
+        for y in blocks(text, "yaml") {
+            let Ok(serde_yaml::Value::Mapping(m)) = serde_yaml::from_str::<serde_yaml::Value>(y) else { continue };
+            let Some(name) = m.get("name").and_then(|n| n.as_str()) else { continue };
+            gates += 1;
+            assert_eq!(part_problems(PartKind::Gate, name, y, &packs), Vec::<String>::new(), "{name}: {y}");
+        }
+        assert_eq!(gates, 8, "every kind has its example");
+        // The script judges as the chapter says.
+        let b = bench(false, &[]);
+        let gate = "name: req-covered\nkind: script\nscript: req-covered\nparams: {spec: req.md, tests: 'tests/**/*.rs'}\n";
+        let files = json!({"req.md": "REQ-1 REQ-2", "tests/a.rs": "// REQ-1"});
+        let r = b.ok("s1", TOOL_GATE_TRY, json!({"text": gate, "script": script, "files": files})).await;
+        assert_eq!((r["verdict"].as_str(), r["metrics"]["missing"].as_u64()), (Some("fail"), Some(1)), "{r}");
+        assert!(r["findings"][0]["message"].as_str().unwrap().contains("REQ-2"), "{r}");
+        let none = b.ok("s1", TOOL_GATE_TRY, json!({"text": gate, "script": script, "files": {}})).await;
+        assert_eq!(none["verdict"], "error", "{none}");
+    }
+    for t in GUIDE_TOPICS {
+        assert!(guide_topic(t, false).is_some() && guide_topic(t, true).is_some());
+    }
+    let b = bench(false, &[]);
+    let r = b.call("s1", TOOL_GUIDE, json!({"topic": "gates", "lang": "zh-CN"})).await;
+    assert!(!r.is_error && r.text.starts_with("# 门禁"));
+    assert!(b.err("s1", TOOL_GUIDE, json!({"topic": "nope"})).await.contains("gates, confirm, deliver"));
 }

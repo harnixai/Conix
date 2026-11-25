@@ -109,21 +109,38 @@ pub(crate) async fn command_gate(
     station: &str,
     g: &crate::GateDef,
 ) -> GateResult {
-    use tokio::io::AsyncReadExt;
     // Everything up to the command's own conclusion is the gate not getting to one.
     let fail = GateResult::errored;
     if !allowed {
         return fail(format!("command gates are not turned on here: {} cannot run", g.name));
     }
-    let Some(command) = g.command.clone().filter(|c| !c.trim().is_empty()) else {
-        return fail(format!("gate {} has no command", g.name));
-    };
     let (Some(ws), Some(station_dir)) = (engine.workspace_for(rec), super::project::station_dir(engine, rec, station)) else {
         return fail(format!("gate {}: the run has no workspace", g.name));
     };
     let ctx = crate::kernel::refs::context_in(rec, None, None, ws.to_str());
+    command_at(env_deny, g, &GateSite { run: &rec.id, station, ws: &ws, station_dir: &station_dir, ctx: &ctx }).await
+}
+
+/// Where a gate runs: the run and station it judges, the directory it judges, where its context
+/// and log go, the references it resolves against. A trial (`flow_gate_try`) makes one up.
+pub(crate) struct GateSite<'a> {
+    pub run: &'a str,
+    pub station: &'a str,
+    pub ws: &'a std::path::Path,
+    pub station_dir: &'a std::path::Path,
+    pub ctx: &'a Value,
+}
+
+/// [`command_gate`] at a site, command gates allowed.
+pub(crate) async fn command_at(env_deny: &[String], g: &crate::GateDef, site: &GateSite<'_>) -> GateResult {
+    use tokio::io::AsyncReadExt;
+    let fail = GateResult::errored;
+    let Some(command) = g.command.clone().filter(|c| !c.trim().is_empty()) else {
+        return fail(format!("gate {} has no command", g.name));
+    };
+    let (ws, station_dir, ctx, station) = (site.ws.to_path_buf(), site.station_dir, site.ctx, site.station);
     let cwd = match &g.cwd {
-        Some(c) => match crate::kernel::refs::resolve_str(c, &ctx) {
+        Some(c) => match crate::kernel::refs::resolve_str(c, ctx) {
             Value::String(s) if !s.is_empty() => {
                 let p = std::path::PathBuf::from(&s);
                 if p.is_absolute() {
@@ -139,7 +156,7 @@ pub(crate) async fn command_gate(
     let context = ctx.to_string();
     let context_file = station_dir.join("context.json");
     let written = std::fs::create_dir_all(&cwd)
-        .and_then(|_| std::fs::create_dir_all(&station_dir))
+        .and_then(|_| std::fs::create_dir_all(station_dir))
         .and_then(|_| std::fs::write(&context_file, &context));
     if let Err(e) = written {
         return fail(format!("gate {}: {}: {e}", g.name, cwd.display()));
@@ -149,7 +166,7 @@ pub(crate) async fn command_gate(
         .arg(&command)
         .current_dir(&cwd)
         .env_clear()
-        .env("FLOW_RUN", &rec.id)
+        .env("FLOW_RUN", site.run)
         .env("FLOW_STATION", station)
         .env("FLOW_WORKSPACE", &ws)
         .env("FLOW_CONTEXT_FILE", &context_file)
@@ -217,7 +234,7 @@ pub(crate) async fn command_gate(
     text.push_str(&String::from_utf8_lossy(&e));
     let log = station_dir.join(format!("gate-{}.log", g.name));
     if let Err(e) = std::fs::write(&log, &text) {
-        tracing::warn!(run = rec.id, gate = g.name, error = %e, "a gate's log not written");
+        tracing::warn!(run = site.run, gate = g.name, error = %e, "a gate's log not written");
     }
     let tail: String = {
         let chars: Vec<char> = text.trim().chars().collect();
@@ -347,6 +364,120 @@ async fn script_gate(
     _: std::sync::Arc<super::files::Reader>,
 ) -> GateResult {
     GateResult::errored(format!("gate {}: this build runs no scripts", g.name))
+}
+
+/// A gate judged once outside any run (`flow_gate_try`): the gate, the script it runs when it is
+/// not saved yet, the directory it judges, and what the run would have had — the station judged,
+/// the inputs, the stations' outputs, the output directory.
+pub(crate) struct Trial {
+    pub gate: crate::GateDef,
+    pub script: Option<String>,
+    pub ws: std::path::PathBuf,
+    pub station: String,
+    pub inputs: Value,
+    pub outputs: serde_json::Map<String, Value>,
+    pub output_dir: Option<String>,
+    /// Why a command may not run here; `None`: it may.
+    pub no_commands: Option<String>,
+}
+
+/// What a trial gives back besides the result: what the gate wrote to its log.
+pub(crate) struct Tried {
+    pub result: GateResult,
+    pub log: String,
+}
+
+impl Runner {
+    /// Judge a gate as a run would, on a made-up run: the same code as in a run, nothing recorded.
+    pub(crate) async fn try_gate(&self, t: Trial) -> Tried {
+        try_gate(self, t).await
+    }
+}
+
+async fn try_gate(rn: &Runner, t: Trial) -> Tried {
+    let g = &t.gate;
+    let tried = |result| Tried { result, log: String::new() };
+    let stations: serde_json::Map<String, Value> = t
+        .outputs
+        .iter()
+        .map(|(k, v)| (k.clone(), serde_json::json!({"status": "passed", "round": 1, "output": v})))
+        .collect();
+    let ctx = serde_json::json!({
+        "run": "trial", "subject": "trial", "inputs": t.inputs, "stations": stations,
+        "item": null, "task": null, "workspace": t.ws.to_string_lossy(), "output_dir": t.output_dir,
+    });
+    match g.kind {
+        GateKind::Check if g.check == Some(crate::kernel::parts::CheckKind::Sealed) => tried(GateResult::errored(
+            "a `sealed` check compares the files the run's earlier gates read: it is judged only in a run".to_string(),
+        )),
+        GateKind::Check | GateKind::Script if g.function.is_none() => {
+            let reader = match super::files::Reader::new(&t.ws) {
+                Ok(r) => Arc::new(r),
+                Err(e) => return tried(GateResult::errored(format!("gate {}: {e}", g.name))),
+            };
+            if g.kind == GateKind::Check {
+                let rec = trial_record(&t.station);
+                return tried(super::checks::run(g, &ctx, &rec, &reader));
+            }
+            let Some(source) = t.script.clone() else {
+                return tried(GateResult::errored(format!("script {} is not in the packs", g.script.as_deref().unwrap_or("?"))));
+            };
+            let input = serde_json::json!({
+                "gate": g.name, "run": "trial", "flow": "trial", "station": t.station, "round": 1,
+                "inputs": t.inputs, "outputs": t.outputs, "output_dir": t.output_dir,
+                "workspace": t.ws.to_string_lossy(), "params": crate::kernel::refs::resolve(&g.params, &ctx),
+            });
+            trial_script(source, input, reader, g.script_seconds()).await
+        }
+        GateKind::Command => {
+            if let Some(why) = &t.no_commands {
+                return tried(GateResult::errored(why.clone()));
+            }
+            if !rn.cfg.command_gates {
+                return tried(GateResult::errored(format!("command gates are not turned on here: {} cannot run", g.name)));
+            }
+            let dir = std::env::temp_dir().join(format!("flow-gate-try-{}-{}", std::process::id(), crate::kernel::host::digest(&ctx.to_string())));
+            let site = GateSite { run: "trial", station: &t.station, ws: &t.ws, station_dir: &dir, ctx: &ctx };
+            let result = command_at(&rn.cfg.env_deny, g, &site).await;
+            let log = std::fs::read_to_string(dir.join(format!("gate-{}.log", g.name))).unwrap_or_default();
+            let _ = std::fs::remove_dir_all(&dir);
+            Tried { result, log }
+        }
+        _ => match (&rn.cfg.gates, g.host_function()) {
+            (Some(gs), Some(f)) => tried(gs.run(&trial_record(&t.station), &t.station, f).await),
+            (None, _) => tried(GateResult::errored(format!("the host runs no checks: {} cannot run", g.name))),
+            (_, None) => tried(GateResult::errored(format!("gate {} is not one the host runs", g.name))),
+        },
+    }
+}
+
+/// The run a trial judges in: one station, nothing done yet.
+fn trial_record(station: &str) -> RunRecord {
+    let def = crate::FlowDef::parse(&format!("{{name: trial, stations: [{{id: {station:?}, exit: [{{kind: confirm}}]}}]}}"))
+        .unwrap_or_else(|_| crate::FlowDef::parse("{name: trial, stations: [{id: trial, exit: [{kind: confirm}]}]}").expect("a trial flow"));
+    crate::kernel::txn::new_record(
+        "trial".into(),
+        def,
+        Default::default(),
+        "trial".into(),
+        "trial".into(),
+        "trial".into(),
+        Value::Null,
+        crate::Actor::flow("trial"),
+        0,
+        None,
+    )
+}
+
+#[cfg(feature = "script")]
+async fn trial_script(source: String, input: Value, reader: Arc<super::files::Reader>, seconds: u64) -> Tried {
+    let (result, trace) = super::script::run(source, input, reader, Duration::from_secs(seconds)).await;
+    Tried { result, log: trace.log }
+}
+
+#[cfg(not(feature = "script"))]
+async fn trial_script(_: String, _: Value, _: Arc<super::files::Reader>, _: u64) -> Tried {
+    Tried { result: GateResult::errored("this build runs no scripts".to_string()), log: String::new() }
 }
 
 /// What a command gate's process keeps of this one's environment.

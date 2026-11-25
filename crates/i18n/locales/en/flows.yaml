@@ -1,4 +1,12 @@
 flows:
+  person_no_run: "/{cmd}: which run? Select it in the Flows tab, or give its id: /{cmd} <run> [station] [reason]"
+  person_no_station: "/{cmd}: no station of this run waits for that; name it: /{cmd} [run] <station> [reason]"
+  person_which_station: "/{cmd}: several stations wait ({stations}): name one"
+  person_needs_reason: "/{cmd} takes a reason: /{cmd} [run] [station] <reason>"
+  person_done_confirm: "Confirmed station {station} of {run}"
+  person_done_reject: "Rejected station {station} of {run}"
+  person_done_release: "Released station {station} of {run}"
+  person_done_force: "Forced station {station} of {run} through"
   progress_done: "{done}/{total} stations"
   progress: "station {done}/{total} {current}"
   run:
@@ -10,7 +18,7 @@ flows:
     cancelled: "cancelled"
   station:
     pending: "pending"
-    held: "held · a to release"
+    held: "held · /release to release"
     working: "working"
     unmet: "unmet"
     passed: "passed"

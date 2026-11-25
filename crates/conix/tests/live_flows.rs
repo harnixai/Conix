@@ -738,7 +738,15 @@ async fn run_ops_release_pause_resume_rework_force_and_confirm() {
         station(v, "gate") == StationStatus::Working
     })
     .await;
-    c.ok(op(&id, RunOp::Confirm { station: gate })).await;
+    c.ok(op(
+        &id,
+        RunOp::Confirm {
+            station: gate,
+            reject: false,
+            reason: None,
+        },
+    ))
+    .await;
     until_run(&mut c, "确认后结束", &id, |v| {
         v.summary.status == RunStatus::Finished
     })

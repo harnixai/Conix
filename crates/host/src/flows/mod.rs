@@ -232,7 +232,7 @@ pub async fn start(hub: &Hub, cfg: FlowsConfig) -> anyhow::Result<Arc<Flows>> {
         author: std::sync::OnceLock::new(),
         published: Default::default(),
         ended: Default::default(),
-        author_host: Arc::new(tools::ConixAuthorHost::new(me.clone())),
+        author_host: Arc::new(tools::ConixAuthorHost::new(me.clone(), cfg.command_gates)),
         swap,
         plugin_map,
         shadowed: std::sync::Mutex::new(shadowed),
@@ -411,7 +411,14 @@ impl Flows {
             RunOp::Pause => e.pause(run, by).await,
             RunOp::Resume => e.resume(run, by).await,
             RunOp::Cancel => e.cancel(run, "cancelled from Conix", by).await,
-            RunOp::Confirm { station } => e.confirm(run, &station.0, true, None, by).await,
+            RunOp::Confirm {
+                station,
+                reject,
+                reason,
+            } => {
+                e.confirm(run, &station.0, !reject, reason.as_deref(), by)
+                    .await
+            }
             RunOp::Release { station } => e.release(run, &station.0, by).await,
             RunOp::Force { station, reason } => e.force(run, &station.0, reason, by).await,
             RunOp::Rework { to } => e.rework(run, &to.0, None, "rework from Conix", by).await,

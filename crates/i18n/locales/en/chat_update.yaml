@@ -1,4 +1,8 @@
 chat_update:
+  cmd_confirm: "Confirm a station: /confirm [run] [station] [reason] (a person's alone; the model has no tool for it)"
+  cmd_reject: "Reject a station: /reject [run] [station] <reason>"
+  cmd_release: "Release a held station: /release [run] [station]"
+  cmd_force: "Force a station through: /force [run] [station] <reason> (not a governed flow's)"
   cmd_help: "Help"
   cmd_new: "New session"
   cmd_rename: "Rename the current session"

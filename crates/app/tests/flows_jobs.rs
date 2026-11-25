@@ -557,3 +557,66 @@ async fn the_away_summary_lists_what_happened_and_enter_goes_there() {
         "跳到那次运行"
     );
 }
+
+/// 确认、驳回、放行、强制放行只有人能做：人在输入框里打 `/confirm` 这一类，不经模型（design/flows.md §4）。
+/// 运行不写是流程标签里选中的那次，站不写是唯一在等的那一站。
+#[tokio::test(start_paused = true)]
+async fn a_person_decides_a_station_by_typing_it() {
+    let mut h = flows("default").await;
+    h.pick_upper(flow_index(&h, "feature-to-ship")).await;
+    h.keys("Right").await;
+    h.settle().await;
+    h.pick_upper(run_index(&h, "r2")).await;
+    h.settle().await;
+    // 回到用户会话说（主会话正等着答一个提问），选中的运行不变。
+    h.keys("m").await;
+    h.core.state.ui.composer.clear();
+    let before = h.calls("dev").len();
+    let ops = |h: &Harness| -> Vec<(String, port::RunOp)> {
+        h.calls("dev")[before..]
+            .iter()
+            .filter_map(|c| match c {
+                Command::RunOp { run, op } => Some((run.as_str().to_string(), op.clone())),
+                _ => None,
+            })
+            .collect()
+    };
+    // 驳回要写理由：没写就不发。
+    h.type_str("/reject sign").await;
+    h.keys("Enter").await;
+    assert!(ops(&h).is_empty());
+    assert!(
+        h.core
+            .state
+            .ui
+            .notice
+            .as_ref()
+            .is_some_and(|n| n.text.contains("要写理由")),
+        "{:?}",
+        h.core.state.ui.notice
+    );
+    // 评审汇总搁置着：/release 不写站就是它。
+    h.type_str("/release").await;
+    h.keys("Enter").await;
+    h.type_str("/confirm sign 看过了").await;
+    h.keys("Enter").await;
+    assert_eq!(
+        ops(&h),
+        [
+            (
+                "r2".to_string(),
+                port::RunOp::Release {
+                    station: port::StationId("sign".into()),
+                }
+            ),
+            (
+                "r2".to_string(),
+                port::RunOp::Confirm {
+                    station: port::StationId("sign".into()),
+                    reject: false,
+                    reason: Some("看过了".into()),
+                }
+            ),
+        ]
+    );
+}

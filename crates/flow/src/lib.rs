@@ -95,3 +95,20 @@ pub use store::{FileStore, Hooked, MemStore};
 /// write flows and for the session that helps them.
 pub const GUIDE_EN: &str = include_str!("../docs/guide.en.md");
 pub const GUIDE_ZH: &str = include_str!("../docs/guide.zh-CN.md");
+
+/// The guide's chapters beyond the overview (`docs/guide/<topic>.*.md`): how to write each kind of
+/// check that holds a station, read when a flow needs one rather than every time.
+pub const GUIDE_TOPICS: &[&str] = &["gates", "confirm", "deliver"];
+
+/// A chapter of the guide, by its name in [`GUIDE_TOPICS`]; `None` for another name.
+pub fn guide_topic(topic: &str, zh: bool) -> Option<&'static str> {
+    Some(match (topic, zh) {
+        ("gates", false) => include_str!("../docs/guide/gates.en.md"),
+        ("gates", true) => include_str!("../docs/guide/gates.zh-CN.md"),
+        ("confirm", false) => include_str!("../docs/guide/confirm.en.md"),
+        ("confirm", true) => include_str!("../docs/guide/confirm.zh-CN.md"),
+        ("deliver", false) => include_str!("../docs/guide/deliver.en.md"),
+        ("deliver", true) => include_str!("../docs/guide/deliver.zh-CN.md"),
+        _ => return None,
+    })
+}
