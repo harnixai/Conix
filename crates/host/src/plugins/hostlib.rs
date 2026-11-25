@@ -196,7 +196,7 @@ async fn plugin_call(hub: &Hub, call: &HostLibCall) -> Result<Value, HostLibErro
         .call(
             "plugin.call",
             json!({"function": function, "input": call.input.get("input").cloned().unwrap_or(Value::Null),
-                   "cwd": cwd, "writes": true, "timeout_ms": 120_000}),
+                   "cwd": cwd, "writes": true, "timeout_ms": super::CALL_TIMEOUT_MS}),
         )
         .await
         .map_err(|e| HostLibError::new("failed", e.to_string()))?;

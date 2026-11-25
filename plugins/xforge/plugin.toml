@@ -2,7 +2,7 @@ uses = ["conix"]
 
 [plugin]
 name = "xforge"
-version = "0.1.0"
+version = "0.1.1"
 api_version = "0.1"
 requires_engine = ">=0.4.0, <0.5"
 description = "规格驱动的变更：规格增量、台账、门禁，按 quick / solid 流程推进"
@@ -77,7 +77,7 @@ xforge-constitution = "xforge.check"
 xforge-ledgers      = "xforge.check"
 xforge-integrated   = "xforge.check"
 xforge-unclaimed    = "xforge.check"
-xforge-unit-tests   = { function = "xforge.check", runs_commands = true }
+xforge-unit-tests   = { function = "xforge.check", runs_commands = true, timeout = "10m" }
 
 [x-conix.steps]
 xforge-open     = "xforge.open"

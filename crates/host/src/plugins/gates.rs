@@ -14,9 +14,6 @@ use serde_json::{Value, json};
 use super::PluginMap;
 use crate::hub::WeakHub;
 
-/// `plugin.call` 的上限，门禁与步骤都用它。
-const CALL_TIMEOUT_MS: u64 = 120_000;
-
 pub struct PluginCalls {
     hub: WeakHub,
     map: Arc<RwLock<PluginMap>>,
@@ -66,6 +63,7 @@ impl PluginCalls {
         input: Value,
         cwd: Option<String>,
         writes: bool,
+        timeout_ms: u64,
     ) -> Result<Value, String> {
         let hub = self
             .hub
@@ -76,7 +74,7 @@ impl PluginCalls {
             .call(
                 "plugin.call",
                 json!({"function": function, "input": input, "cwd": cwd, "writes": writes,
-                       "timeout_ms": CALL_TIMEOUT_MS}),
+                       "timeout_ms": timeout_ms}),
             )
             .await
             .map_err(|e| format!("plugin.call {function}: {e}"))?;
@@ -97,9 +95,16 @@ pub struct PluginGates(pub Arc<PluginCalls>);
 #[async_trait]
 impl Gates for PluginGates {
     async fn run(&self, run: &RunRecord, station: &str, gate: &str) -> GateResult {
-        let (found, writes) = match self.0.map.read() {
-            Ok(m) => (m.gates.get(gate).cloned(), m.runs_commands.contains(gate)),
-            Err(_) => (None, false),
+        let (found, writes, timeout) = match self.0.map.read() {
+            Ok(m) => (
+                m.gates.get(gate).cloned(),
+                m.runs_commands.contains(gate),
+                m.gate_timeouts
+                    .get(gate)
+                    .copied()
+                    .unwrap_or(super::CALL_TIMEOUT_MS),
+            ),
+            Err(_) => (None, false, super::CALL_TIMEOUT_MS),
         };
         let Some((_, function)) = found else {
             return GateResult {
@@ -111,7 +116,7 @@ impl Gates for PluginGates {
         input["gate"] = json!(gate);
         // 缺省 writes:false：只读命令不用规则就能跑（writes:true 时它们也要按规则判，不带会话没人可问）；
         // 声明了 runs_commands 的才 writes:true，好跑测试这类命令（见 GateTarget）。
-        match self.0.call(&function, input, cwd, writes).await {
+        match self.0.call(&function, input, cwd, writes, timeout).await {
             Ok(v) => match serde_json::from_value::<GateResult>(v.clone()) {
                 Ok(g) => g,
                 Err(_) => GateResult {
@@ -140,13 +145,15 @@ impl Programs for PluginPrograms {
         run: &RunRecord,
         item: Option<&Value>,
     ) -> Result<Value, String> {
-        let found = self
-            .0
-            .map
-            .read()
-            .ok()
-            .and_then(|m| m.steps.get(step).cloned());
-        let Some((_, function)) = found else {
+        let found = self.0.map.read().ok().and_then(|m| {
+            let t = m
+                .step_timeouts
+                .get(step)
+                .copied()
+                .unwrap_or(super::CALL_TIMEOUT_MS);
+            m.steps.get(step).cloned().map(|f| (f, t))
+        });
+        let Some(((_, function), timeout)) = found else {
             return Err(format!("no enabled plugin provides the step `{step}`"));
         };
         let station = run
@@ -158,6 +165,6 @@ impl Programs for PluginPrograms {
         let (mut input, cwd) = self.0.input(run, &station);
         input["step"] = json!(step);
         input["item"] = item.cloned().unwrap_or(Value::Null);
-        self.0.call(&function, input, cwd, true).await
+        self.0.call(&function, input, cwd, true, timeout).await
     }
 }

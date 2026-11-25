@@ -95,9 +95,10 @@ flows = "flows"                                  # 一个 harnix-flow 流程包�
 
 [x-conix.gates]                                  # host 门禁名 → 插件函数的调用名（只读调用）
 xforge-structure = "xforge.check"
+xforge-unit-tests = { function = "xforge.check", runs_commands = true, timeout = "10m" }
 
 [x-conix.steps]                                  # program 步骤名 → 插件函数的调用名（可写调用）
-xforge-open = "xforge.open"
+xforge-open = "xforge.open"                       # 也可写 { function = "…", timeout = "5m" }
 ```
 
 - **分层**：Conix 实现一层 `PluginPacks`，挂所有已启用插件的流程包。叠加顺序：项目 > 插件 > 内置示例（没有全局可写层，architecture §8.1）。来源记 `Origin::Plugin`（Harnix 0.4.7，不带名字；插件名从 `Packs::source(flow)` / `DefRow::source` 取）；项目里存同名的就是
@@ -148,8 +149,11 @@ TUI 照常收到事件。
   声明的 `writes`，命令按项目 `.conix/settings.json` 的规则判，要问人的失败、`detail` 写明要哪条。安装时披露里写明。
 - **步骤**（`PluginPrograms`，实现 `Programs`）：步骤名按 `[x-conix.steps]` 找到函数，`writes: true`（只写得了函数声明的
   `writes`），`input` 同上把 `gate` 换成 `step`，再加 `item`；返回值交给 `Engine::submit`，错误交给 `Engine::fail`。
-- 时限：`plugin.call` 至多 120 秒，门禁与步骤都用它；每次带一个 `run_id`（`<运行>/<站>/<门禁或步骤>`），实例停时
-  `plugin.cancel`，派工器下次启动重做（同现有的租约规则）。
+- 时限：缺省 120 秒（`plugin.call` 的缺省）。跑测试这类两分钟不够的，门禁或步骤写成表、加 `timeout`（`"8m"`、`"90s"`、
+  `"1h30m"`，纯数字按分钟），至多十分钟——Agix 给宿主调的 `plugin.call` 的上限（0.4.4 的 `plugin_call_long`，同 `Bash`）；
+  长过十分钟的按十分钟，写错的用缺省、记日志。比缺省长的写进安装时的披露（"up to 8 min"）：一道门禁至多能占着一站这么久。
+  流程库不另给门禁计时。函数里的 `tools.Bash` 自己缺省两分钟，要给长的时限（受这次调用剩下的时间约束）。
+  不带 `run_id`、不 `plugin.cancel`：引擎嵌在实例里，实例停时调用随引擎一起停，门禁仍在运行里等着，流程库下次启动重跑它。
 - 带会话的调用这一版不用，留给以后面板上的操作。
 
 ## 6. 插件 `xforge`
@@ -241,7 +245,7 @@ xforge-constitution = "xforge.check"
 xforge-ledgers      = "xforge.check"
 xforge-integrated   = "xforge.check"
 xforge-unclaimed    = "xforge.check"
-xforge-unit-tests   = "xforge.check"
+xforge-unit-tests   = { function = "xforge.check", runs_commands = true, timeout = "10m" }
 
 [x-conix.steps]
 xforge-open     = "xforge.open"
@@ -407,7 +411,7 @@ XForge 原来的文件格式（回执、投影、审计链、多方案）第一�
 | `xforge-ledgers` | 三个台账里没有 `conclusion: open` 的条目 |
 | `xforge-integrated` | 工作包都 `done` |
 | `xforge-unclaimed` | `git status --porcelain` 里改过的路径都落在某个包的 `paths` 里或在 `xforge/` 下；不落的列出来 |
-| `xforge-unit-tests` | 每个写了 `verify` 的包，跑 `manifest.yaml` 里那条命令，退出码都是 0 |
+| `xforge-unit-tests` | 每个写了 `verify` 的包，跑 `manifest.yaml` 里那条命令，退出码都是 0；整道门禁至多 10 分钟 |
 
 不带会话的调用要问人的一律失败：`unclaimed`、`unit-tests` 跑的命令被拒时，`detail` 写明要在项目设置里给哪条
 `permissions.allow` 规则（如 `"Bash(git status:*)"`）。

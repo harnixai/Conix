@@ -360,7 +360,8 @@ async function gateUnitTests(ch) {
       continue;
     }
     try {
-      await tools.Bash({ command: cmd });
+      // Bash 缺省两分钟；给到上限，实际以这次门禁调用剩下的时间为准（plugin.toml 里 unit-tests 给了十分钟）。
+      await tools.Bash({ command: cmd, timeout: 600000 });
     } catch (e) {
       problems.push(bashProblem(cmd, e));
     }

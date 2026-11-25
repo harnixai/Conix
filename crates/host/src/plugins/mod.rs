@@ -19,9 +19,58 @@ pub struct ConixSection {
     /// host 门禁名 → 插件函数的调用名（`<包名>.<函数名>`），或 `{ function, runs_commands = true }`。
     #[serde(default)]
     pub gates: BTreeMap<String, GateTarget>,
-    /// program 步骤名 → 插件函数的调用名。
+    /// program 步骤名 → 插件函数的调用名，或 `{ function, timeout = "5m" }`。
     #[serde(default)]
-    pub steps: BTreeMap<String, String>,
+    pub steps: BTreeMap<String, StepTarget>,
+}
+
+/// 门禁与步骤调插件函数的缺省时限（`plugin.call` 的缺省）。
+pub const CALL_TIMEOUT_MS: u64 = 120_000;
+/// 能声明的最长时限：Agix 给宿主调的 `plugin.call` 至多十分钟（`plugin_call_long`，与 `Bash` 的上限一致）。
+pub const MAX_CALL_TIMEOUT_MS: u64 = 600_000;
+
+/// `timeout = "5m"`（`90s`、`1h30m`，纯数字按分钟）→ 毫秒；没写、写错的用缺省，长过十分钟的按十分钟。
+fn call_timeout(t: Option<&str>) -> u64 {
+    match t {
+        None => CALL_TIMEOUT_MS,
+        Some(s) => match crate::jobs::guard::parse_duration(s) {
+            Some(ms) => ms.min(MAX_CALL_TIMEOUT_MS),
+            None => {
+                tracing::warn!(
+                    timeout = s,
+                    "plugin.toml: not a duration, using the default"
+                );
+                CALL_TIMEOUT_MS
+            }
+        },
+    }
+}
+
+/// 一个程序步骤由哪个函数做、给它多久。
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(untagged)]
+pub enum StepTarget {
+    Function(String),
+    Full {
+        function: String,
+        #[serde(default)]
+        timeout: Option<String>,
+    },
+}
+
+impl StepTarget {
+    pub fn function(&self) -> &str {
+        match self {
+            StepTarget::Function(f) | StepTarget::Full { function: f, .. } => f,
+        }
+    }
+
+    pub fn timeout_ms(&self) -> u64 {
+        match self {
+            StepTarget::Function(_) => CALL_TIMEOUT_MS,
+            StepTarget::Full { timeout, .. } => call_timeout(timeout.as_deref()),
+        }
+    }
 }
 
 /// 一道门禁由哪个函数判。缺省以 `writes:false` 调：只读的命令（`git status`）不用规则就能跑，会改东西的一律被拒。
@@ -35,6 +84,9 @@ pub enum GateTarget {
         function: String,
         #[serde(default)]
         runs_commands: bool,
+        /// 跑测试这类门禁两分钟不够时写，如 `"8m"`；至多十分钟。
+        #[serde(default)]
+        timeout: Option<String>,
     },
 }
 
@@ -42,6 +94,13 @@ impl GateTarget {
     pub fn function(&self) -> &str {
         match self {
             GateTarget::Function(f) | GateTarget::Full { function: f, .. } => f,
+        }
+    }
+
+    pub fn timeout_ms(&self) -> u64 {
+        match self {
+            GateTarget::Function(_) => CALL_TIMEOUT_MS,
+            GateTarget::Full { timeout, .. } => call_timeout(timeout.as_deref()),
         }
     }
 
@@ -126,6 +185,9 @@ pub struct PluginMap {
     pub steps: BTreeMap<String, (String, String)>,
     /// 以 `writes:true` 调的门禁（[`GateTarget::runs_commands`]）。
     pub runs_commands: std::collections::BTreeSet<String>,
+    /// 声明了时限的门禁与步骤：名字 → 毫秒；没有的用 [`CALL_TIMEOUT_MS`]。
+    pub gate_timeouts: BTreeMap<String, u64>,
+    pub step_timeouts: BTreeMap<String, u64>,
     /// 插件名 → 被遮住的东西，一条一句。
     pub conflicts: BTreeMap<String, Vec<String>>,
 }
@@ -142,14 +204,31 @@ impl PluginMap {
                 .iter()
                 .map(|(g, t)| (g.clone(), t.function().to_string()))
                 .collect();
+            let steps: BTreeMap<String, String> = p
+                .section
+                .steps
+                .iter()
+                .map(|(n, t)| (n.clone(), t.function().to_string()))
+                .collect();
+            // 门禁、步骤的附加项只算胜出的那个插件的（下面同名的后到者记成冲突）。
             for (g, t) in &p.section.gates {
-                if t.runs_commands() && !m.gates.contains_key(g) {
-                    m.runs_commands.insert(g.clone());
+                if !m.gates.contains_key(g) {
+                    if t.runs_commands() {
+                        m.runs_commands.insert(g.clone());
+                    }
+                    if t.timeout_ms() != CALL_TIMEOUT_MS {
+                        m.gate_timeouts.insert(g.clone(), t.timeout_ms());
+                    }
+                }
+            }
+            for (n, t) in &p.section.steps {
+                if !m.steps.contains_key(n) && t.timeout_ms() != CALL_TIMEOUT_MS {
+                    m.step_timeouts.insert(n.clone(), t.timeout_ms());
                 }
             }
             for (kind, src, dst) in [
                 ("gate", &gates, &mut m.gates),
-                ("step", &p.section.steps, &mut m.steps),
+                ("step", &steps, &mut m.steps),
             ] {
                 for (name, function) in src {
                     match dst.get(name) {
@@ -263,6 +342,18 @@ pub fn disclosure(agix: &Value, mounted: Option<&Mounted>) -> port::PluginDisclo
     d
 }
 
+/// 披露里写明比缺省的两分钟长的时限：一道门禁最多能占着一站这么久。
+fn longer(ms: u64) -> String {
+    if ms <= CALL_TIMEOUT_MS {
+        return String::new();
+    }
+    let s = ms / 1000;
+    match (s / 60, s % 60) {
+        (m, 0) => format!(", up to {m} min"),
+        (m, r) => format!(", up to {m} min {r} s"),
+    }
+}
+
 fn conix_disclosure(m: &Mounted, d: &mut port::PluginDisclosure) {
     for name in m.flow_names() {
         d.conix.push(format!("flow `{name}`"));
@@ -274,13 +365,16 @@ fn conix_disclosure(m: &Mounted, d: &mut port::PluginDisclosure) {
             "read-only call"
         };
         d.conix.push(format!(
-            "host gate `{gate}` → plugin function `{}` ({how})",
-            t.function()
+            "host gate `{gate}` → plugin function `{}` ({how}{})",
+            t.function(),
+            longer(t.timeout_ms())
         ));
     }
-    for (step, f) in &m.section.steps {
+    for (step, t) in &m.section.steps {
         d.conix.push(format!(
-            "program step `{step}` → plugin function `{f}` (may write)"
+            "program step `{step}` → plugin function `{}` (may write{})",
+            t.function(),
+            longer(t.timeout_ms())
         ));
     }
     if m.section.flows.is_some() && m.flows_dir().is_none() {
@@ -407,6 +501,7 @@ xf-open = "xf.open"
                     GateTarget::Full {
                         function: format!("{name}.check"),
                         runs_commands: name == "zeta",
+                        timeout: (name == "zeta").then(|| "8m".into()),
                     },
                 )]),
                 ..Default::default()
@@ -415,6 +510,64 @@ xf-open = "xf.open"
         let m = PluginMap::build(&[p("zeta"), p("alpha")]);
         assert_eq!(m.gates["g"], ("alpha".into(), "alpha.check".into()));
         assert!(m.runs_commands.is_empty(), "胜出的那个没要跑命令");
+        assert!(m.gate_timeouts.is_empty(), "时限也只算胜出的那个");
         assert_eq!(m.conflicts["zeta"].len(), 1);
+    }
+
+    /// 门禁与步骤可以写时限：缺省两分钟，至多十分钟（Agix `plugin_call_long`），写错的用缺省；披露里写明长的。
+    #[test]
+    fn gates_and_steps_may_ask_for_up_to_ten_minutes() {
+        let section: ConixSection = toml::from_str::<Manifest>(
+            r#"
+[x-conix.gates]
+quick = "p.quick"
+tests = { function = "p.tests", runs_commands = true, timeout = "8m" }
+huge = { function = "p.huge", timeout = "2h" }
+typo = { function = "p.typo", timeout = "eight minutes" }
+
+[x-conix.steps]
+pack = { function = "p.pack", timeout = "3m30s" }
+plain = "p.plain"
+"#,
+        )
+        .unwrap()
+        .x_conix
+        .unwrap();
+        let m = Mounted {
+            name: "p".into(),
+            root: PathBuf::new(),
+            section,
+        };
+        let map = PluginMap::build(std::slice::from_ref(&m));
+        assert_eq!(
+            map.gate_timeouts,
+            BTreeMap::from([("tests".into(), 480_000), ("huge".into(), 600_000)])
+        );
+        assert_eq!(
+            map.step_timeouts,
+            BTreeMap::from([("pack".into(), 210_000)])
+        );
+        assert_eq!(map.steps["plain"], ("p".into(), "p.plain".into()));
+        let mut d = port::PluginDisclosure::default();
+        conix_disclosure(&m, &mut d);
+        assert!(
+            d.conix
+                .iter()
+                .any(|l| l.contains("`tests`") && l.ends_with("up to 8 min)")),
+            "{:?}",
+            d.conix
+        );
+        assert!(
+            d.conix
+                .iter()
+                .any(|l| l.contains("`pack`") && l.ends_with("up to 3 min 30 s)")),
+            "{:?}",
+            d.conix
+        );
+        assert!(
+            d.conix
+                .iter()
+                .any(|l| l.contains("`quick`") && l.ends_with("(read-only call)"))
+        );
     }
 }
