@@ -217,6 +217,7 @@ async fn the_builtin_xforge_runs_a_change_from_proposal_to_archive_with_its_own_
             run: id.clone(),
             op: RunOp::Rework {
                 to: StationId("design".into()),
+                reason: Some("检查还留着 open 的问题：设计照台账改，改完让检查再看".into()),
             },
         })
         .await;

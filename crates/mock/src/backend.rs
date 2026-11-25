@@ -1008,7 +1008,7 @@ fn apply_run_op(view: &mut RunView, op: &RunOp) {
             }
             view.summary.status = RunStatus::Running;
         }
-        RunOp::Rework { to } => {
+        RunOp::Rework { to, .. } => {
             if let Some(i) = station(view, to) {
                 for s in &mut view.stations[i..] {
                     if s.status != StationStatus::Skipped {

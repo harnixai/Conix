@@ -6,7 +6,9 @@ flows:
   person_done_confirm: "Confirmed station {station} of {run}"
   person_done_reject: "Rejected station {station} of {run}"
   person_done_release: "Released station {station} of {run}"
+  person_rework_to: "/rework takes the station to send the run back to: /rework [run] <station> [reason]"
   person_done_force: "Forced station {station} of {run} through"
+  person_done_rework: "Sent {run} back to station {station}"
   progress_done: "{done}/{total} stations"
   progress: "station {done}/{total} {current}"
   run:

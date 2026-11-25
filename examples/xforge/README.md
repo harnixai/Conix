@@ -13,7 +13,7 @@ conix            # 起实例并接入
 ```
 
 在对话里说"用 xforge/solid 做一个变更：给 textkit 加 truncate(text, n)，标题 truncate"，或者 `flow_start`。
-`solid` 在独立检查与验收两处停下等人：`/confirm` 放行，`/reject <理由>` 驳回；检查留下没解决的问题时，在对话里让 Agent 把运行打回设计（`flow_rework`）。
+`solid` 在独立检查与验收两处停下等人：`/confirm` 放行，`/reject <理由>` 驳回；检查留下没解决的问题时，`/rework design <理由>` 把运行打回设计（也可以在对话里让 Agent 打回：`flow_rework`）。
 
 ## 两条路径
 

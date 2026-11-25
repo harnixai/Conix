@@ -7,7 +7,9 @@ flows:
   person_done_confirm: "已确认 {run} 的站 {station}"
   person_done_reject: "已驳回 {run} 的站 {station}"
   person_done_release: "已放行 {run} 的站 {station}"
+  person_rework_to: "/rework 要写打回到哪一站：/rework [运行] <站> [理由]"
   person_done_force: "已强制放行 {run} 的站 {station}"
+  person_done_rework: "已把 {run} 打回到站 {station}"
   progress_done: "{done}/{total} 站"
   progress: "站 {done}/{total} {current}"
   run:

@@ -803,9 +803,10 @@ fn def_action(s: &mut State, a: Action, name: &str) -> Option<Vec<Effect>> {
 
 /// 只有人能做的站上的决定（design/flows.md §4–§5）：`/confirm`、`/reject`、`/release`、`/force`。会话里的模型
 /// 没有这几个工具，标签上也不放操作键（交互 §5），所以由人在输入框里打：打出来的就是人的决定，不经模型。
+/// `/rework` 不是只有人能做（模型有 `flow_rework`），放在这里是让人不必绕道对话去叫模型打回。
 ///
 /// `[运行] [站] [理由]`：运行不写，是流程标签里选中的运行、或左边正对着的运行主会话；站不写，是这个运行里唯一
-/// 在等这件事的站。驳回与强制放行要写理由。
+/// 在等这件事的站。驳回与强制放行要写理由。打回的站是目标站，没有"在等打回"的站可推断，所以一定要写。
 pub(crate) fn person_op(s: &mut State, name: &str, arg: &str) -> Vec<Effect> {
     let mut words: Vec<&str> = arg.split_whitespace().collect();
     let known = |id: &str| s.domain.run_views.contains_key(&RunId(id.to_string()));
@@ -835,6 +836,7 @@ pub(crate) fn person_op(s: &mut State, name: &str, arg: &str) -> Vec<Effect> {
                 && st.exit.iter().any(|e| e.starts_with("confirm"))
         }
         "release" => st.status == StationStatus::Held,
+        "rework" => false,
         _ => st.status == StationStatus::Unmet,
     };
     let named = words.first().and_then(|w| {
@@ -852,6 +854,10 @@ pub(crate) fn person_op(s: &mut State, name: &str, arg: &str) -> Vec<Effect> {
                 view.stations.iter().filter(|st| waits(st)).collect();
             match candidates.as_slice() {
                 [one] => one.id.clone(),
+                [] if name == "rework" => {
+                    s.notice(i18n::t!("flows.person_rework_to"), true);
+                    return vec![];
+                }
                 [] => {
                     s.notice(i18n::t!("flows.person_no_station", cmd = name), true);
                     return vec![];
@@ -890,6 +896,10 @@ pub(crate) fn person_op(s: &mut State, name: &str, arg: &str) -> Vec<Effect> {
         },
         "release" => port::RunOp::Release {
             station: station.clone(),
+        },
+        "rework" => port::RunOp::Rework {
+            to: station.clone(),
+            reason,
         },
         _ => port::RunOp::Force {
             station: station.clone(),

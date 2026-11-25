@@ -171,8 +171,11 @@ pub enum RunOp {
         station: StationId,
         reason: String,
     },
+    /// 打回到 `to`（它和后面的站重做）；`reason` 记进运行的日志，给重做的站看。
     Rework {
         to: StationId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
     },
     Retry {
         station: StationId,

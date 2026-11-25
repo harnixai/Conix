@@ -443,6 +443,7 @@ async fn the_reviewer_sends_the_draft_back_and_both_rounds_stay_on_their_models(
         run: id.clone(),
         op: RunOp::Rework {
             to: StationId("write".into()),
+            reason: None,
         },
     })
     .await;

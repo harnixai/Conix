@@ -450,7 +450,10 @@ impl Flows {
             }
             RunOp::Release { station } => e.release(run, &station.0, by).await,
             RunOp::Force { station, reason } => e.force(run, &station.0, reason, by).await,
-            RunOp::Rework { to } => e.rework(run, &to.0, None, "rework from Conix", by).await,
+            RunOp::Rework { to, reason } => {
+                let reason = reason.as_deref().unwrap_or("rework from Conix");
+                e.rework(run, &to.0, None, reason, by).await
+            }
             // 有失败的任务就重做任务；没有就把没过的门禁重跑一遍（门禁 error 之后人看过了，或文件手工改好了）。
             RunOp::Retry { station } => {
                 let rec = e.record(run).await.map_err(flow_err)?;

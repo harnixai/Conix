@@ -241,13 +241,13 @@ fn guide_notes(topic: Option<&str>, zh: bool, command_gates: bool) -> Option<Str
         (None, true) => format!(
             "## 在 Conix 里\n\n- 流程和件存在项目的 `.conix/flows/`（文中的 `.harnix/` 在 Conix 里是 `.conix/`），随项目提交；项目受信才读、才写。新写的流程放进一个流程包：存 `<包>/<流程>` 就建 `.conix/flows/<包>/`，一个包自洽地放它的流程和件（Conix 的 docs/design/layout.md）。\n\
              - 运行在项目的制品目录里有自己的目录（缺省 `conix/runs/<运行>/`，不进 git），包的流程结束后归档进 `conix/<包>/archive/`。Conix 内置一个开发流程包 `xforge`（`xforge/solid`、`xforge/quick`），可以直接用，也可以照它写。\n\
-             - 确认、驳回、放行搁置的站、强制放行只能由用户做：你没有这些工具，需要时告诉用户在输入框里打 `/confirm`、`/reject <理由>`、`/release`、`/force <理由>`（可以带运行和站：`/confirm <运行> <站>`）。\n\
+             - 确认、驳回、放行搁置的站、强制放行只能由用户做：你没有这些工具，需要时告诉用户在输入框里打 `/confirm`、`/reject <理由>`、`/release`、`/force <理由>`（可以带运行和站：`/confirm <运行> <站>`）。打回你有 `flow_rework`，用户也可以自己打 `/rework <站> [理由]`。\n\
              - {cmd}\n- 写门禁前读 `flow_guide {{topic: \"gates\"}}`；要人批的读 `flow_guide {{topic: \"confirm\"}}`。"
         ),
         (None, false) => format!(
             "## In Conix\n\n- Flows and parts are saved in the project's `.conix/flows/` (`.harnix/` above is `.conix/` in Conix), committed with it; read and written only while the project is trusted. Put a new flow in a bundle: saving `<bundle>/<flow>` makes `.conix/flows/<bundle>/`, which holds its flows and parts on its own (Conix's docs/design/layout.md).\n\
              - A run has its own directory in the project's artifacts (`conix/runs/<run>/` by default, not committed); a bundle's run is archived to `conix/<bundle>/archive/` once it finished. Conix ships a development bundle, `xforge` (`xforge/solid`, `xforge/quick`): use it as it is, or write one after it.\n\
-             - Confirming, rejecting, releasing a held station and forcing are the user's: you have no tools for them; when one is needed, tell the user to type `/confirm`, `/reject <reason>`, `/release` or `/force <reason>` (a run and station may follow: `/confirm <run> <station>`).\n\
+             - Confirming, rejecting, releasing a held station and forcing are the user's: you have no tools for them; when one is needed, tell the user to type `/confirm`, `/reject <reason>`, `/release` or `/force <reason>` (a run and station may follow: `/confirm <run> <station>`). You send a run back with `flow_rework`; the user may also type `/rework <station> [reason]`.\n\
              - {cmd}\n- Read `flow_guide {{topic: \"gates\"}}` before writing a gate, `flow_guide {{topic: \"confirm\"}}` when someone must approve."
         ),
         (Some("gates"), true) => format!("## 在 Conix 里\n\n- {cmd}\n- `flow_gate_try` 不是只读工具（命令门禁会跑命令），按会话的权限设置可能先问用户。"),

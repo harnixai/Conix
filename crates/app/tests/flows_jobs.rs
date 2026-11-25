@@ -620,3 +620,63 @@ async fn a_person_decides_a_station_by_typing_it() {
         ]
     );
 }
+
+/// 打回也能在输入框里打（`/rework`）：不必绕道对话去叫模型调 `flow_rework`。打回到哪一站没法推断，一定要写；
+/// 站可以写 id 或标题，后面的是理由，记进运行、给重做的站看。
+#[tokio::test(start_paused = true)]
+async fn a_person_sends_a_run_back_by_typing_it() {
+    let mut h = flows("default").await;
+    h.pick_upper(flow_index(&h, "feature-to-ship")).await;
+    h.keys("Right").await;
+    h.settle().await;
+    h.pick_upper(run_index(&h, "r2")).await;
+    h.settle().await;
+    h.keys("m").await;
+    h.core.state.ui.composer.clear();
+    let before = h.calls("dev").len();
+    let ops = |h: &Harness| -> Vec<(String, port::RunOp)> {
+        h.calls("dev")[before..]
+            .iter()
+            .filter_map(|c| match c {
+                Command::RunOp { run, op } => Some((run.as_str().to_string(), op.clone())),
+                _ => None,
+            })
+            .collect()
+    };
+    h.type_str("/rework").await;
+    h.keys("Enter").await;
+    assert!(ops(&h).is_empty());
+    assert!(
+        h.core
+            .state
+            .ui
+            .notice
+            .as_ref()
+            .is_some_and(|n| n.text.contains("打回到哪一站")),
+        "{:?}",
+        h.core.state.ui.notice
+    );
+    h.type_str("/rework 设计 接口还要能取消").await;
+    h.keys("Enter").await;
+    h.type_str("/rework r2 design").await;
+    h.keys("Enter").await;
+    assert_eq!(
+        ops(&h),
+        [
+            (
+                "r2".to_string(),
+                port::RunOp::Rework {
+                    to: port::StationId("design".into()),
+                    reason: Some("接口还要能取消".into()),
+                }
+            ),
+            (
+                "r2".to_string(),
+                port::RunOp::Rework {
+                    to: port::StationId("design".into()),
+                    reason: None,
+                }
+            ),
+        ]
+    );
+}
