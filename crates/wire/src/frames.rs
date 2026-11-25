@@ -104,6 +104,22 @@ pub enum SessionEvent {
         #[serde(default)]
         tokens_after: u64,
     },
+    /// 一次改写历史的压缩开始了；之后恰好一帧 `compact`（压成了）或 `compact_ended`（没压成）（协议 §7.1）。
+    CompactStarted {
+        /// `threshold`、`manual`、`overflow`。
+        #[serde(default)]
+        trigger: String,
+        #[serde(default)]
+        tokens_before: u64,
+    },
+    /// `compact_started` 宣布的那次压缩没压成，历史原样。
+    CompactEnded {
+        /// `declined`、`nothing_to_compact`、`failed`、`cancelled`。
+        #[serde(default)]
+        outcome: String,
+        #[serde(default)]
+        reason: Option<String>,
+    },
     /// 这次模型调用去了与会话上一次调用不同的 provider（`model.order` 的回退或回切）。
     ProviderSwitched {
         #[serde(default)]
@@ -205,6 +221,9 @@ pub enum PromptPayload {
         permit_always: bool,
         #[serde(default)]
         origin: Option<PromptOrigin>,
+        /// 子 Agent 发起的询问：它在父会话里的任务（Agix 0.4.4 起，`prompt_task`）。
+        #[serde(default)]
+        task_id: Option<String>,
     },
     Question {
         prompt_id: String,
@@ -214,6 +233,8 @@ pub enum PromptPayload {
         header: Option<String>,
         #[serde(default)]
         options: Vec<QuestionOption>,
+        #[serde(default)]
+        task_id: Option<String>,
     },
     McpElicitation {
         prompt_id: String,
@@ -221,6 +242,8 @@ pub enum PromptPayload {
         server: String,
         #[serde(default)]
         message: String,
+        #[serde(default)]
+        task_id: Option<String>,
     },
 }
 
@@ -260,6 +283,17 @@ impl PromptPayload {
                     .filter(|c| !c.is_empty())
             }),
             _ => None,
+        }
+    }
+
+    /// 子 Agent 发起时它的任务；模型自己的询问没有。
+    pub fn task_id(&self) -> Option<&str> {
+        match self {
+            PromptPayload::Permission { task_id, .. }
+            | PromptPayload::Question { task_id, .. }
+            | PromptPayload::McpElicitation { task_id, .. } => {
+                task_id.as_deref().filter(|t| !t.is_empty())
+            }
         }
     }
 

@@ -25,7 +25,7 @@ pub use command::{
     SlashCommand, SubmitMode, Watched,
 };
 pub use common::{Millis, Usage};
-pub use event::{ConnState, Event, NoticeLevel};
+pub use event::{CompactOutcome, ConnState, Event, NoticeLevel};
 pub use flow::{
     DefState, FlowDetail, FlowOrigin, FlowSummary, RunOp, RunStatus, RunSummary, RunView,
     StationStatus, StationTask, StationView,

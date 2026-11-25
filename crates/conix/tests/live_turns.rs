@@ -476,3 +476,40 @@ async fn a_sub_agent_shows_up_as_a_task_with_its_own_session() {
     })
     .await;
 }
+
+/// `/compact`（C-10）：引擎开始压缩就有"压缩中"，再以压成（`Compacted`）或没压成（`CompactEnded`）收尾，
+/// 然后这一轮结束。历史很短，多半是"没有可压的"，两种收尾都算。
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "live"]
+async fn compact_shows_compacting_and_then_how_it_ended() {
+    let lv = Live::new();
+    let mut c = lv.start().await;
+    let s = c.new_session().await;
+    c.skip_past();
+    c.submit(&s, "Reply with exactly: PONG", SubmitMode::Turn)
+        .await;
+    c.finish_turn(&s).await.ended();
+
+    c.submit(&s, "/compact", SubmitMode::Turn).await;
+    let s2 = s.clone();
+    c.wait_event("压缩中", TURN, |e| {
+        matches!(e, Event::Compacting { session } if *session == s2).then_some(())
+    })
+    .await;
+    let s2 = s.clone();
+    let how = c
+        .wait_event("压缩的收尾", TURN, |e| match e {
+            Event::Compacted { session, .. } if *session == s2 => Some("compacted".to_string()),
+            Event::CompactEnded {
+                session, outcome, ..
+            } if *session == s2 => Some(format!("{outcome:?}")),
+            _ => None,
+        })
+        .await;
+    assert!(
+        matches!(how.as_str(), "compacted" | "NothingToCompact"),
+        "{how}"
+    );
+    let t = c.finish_turn(&s).await;
+    assert!(t.end.is_some(), "这一轮结束了");
+}

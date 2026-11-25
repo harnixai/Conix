@@ -1707,9 +1707,10 @@ async fn a_watched_sessions_usage_is_what_the_engine_reports() {
     );
 }
 
-/// `/compact`：引擎只在压缩做完后发一帧，开始时实例先说"压缩中"。
+/// 压缩中跟着引擎的首尾两帧走（Agix #103）：`/compact` 本身不再先报"压缩中"；没压成的以 `CompactEnded` 收尾，
+/// 带上原因；子 Agent 的压缩落在它的侧链上。
 #[tokio::test]
-async fn compact_says_compacting_before_the_engine_finishes() {
+async fn compacting_follows_the_engine_frames_and_says_why_it_did_not_compact() {
     let mut r = rig().await;
     r.hub
         .handle(Command::Watch {
@@ -1727,10 +1728,94 @@ async fn compact_says_compacting_before_the_engine_finishes() {
         .unwrap();
     let ev = r.events().await;
     assert!(
-        ev.iter()
-            .any(|e| matches!(e, Event::Compacting { session } if session.0 == "s1")),
-        "{ev:?}"
+        !ev.iter().any(|e| matches!(e, Event::Compacting { .. })),
+        "压缩中只从引擎来：{ev:?}"
     );
+
+    r.frame(
+        "s1",
+        json!({"kind":"compact_started","trigger":"manual","tokens_before":1200}),
+    );
+    r.frame(
+        "s1",
+        json!({"kind":"compact_ended","outcome":"failed","reason":"provider error: overloaded"}),
+    );
+    let ev = r.events().await;
+    let mine: Vec<_> = ev
+        .iter()
+        .filter(|e| matches!(e, Event::Compacting { .. } | Event::CompactEnded { .. }))
+        .collect();
+    assert_eq!(
+        mine,
+        vec![
+            &Event::Compacting {
+                session: SessionId("s1".into())
+            },
+            &Event::CompactEnded {
+                session: SessionId("s1".into()),
+                outcome: port::CompactOutcome::Failed,
+                reason: Some("provider error: overloaded".into()),
+            },
+        ]
+    );
+
+    // 侧链的事件只推给看着它的人（同父会话一样要 Watch）。
+    let sub = |ev: Value| {
+        json!({"kind":"subagent_progress","agent_label":"探索","agent_session_id":"c1",
+            "agent_type":"explore","parent_turn":1,"task_id":"tk1","event":ev})
+    };
+    r.frame("s1", sub(json!({"kind":"turn_start"})));
+    r.events().await;
+    r.hub
+        .handle(Command::Watch {
+            session: SessionId("c1".into()),
+        })
+        .await
+        .unwrap();
+    r.frame(
+        "s1",
+        sub(json!({"kind":"compact_started","trigger":"threshold","tokens_before":90000})),
+    );
+    let ev = r.events().await;
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, Event::Compacting { session } if session.0 == "c1")),
+        "子 Agent 的压缩挂在它的侧链上：{ev:?}"
+    );
+}
+
+/// 子 Agent 的询问带着它的任务（Agix #104）：不用等任务表里的 `waiting_for`，就认得出是谁问的。
+#[tokio::test]
+async fn a_sub_agent_question_names_its_task_before_the_task_says_it_is_waiting() {
+    let mut r = rig().await;
+    r.hub
+        .handle(Command::Watch {
+            session: SessionId("s1".into()),
+        })
+        .await
+        .unwrap();
+    r.frame(
+        "s1",
+        json!({"kind":"task_started","task":{"task_id":"tk1","kind":"agent","status":"running",
+            "started_ms":0,"detail":{"description":"查分支","agent_type":"explore","agent_session_id":"c1"}}}),
+    );
+    r.frame(
+        "s1",
+        json!({"kind":"prompt","prompt_type":"question","prompt_id":"p1","tool_use_id":"x",
+            "question":"哪个分支？","header":null,"options":[],
+            "task_id":"tk1","agent_session_id":"c1"}),
+    );
+    let ev = r.events().await;
+    let from = ev
+        .iter()
+        .find_map(|e| match e {
+            Event::PromptPending { prompt, .. } => Some(prompt.from.clone()),
+            _ => None,
+        })
+        .expect("提问推出来了")
+        .expect("认出了来源");
+    assert_eq!(from.label, "查分支");
+    assert_eq!(from.task, Some(port::TaskId("tk1".into())));
 }
 
 /// 会话里的自检与测试通知（architecture §8.12）：conix_doctor 与 /doctor 同一份；notify_test 经配置的出口

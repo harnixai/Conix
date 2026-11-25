@@ -4,8 +4,8 @@
 use std::collections::HashSet;
 
 use port::{
-    Event, FileChange, Goal, HistoryItem, MessageId, Prompt, Resolution, SessionSummary,
-    SlashCommand, StopReason, Task, Todo, TodoStatus, ToolId, Watched,
+    CompactOutcome, Event, FileChange, Goal, HistoryItem, MessageId, Prompt, Resolution,
+    SessionSummary, SlashCommand, StopReason, Task, Todo, TodoStatus, ToolId, Watched,
 };
 use tui::{Line, Tone};
 
@@ -438,6 +438,25 @@ impl Conversation {
                     tone: Tone::Dim,
                 });
             }
+            Event::CompactEnded {
+                outcome, reason, ..
+            } => {
+                self.phase = Phase::Thinking;
+                let (text, tone) = match (outcome, reason) {
+                    (CompactOutcome::Declined, _) => (i18n::t!("chat.compact_declined"), Tone::Dim),
+                    (CompactOutcome::NothingToCompact, _) => {
+                        (i18n::t!("chat.compact_nothing"), Tone::Dim)
+                    }
+                    (CompactOutcome::Cancelled, _) => {
+                        (i18n::t!("chat.compact_cancelled"), Tone::Dim)
+                    }
+                    (CompactOutcome::Failed, Some(r)) => {
+                        (i18n::t!("chat.compact_failed_why", reason = r), Tone::Warn)
+                    }
+                    (CompactOutcome::Failed, None) => (i18n::t!("chat.compact_failed"), Tone::Warn),
+                };
+                self.push(BlockKind::Notice { text, tone });
+            }
             Event::TaskUpserted(t) => match self.tasks.iter_mut().find(|x| x.id == t.id) {
                 Some(x) => *x = t,
                 None => self.tasks.push(t),
@@ -804,6 +823,38 @@ mod tests {
             },
             0,
         );
+    }
+
+    /// 压缩没压成：从"压缩中"回到这一轮，留一行说明为什么；失败的提醒一下，别的只是灰字。
+    #[test]
+    fn a_compaction_that_did_not_compact_says_why() {
+        let mut c = conversation();
+        let sid = || port::SessionId("s1".into());
+        c.apply(Event::Compacting { session: sid() }, 0);
+        assert_eq!(c.phase, Phase::Compacting);
+        c.apply(
+            Event::CompactEnded {
+                session: sid(),
+                outcome: CompactOutcome::Failed,
+                reason: Some("overloaded".into()),
+            },
+            0,
+        );
+        assert_eq!(c.phase, Phase::Thinking);
+        let (text, tone) = last_notice(&c).expect("留了一行");
+        assert!(text.contains("overloaded"), "{text}");
+        assert_eq!(tone, Tone::Warn);
+
+        c.apply(Event::Compacting { session: sid() }, 0);
+        c.apply(
+            Event::CompactEnded {
+                session: sid(),
+                outcome: CompactOutcome::NothingToCompact,
+                reason: None,
+            },
+            0,
+        );
+        assert_eq!(last_notice(&c).unwrap().1, Tone::Dim);
     }
 
     #[test]

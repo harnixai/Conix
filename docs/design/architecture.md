@@ -105,7 +105,7 @@ pub trait Backend: Send + Sync + 'static {
 | 一轮（仅限被 Watch 的会话） | `TurnStarted`、`StepRestarted{step}`、`TextDelta`、`ThinkingDelta`、`ToolStarted`、`ToolInput`、`ToolProgress`、`ToolFinished`、`TurnEnded{stop, usage}`、`TurnFailed` |
 | 插话 | `SteerDelivered`、`SteerReturned{messages}` |
 | 提问 | `PromptPending(Prompt)`、`PromptResolved{id, resolution}` |
-| 会话状态 | `GoalChanged`、`TodosChanged`、`Compacted`、`CommandsChanged`、`Notice{level, text}` |
+| 会话状态 | `GoalChanged`、`TodosChanged`、`Compacting`、`Compacted`、`CompactEnded{outcome, reason}`、`CommandsChanged`、`Notice{level, text}` |
 | 任务 | `TaskUpserted(Task)`、`TaskOutput{task, bytes, from, next}` |
 | 流程 | `RunUpserted(RunSummary)`、`RunDetail(RunView)` |
 | 作业 | `JobUpserted(Job)`、`JobFired{job, entry}` |
@@ -390,11 +390,12 @@ conix（一个二进制）
 | `text_delta` / `thinking_delta` | `TextDelta` / `ThinkingDelta` |
 | `tool_use_start` / `tool_use` / `tool_progress` / `tool_result` | `ToolStarted` / `ToolInput`（按工具名摘要参数）/ `ToolProgress` / `ToolFinished` |
 | 工具名为 `TodoWrite` 的 `tool_use` | 另推 `TodosChanged` |
-| `prompt` / `prompt_resolved` | `PromptPending` / `PromptResolved`，会话状态随之在 Waiting 与 Running 间变 |
+| `prompt` / `prompt_resolved` | `PromptPending` / `PromptResolved`，会话状态随之在 Waiting 与 Running 间变。子 Agent 问的，帧上的 `task_id` 指出是哪件任务，提问注明来源；没带的再看任务的 `waiting_for` |
 | `turn_complete` / `error` 帧或 `run_turn` 的错误响应 | `TurnEnded` / `TurnFailed` |
 | `user_message_delivered` / `user_messages_returned` | `SteerDelivered` / `SteerReturned` |
 | `task_started` / `task_updated` / `task_finished` / `task_progress` | `TaskUpserted` / `TaskOutput` |
-| `goal_changed` / `compact` / `skills_changed` / `notification` | `GoalChanged` / `Compacted` / `CommandsChanged` / `Notice` |
+| `compact_started` / `compact` / `compact_ended` | `Compacting` / `Compacted` / `CompactEnded{outcome, reason}`：自动（到阈值、请求太大）与手动（`/compact`）的压缩都有开始帧，之后恰好一个收尾；子 Agent 的经 `subagent_progress` 落在它的侧链上 |
+| `goal_changed` / `skills_changed` / `notification` | `GoalChanged` / `CommandsChanged` / `Notice` |
 | `host_tool_call` | 由 `Hub` 自己执行（宿主工具，§8.5），`session.respondToolCall` 作答 |
 | `daemon.event` 的 `turn_started` / `turn_completed` / `session_*` | `SessionUpserted` / `SessionRemoved` |
 | `Submit{mode}` | `session.run_turn{on_busy}`：`run_turn` 是长调用，`Hub` 另起任务等它，命令立刻回 `Submitted` |

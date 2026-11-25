@@ -133,6 +133,13 @@ pub enum Event {
         tokens_before: u64,
         tokens_after: u64,
     },
+    /// 开始了的压缩没压成，历史原样；压成了的是 `Compacted`。
+    CompactEnded {
+        session: SessionId,
+        outcome: CompactOutcome,
+        #[serde(default)]
+        reason: Option<String>,
+    },
     CommandsChanged {
         session: SessionId,
     },
@@ -206,6 +213,7 @@ impl Event {
             | TodosChanged { session, .. }
             | Compacting { session }
             | Compacted { session, .. }
+            | CompactEnded { session, .. }
             | CommandsChanged { session }
             | SessionRemoved { session } => Some(session),
             SessionUpserted(s) => Some(&s.id),
@@ -224,6 +232,17 @@ pub enum ConnState {
     },
     /// 重连后追平：之后紧跟新的快照。
     Resynced,
+}
+
+/// 压缩为什么没压成（Agix `compact_ended.outcome`）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CompactOutcome {
+    /// `PreCompact` hook 拒绝了。
+    Declined,
+    NothingToCompact,
+    Failed,
+    Cancelled,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

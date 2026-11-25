@@ -310,10 +310,15 @@ impl St {
                 file_changes: history::file_changes(&file_changes),
             }),
             SessionEvent::Prompt(p) => {
-                let from = s
-                    .tasks
-                    .values()
-                    .find(|t| t.waiting_for.iter().any(|w| w.0 == p.id()))
+                // 子 Agent 的询问带它的任务（`prompt_task`）；任务表里的 `waiting_for` 可能比询问晚到，只作退路。
+                let from = p
+                    .task_id()
+                    .and_then(|id| s.tasks.get(id))
+                    .or_else(|| {
+                        s.tasks
+                            .values()
+                            .find(|t| t.waiting_for.iter().any(|w| w.0 == p.id()))
+                    })
                     .map(|t| PromptSource {
                         label: t.label.clone(),
                         task: Some(t.id.clone()),
@@ -366,6 +371,23 @@ impl St {
                 tokens_before,
                 tokens_after,
             }),
+            // 自动（到阈值、请求太大）与手动的压缩都有这一帧；子 Agent 的经 `subagent_progress` 落到它的侧链。
+            SessionEvent::CompactStarted { .. } => {
+                out.events.push(Event::Compacting { session: session() })
+            }
+            SessionEvent::CompactEnded { outcome, reason } => {
+                let outcome = match outcome.as_str() {
+                    "declined" => port::CompactOutcome::Declined,
+                    "nothing_to_compact" => port::CompactOutcome::NothingToCompact,
+                    "cancelled" => port::CompactOutcome::Cancelled,
+                    _ => port::CompactOutcome::Failed,
+                };
+                out.events.push(Event::CompactEnded {
+                    session: session(),
+                    outcome,
+                    reason: reason.filter(|r| !r.is_empty()),
+                })
+            }
             SessionEvent::UserMessageDelivered { message_id } => {
                 out.events.push(Event::SteerDelivered {
                     session: session(),
