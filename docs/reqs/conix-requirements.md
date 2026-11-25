@@ -228,9 +228,9 @@ Conix 不和 Claude Code、Codex、opencode 拼"聊天写代码"的打磨程度�
 | 需要 | 现状 | 处理 |
 |---|---|---|
 | 数据目录用 `~/.conix` | Agix 的全局数据根可以通过 `EmbedConfig::new(data_root)` 指定 | 直接支持 |
-| 项目里的配置目录也叫 `.conix` | Agix 把项目层的 `<项目>/.agix/`（项目设置、规则、agents、hooks、worktrees 等）写死在 40 多个文件里，其中包括路径安全和沙箱掩码 | 已提 harnixai/Agix#86（`EmbedConfig.project_dir`，安全保护随名字生效）。落地之前先沿用 `.agix/`，落地之后改成 `.conix/` |
+| 项目里的配置目录也叫 `.conix` | Agix 有了 `EmbedConfig.project_dir`（harnixai/Agix#86），项目层的设置、规则、agents、hooks 与路径安全、沙箱掩码都随这个名字走（worktree 不随，在仓库根的 `.wkts/`） | 实例以 `project_dir = ".conix"` 嵌入引擎 |
 | todo 列表 | Agix 没有专门的方法或事件，只能从 `TodoWrite` 工具调用的入参里读出来 | 接缝时先从事件里取，不够用再给 Agix 提 issue |
-| 流程 | 不在 Agix 里，在 Harnix 的 flow 里 | 拷贝到 `3rds/harnix-flow`，等 Harnix#66 拆分完成 |
+| 流程 | 不在 Agix 里，在 Harnix 的 flow 里 | Harnix#66 已把流程拆成独立的 `crates/flow`；按发布标签拷到 `3rds/harnix-flow`（`3rds/INDEX.md`） |
 | 作业 | Agix 的 `schedule.*` 只能定时跑一轮对话，启动不了流程 | 由 Conix 实例自己调度 |
 | 侧问 | Agix 提供 `session.fork` | C-14 接缝时使用 |
 | 多个实例共用 `~/.conix` | Agix 的 `EmbedConfig.instance` 锁的粒度是"数据根 + 场景"，同一个场景只能有一个 | Conix 不传 `instance`，由自己管实例锁；进程组的登记用每个实例自己的 `groups_file`。同一个会话被两个实例同时打开时，Agix 的会话写者锁会拒绝后来的那个，界面上提示是被谁占着（S-08） |
