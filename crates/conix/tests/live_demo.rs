@@ -481,7 +481,19 @@ async fn the_demo_publish_asks_the_outside_approval_system() {
         (Some("mcp"), Some("mcp")),
         "{last}"
     );
-    assert_eq!(last["ref"].as_str(), Some(rid), "{last}");
+    // 流程写了 `link: url`：记的是单的链接，链到这张单。
+    assert!(
+        last["ref"]
+            .as_str()
+            .is_some_and(|r| r.ends_with(&format!("#{rid}"))),
+        "{last}"
+    );
+    assert_eq!(
+        last["by"]["id"].as_str(),
+        std::env::var("USER").ok().as_deref(),
+        "审批系统答的审批人：{last}"
+    );
+    assert_eq!(last["pass"], true, "{last}");
 }
 
 #[tokio::test(flavor = "multi_thread")]
