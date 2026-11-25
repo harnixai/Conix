@@ -2,6 +2,8 @@
 //! 流程包、派工器都用库的；会话由 [`session_host`] 经 Hub 开在嵌入的 Agix 上。端口的流程命令、
 //! `flow_*` 宿主工具、流程作业的触发都从这里进。
 
+mod approvals;
+pub(crate) mod authorize;
 mod frames;
 mod map;
 pub(crate) mod policy;
@@ -134,6 +136,9 @@ fn build_packs(mounted: &[crate::plugins::Mounted], map: &crate::plugins::Plugin
     for m in mounted {
         if let Some(d) = m.flows_dir() {
             dir = dir.with_plugin(m.name.clone(), d);
+            if let Some(flows) = m.section.governed.flows() {
+                dir = dir.with_governed(m.name.clone(), flows);
+            }
         }
     }
     dir.with_catalog(harnix_flow::Catalog {
@@ -168,6 +173,7 @@ pub async fn start(hub: &Hub, cfg: FlowsConfig) -> anyhow::Result<Arc<Flows>> {
     let plugin_map = Arc::new(std::sync::RwLock::new(map));
     let calls = crate::plugins::gates::PluginCalls::new(hub.downgrade(), plugin_map.clone());
     let rcfg = RunnerConfig {
+        approvals: Some(Arc::new(approvals::McpApprovals(hub.downgrade()))),
         gates: Some(Arc::new(crate::plugins::gates::PluginGates(calls.clone()))),
         programs: Some(Arc::new(crate::plugins::gates::PluginPrograms(
             calls.clone(),
@@ -188,6 +194,13 @@ pub async fn start(hub: &Hub, cfg: FlowsConfig) -> anyhow::Result<Arc<Flows>> {
             .with_submit_scenes(rcfg.profiles.clone())
             .with_main_scene(SCENE)
             .with_workspaces(cfg.workspaces_dir)
+            .with_authorizer(Arc::new(authorize::ConixAuthorizer {
+                roles_file: harnix_flow::project_pack_dir(
+                    std::path::Path::new(hub.project()),
+                    &layout,
+                )
+                .join("roles.yaml"),
+            }))
             .with_layout(layout),
     );
     let project = hub.project().to_string();
@@ -250,8 +263,9 @@ impl Flows {
         self.engine.packs_for(Some(&self.project))
     }
 
+    /// TUI 里的操作：实例的主人亲手做的（[`authorize::person`]）。
     fn by() -> Actor {
-        Actor::device("conix")
+        authorize::person()
     }
 
     pub(crate) async fn summaries(&self) -> Vec<port::FlowSummary> {

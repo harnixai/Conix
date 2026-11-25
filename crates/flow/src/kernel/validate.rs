@@ -416,6 +416,43 @@ fn station_problems(c: &mut Ctx, s: &Station, cyclic: bool) {
                     }
                 }
             },
+            ExitCond::Confirm { via, mcp, timeout, .. } => {
+                use super::def::{duration_ms, ConfirmVia};
+                if let Some(t) = timeout {
+                    if duration_ms(t).is_none() {
+                        c.at(id, format!("confirm timeout {t:?}: a duration such as 90m, 8h, 3d or 1h30m"));
+                    }
+                }
+                match (via.unwrap_or_default(), mcp) {
+                    (ConfirmVia::Mcp, None) => c.at(id, "a confirm via mcp says how: mcp {server, request, status, decision}"),
+                    (ConfirmVia::Person, Some(_)) => c.at(id, "a confirm with mcp is via: mcp"),
+                    (ConfirmVia::Mcp, Some(m)) => {
+                        if m.server.trim().is_empty() || m.request.tool.trim().is_empty() || m.status.tool.trim().is_empty() {
+                            c.at(id, "confirm mcp: server, request.tool and status.tool are named");
+                        }
+                        if m.decision.path.trim().is_empty() || m.decision.approved.is_empty() || m.decision.rejected.is_empty() {
+                            c.at(id, "confirm mcp: decision says its path and the values that approve and reject");
+                        }
+                        if let Some(p) = &m.poll {
+                            if duration_ms(p).is_none() {
+                                c.at(id, format!("confirm mcp poll {p:?}: a duration such as 30s or 5m"));
+                            }
+                        }
+                        for r in refs_in_value(&m.request.arguments) {
+                            if r.split(['.', '[']).next() == Some("request") {
+                                c.at(id, format!("confirm mcp request: {r} — `request` is only there for status"));
+                            }
+                        }
+                        let refs: Vec<String> = refs_in_value(&m.request.arguments)
+                            .into_iter()
+                            .chain(refs_in_value(&m.status.arguments))
+                            .filter(|r| !matches!(r.split(['.', '[']).next(), Some("request" | "station")))
+                            .collect();
+                        ref_problems(c, s, &refs);
+                    }
+                    (ConfirmVia::Person, None) => {}
+                }
+            }
             _ => {}
         }
     }

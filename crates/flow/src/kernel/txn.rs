@@ -362,6 +362,7 @@ pub(crate) fn new_record(
         workspace: Workspace::Scratch,
         output_dir: None,
         worktree: None,
+        governed: false,
         def,
     }
 }
@@ -1101,18 +1102,61 @@ impl<'a> M<'a> {
                     }
                 },
                 },
-                C::Confirm { .. } => match r.confirms.iter().rev().find(|c| c.round == round) {
-                    Some(c) if c.pass => (CheckStatus::Pass, String::new()),
-                    Some(c) => (
-                        CheckStatus::Fail,
-                        format!(
-                            "rejected by {}: {}",
-                            c.by,
-                            c.reason.clone().unwrap_or_default()
+                C::Confirm { via, mcp, timeout, .. } => {
+                    let before = r.checks.iter().find(|k| k.cond == Some(i) && k.round == round);
+                    match r.confirms.iter().rev().find(|c| c.round == round) {
+                        Some(c) if c.pass => (CheckStatus::Pass, String::new()),
+                        Some(c) => (
+                            CheckStatus::Fail,
+                            format!(
+                                "rejected by {}: {}",
+                                c.by,
+                                c.reason.clone().unwrap_or_default()
+                            ),
                         ),
-                    ),
-                    None => (CheckStatus::Wait, "awaiting confirmation".into()),
-                },
+                        // An approval that could not be asked for stays so until someone asks again.
+                        None if before.is_some_and(|k| k.status == CheckStatus::Error) => {
+                            let k = before.unwrap();
+                            at = k.at;
+                            (CheckStatus::Error, k.detail.clone())
+                        }
+                        None => {
+                            // Waiting since it first waited this round: what a timeout counts from.
+                            let since = before.filter(|k| k.status == CheckStatus::Wait).map_or(now, |k| k.at);
+                            at = since;
+                            let limit = timeout.as_deref().and_then(super::def::duration_ms);
+                            if limit.is_some_and(|l| now >= since.saturating_add(l)) {
+                                (CheckStatus::Fail, format!("no decision within {}", timeout.as_deref().unwrap_or_default()))
+                            } else if *via == Some(super::def::ConfirmVia::Mcp) {
+                                let server = mcp.as_ref().map_or("", |m| m.server.as_str());
+                                match r.approvals.iter().find(|a| a.cond == i && a.round == round) {
+                                    Some(a) => (
+                                        CheckStatus::Wait,
+                                        match &a.link {
+                                            Some(l) => format!("awaiting approval in {server}: {l}"),
+                                            None => format!("awaiting approval in {server}"),
+                                        },
+                                    ),
+                                    None => {
+                                        // Asked for once a round; a restart picks it up again from
+                                        // the waiting check (`dispatched_work`).
+                                        if before.is_none() {
+                                            self.fx.work.push(WorkItem::Approval {
+                                                run: self.rec.id.clone(),
+                                                station: sid.to_string(),
+                                                round,
+                                                cond: i,
+                                            });
+                                        }
+                                        (CheckStatus::Wait, format!("asking {server} for approval"))
+                                    }
+                                }
+                            } else {
+                                (CheckStatus::Wait, "awaiting confirmation".into())
+                            }
+                        }
+                    }
+                }
                 C::Children { .. } => {
                     let open: Vec<&str> = r
                         .tasks
@@ -1351,6 +1395,35 @@ impl<'a> M<'a> {
                 self.emit("task.ready", Some(sid), Some(tid), Value::Null);
             }
         }
-        !expired.is_empty()
+        // Confirmations whose time is up are judged again: no decision is a failure now.
+        let mut due = vec![];
+        for (sid, r) in &self.rec.stations {
+            if r.status != StationStatus::Working {
+                continue;
+            }
+            if confirm_due(self.rec, sid).is_some_and(|d| d <= now) {
+                due.push(sid.clone());
+            }
+        }
+        for sid in &due {
+            self.judge_later(sid);
+        }
+        !expired.is_empty() || !due.is_empty()
     }
+}
+
+/// When the earliest confirmation a station waits for runs out of time, if one has a timeout.
+pub(crate) fn confirm_due(rec: &RunRecord, sid: &str) -> Option<u64> {
+    let st = rec.stations.get(sid)?;
+    let def = rec.def.station(sid)?;
+    st.checks
+        .iter()
+        .filter(|c| c.round == st.round && c.status == CheckStatus::Wait)
+        .filter_map(|c| match def.exit.get(c.cond?)? {
+            super::def::ExitCond::Confirm { timeout: Some(t), .. } => {
+                super::def::duration_ms(t).map(|ms| c.at.saturating_add(ms))
+            }
+            _ => None,
+        })
+        .min()
 }

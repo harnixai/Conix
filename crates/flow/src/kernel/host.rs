@@ -248,6 +248,16 @@ pub trait Packs: Send + Sync {
     fn withheld_flows(&self) -> Vec<(String, Withheld)> {
         vec![]
     }
+    /// Whether the flow offered as `flow` is governed: a plugin's that its plugin declares so
+    /// (docs/design/flows.md §5, in Conix). A project's own of the same name does not hide it,
+    /// none can be saved over it, and a run of it cannot be forced.
+    fn governed(&self, _flow: &str) -> bool {
+        false
+    }
+    /// Whether a part is a governed plugin's: a project's own of the same name does not hide it.
+    fn governed_part(&self, _kind: PartKind, _name: &str) -> bool {
+        false
+    }
 }
 
 /// Why a flow the packs have is not offered (`Packs::withheld_flows`). More may come.
@@ -264,6 +274,9 @@ pub enum Withheld {
     /// is offered ([`Packs::source`] names it), the others are not. The name is not withheld,
     /// only their flows of it.
     Shadowed,
+    /// A project's own flow of a name a governed plugin's flow has: the plugin's is offered, and
+    /// the project's is not read.
+    Governed,
 }
 
 /// Hex SHA-256 of a text: the digest pinned for definitions and skills.
@@ -549,6 +562,13 @@ pub trait Gates: Send + Sync {
     async fn run(&self, run: &RunRecord, station: &str, gate: &str) -> GateResult;
 }
 
+/// Calls the MCP tools of `via: mcp` confirmations (called by the module for a
+/// [`WorkItem::Approval`]). The result is the tool's structured content, else its text.
+#[async_trait]
+pub trait Approvals: Send + Sync {
+    async fn call(&self, run: &RunRecord, server: &str, tool: &str, arguments: &Value) -> Result<Value, String>;
+}
+
 /// Runs a program step (called by the module for a program [`WorkItem::Task`]; the
 /// result goes to `Engine::submit` or `Engine::fail`).
 #[async_trait]
@@ -713,6 +733,15 @@ pub enum WorkItem {
         station: String,
         round: u32,
         gate: String,
+    },
+    /// Ask an outside approval system for a `via: mcp` confirmation (exit `cond` of the
+    /// station), and poll it until it decides; report through `approval_requested`,
+    /// `approval_decided` and `approval_failed`.
+    Approval {
+        run: String,
+        station: String,
+        round: u32,
+        cond: usize,
     },
     /// A session served a task that was cancelled.
     CloseSession { session: String },

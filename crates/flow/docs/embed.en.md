@@ -464,6 +464,20 @@ is so as not to collide with Harnix's own next one; what changes for a host is l
 - **`StationRec::reworked`** (`ReworkRec`, new at the root): why a round started over, and — from
   `on_unmet` — the checks not met; the task's protocol tells the session.
 
+- **Confirmations** (`ExitCond::Confirm` gains `via`, `mcp`, `timeout`): `timeout` (`duration_ms`:
+  `90m`, `8h`, `3d`) makes no decision by then a failure — `next_expiry` and `tick` count it;
+  `via: mcp` (`ConfirmVia`, `McpApproval`, `McpCall`, `DecisionMap`) asks an outside approval system:
+  `WorkItem::Approval` is handed out, the runner calls the host's **`Approvals`** trait
+  (`RunnerConfig::approvals`) to open the request once and poll it, and reports through
+  `Engine::approval_requested`, `approval_polled`, `approval_decided` and `approval_failed`.
+  `ConfirmRec` gains `via` and `ref`; `StationRec::approvals` (`ApprovalRec`) keeps the open request,
+  so a restart polls it rather than opening another.
+
+- **Governed flows** (`DirPacks::with_governed(plugin, flows)`, `Packs::governed`,
+  `Packs::governed_part`, `Withheld::Governed`): a plugin's flows it governs, and all its parts, are
+  the plugin's in every project — a project's own of those names is withheld and cannot be saved;
+  `RunRecord::governed` marks a run of one, and `Engine::force` refuses it.
+
 ### `FLOW_API_VERSION = 1`
 
 The library's first version: the kernel, stores, packs and dry runs move out of `harnix-ext-flow`;

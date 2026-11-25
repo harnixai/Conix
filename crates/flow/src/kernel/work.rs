@@ -225,6 +225,18 @@ pub(crate) fn dispatched_work_with(rec: &RunRecord, eng: &Engine, now: u64) -> V
                 }
             }
         }
+        if st.status == StationStatus::Working {
+            for c in &st.checks {
+                let Some(i) = c.cond else { continue };
+                let mcp = matches!(
+                    sdef.exit.get(i),
+                    Some(ExitCond::Confirm { via: Some(crate::kernel::def::ConfirmVia::Mcp), .. })
+                );
+                if mcp && c.status == CheckStatus::Wait && c.round == st.round {
+                    out.push(WorkItem::Approval { run: rec.id.clone(), station: sid.clone(), round: st.round, cond: i });
+                }
+            }
+        }
         if st.status != StationStatus::Working {
             continue;
         }

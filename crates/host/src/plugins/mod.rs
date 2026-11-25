@@ -22,6 +22,32 @@ pub struct ConixSection {
     /// program 步骤名 → 插件函数的调用名，或 `{ function, timeout = "5m" }`。
     #[serde(default)]
     pub steps: BTreeMap<String, StepTarget>,
+    /// 受管的流程（design/flows.md §5）：`true` 是包里全部流程，或者列出名字。受管的流程与包里所有的件，项目里
+    /// 同名的不顶替、存不进去；它的运行不能强制放行。
+    #[serde(default)]
+    pub governed: Governed,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(untagged)]
+pub enum Governed {
+    #[default]
+    #[serde(skip)]
+    None,
+    All(bool),
+    Flows(Vec<String>),
+}
+
+impl Governed {
+    /// 交给流程库的形状（`DirPacks::with_governed`）：不受管是 `None`；整包是 `Some(None)`。
+    pub fn flows(&self) -> Option<Option<Vec<String>>> {
+        match self {
+            Governed::None | Governed::All(false) => None,
+            Governed::All(true) => Some(None),
+            Governed::Flows(f) if f.is_empty() => None,
+            Governed::Flows(f) => Some(Some(f.clone())),
+        }
+    }
 }
 
 /// 门禁与步骤调插件函数的缺省时限（`plugin.call` 的缺省）。
@@ -376,6 +402,55 @@ fn conix_disclosure(m: &Mounted, d: &mut port::PluginDisclosure) {
             t.function(),
             longer(t.timeout_ms())
         ));
+    }
+    match m.section.governed.flows() {
+        Some(None) => d.conix.push(
+            "governs all its flows: a project cannot replace them or their parts, and their runs cannot be forced".into(),
+        ),
+        Some(Some(names)) => d.conix.push(format!(
+            "governs flows {}: a project cannot replace them or the plugin's parts, and their runs cannot be forced",
+            names.iter().map(|n| format!("`{n}`")).collect::<Vec<_>>().join(", ")
+        )),
+        None => {}
+    }
+    // 流程包里自带的命令门禁会在这台机器上执行命令，脚本门禁会读运行的工作目录：都写出来。
+    if let Some(dir) = m.flows_dir() {
+        let mut gates: Vec<_> = std::fs::read_dir(dir.join("gates"))
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|x| x == "yaml"))
+            .collect();
+        gates.sort();
+        for p in gates {
+            let Ok(g) = std::fs::read_to_string(&p)
+                .map_err(|e| e.to_string())
+                .and_then(|t| {
+                    serde_yaml::from_str::<harnix_flow::GateDef>(&t).map_err(|e| e.to_string())
+                })
+            else {
+                continue;
+            };
+            match g.kind {
+                harnix_flow::GateKind::Command => d.conix.push(format!(
+                    "command gate `{}` runs `{}` on this machine (in trusted projects){}",
+                    g.name,
+                    g.command.as_deref().unwrap_or_default(),
+                    if g.env.is_empty() {
+                        String::new()
+                    } else {
+                        format!(", given {}", g.env.join(", "))
+                    }
+                )),
+                harnix_flow::GateKind::Script if g.script.is_some() => d.conix.push(format!(
+                    "script gate `{}` runs scripts/{}.js, reading the run's workspace",
+                    g.name,
+                    g.script.as_deref().unwrap_or_default()
+                )),
+                _ => {}
+            }
+        }
     }
     if m.section.flows.is_some() && m.flows_dir().is_none() {
         d.conix

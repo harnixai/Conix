@@ -341,6 +341,16 @@ Conix 在 Harnix 0.4.7 分叉了这个库，先把站的治理（门禁、确认
   起不来、超时算 `error`。
 - **`StationRec::reworked`**（`ReworkRec`，新，在根上）：这一轮为什么重来；`on_unmet` 打回的还带当时没过的检查，任务的协议讲给会话。
 
+- **确认**（`ExitCond::Confirm` 多了 `via`、`mcp`、`timeout`）：`timeout`（`duration_ms`：`90m`、`8h`、`3d`）到时没有决定算不过，
+  `next_expiry` 与 `tick` 算进它；`via: mcp`（`ConfirmVia`、`McpApproval`、`McpCall`、`DecisionMap`）走外部审批：交出
+  `WorkItem::Approval`，派工器调宿主的 **`Approvals`**（`RunnerConfig::approvals`）建一次单、之后轮询，经
+  `Engine::approval_requested`、`approval_polled`、`approval_decided`、`approval_failed` 报回。`ConfirmRec` 多了 `via` 与
+  `ref`；`StationRec::approvals`（`ApprovalRec`）记着建好的单，重启后接着查，不另建。
+
+- **受管流程**（`DirPacks::with_governed(plugin, flows)`、`Packs::governed`、`Packs::governed_part`、`Withheld::Governed`）：
+  插件管着的流程和它所有的件，在每个项目里都是插件的——项目里同名的被挡下、存不进去；`RunRecord::governed` 标记这样的运行，
+  `Engine::force` 拒绝它。
+
 ### `FLOW_API_VERSION = 1`
 
 库的第一版：内核、存储、流程包、试运行从 `harnix-ext-flow` 搬出来；`DEFINITION_FORMAT = 1`、`RUN_FORMAT = 1`。首次发布之前，

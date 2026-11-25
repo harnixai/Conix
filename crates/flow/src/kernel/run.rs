@@ -415,6 +415,30 @@ pub struct ConfirmRec {
     pub pass: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+    /// How it was decided: `person` (absent) or `mcp`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub via: Option<super::def::ConfirmVia>,
+    /// The outside request it was decided in: its link, else its id.
+    #[serde(default, rename = "ref", skip_serializing_if = "Option::is_none")]
+    pub reference: Option<String>,
+}
+
+/// A confirmation asked of an outside approval system (`via: mcp`): what the request gave back,
+/// so that a restart polls the same request and does not open another.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct ApprovalRec {
+    /// Index into the station's `exit`.
+    pub cond: usize,
+    pub round: u32,
+    pub requested_at: u64,
+    /// The request tool's result.
+    #[cfg_attr(feature = "ts", ts(type = "unknown"))]
+    pub request: Value,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub link: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub polled_at: Option<u64>,
 }
 
 /// A station passed by force: who, why, and what was not met at the time.
@@ -465,6 +489,9 @@ pub struct StationRec {
     /// told first.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reworked: Option<ReworkRec>,
+    /// The outside approvals asked for (`via: mcp` confirmations).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub approvals: Vec<ApprovalRec>,
 }
 
 /// A round started by a rework: by whom, why, and — sent back by a station left unmet — what
@@ -499,6 +526,7 @@ impl StationRec {
             left_at: None,
             spent: Usage::default(),
             reworked: None,
+            approvals: vec![],
         }
     }
 
@@ -629,6 +657,9 @@ pub struct RunRecord {
     /// start, and what became of it once the run was over. A child run holds its parent's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub worktree: Option<WorktreeRec>,
+    /// Started from a governed flow (`Packs::governed`): it cannot be forced past a station.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub governed: bool,
 }
 
 /// A run's worktree of its project (`docs/glossary.md`, 项目任务): outside the project, in the
@@ -934,14 +965,20 @@ impl RunRecord {
             .collect()
     }
 
-    /// The earliest expiry among claimed tasks' leases.
+    /// The earliest expiry among claimed tasks' leases and confirmations' timeouts.
     pub fn next_expiry(&self) -> Option<u64> {
-        self.stations
+        let leases = self
+            .stations
             .values()
             .flat_map(|s| &s.tasks)
             .filter(|t| t.status == TaskStatus::Claimed)
-            .filter_map(|t| t.lease.as_ref().map(|l| l.until))
-            .min()
+            .filter_map(|t| t.lease.as_ref().map(|l| l.until));
+        let confirms = self
+            .stations
+            .iter()
+            .filter(|(_, s)| s.status == StationStatus::Working)
+            .filter_map(|(id, _)| super::txn::confirm_due(self, id));
+        leases.chain(confirms).min()
     }
 
     pub fn summary(&self) -> RunSummary {

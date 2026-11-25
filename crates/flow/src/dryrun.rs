@@ -651,6 +651,17 @@ impl Sandbox {
                 };
                 (stepped, r.map(|o| o.work).unwrap_or_default())
             }
+            WorkItem::Approval { run, station, .. } => (
+                Stepped {
+                    kind: "approval".into(),
+                    run,
+                    station: Some(station),
+                    task: None,
+                    gate: None,
+                    result: "waits for an outside approval, as a confirmation waits for a person".into(),
+                },
+                vec![],
+            ),
             WorkItem::CloseSession { session } => (
                 Stepped {
                     kind: "close_session".into(),

@@ -27,7 +27,7 @@ pub(crate) fn dispatcher() -> Actor {
 
 fn run_of(w: &WorkItem) -> Option<&str> {
     match w {
-        WorkItem::Task { run, .. } | WorkItem::Gate { run, .. } => Some(run),
+        WorkItem::Task { run, .. } | WorkItem::Gate { run, .. } | WorkItem::Approval { run, .. } => Some(run),
         WorkItem::CloseSession { .. } => None,
     }
 }
@@ -214,6 +214,7 @@ async fn run_work(rn: Arc<Runner>, w: WorkItem, resume: bool) {
             rn.state.end(&key, &token);
         }
         WorkItem::Gate { run, station, round, gate } => super::gate::run_gate(&rn, run, station, round, gate).await,
+        WorkItem::Approval { run, station, round, cond } => super::approvals::run_approval(&rn, run, station, round, cond).await,
         WorkItem::CloseSession { session } => {
             rn.state.unbind_session(&session);
             let host = rn.host();

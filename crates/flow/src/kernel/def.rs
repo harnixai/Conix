@@ -459,18 +459,123 @@ pub enum ExitCond {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         label: Option<String>,
     },
-    /// Someone confirms. `who` is an opaque label handed to the authorizer.
+    /// Someone confirms. `who` is an opaque label handed to the authorizer (a role, in Conix).
+    /// `via: mcp` asks an outside approval system through MCP tools instead of a person here;
+    /// `timeout` (`3d`, `8h`, `90m`) makes no decision by then a failure.
     Confirm {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         who: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         label: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        via: Option<ConfirmVia>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        mcp: Option<Box<McpApproval>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        timeout: Option<String>,
     },
     /// Every child run of the station finished.
     Children {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         label: Option<String>,
     },
+}
+
+/// Who decides a confirmation.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "snake_case")]
+pub enum ConfirmVia {
+    /// A person, through the application.
+    #[default]
+    Person,
+    /// An outside approval system, through MCP tools the host calls (`Approvals`).
+    Mcp,
+}
+
+/// A confirmation asked of an outside approval system: `request` once, then `status` every
+/// `poll` until `decision` reads approved or rejected (docs/design/flows.md §4, in Conix).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(deny_unknown_fields)]
+pub struct McpApproval {
+    pub server: String,
+    /// Opens the request. Its arguments may say `${run}`, `${station}`, `${inputs.k}`…
+    pub request: McpCall,
+    /// Reads where it stands. Its arguments may also say `${request.<path>}`: what `request` gave.
+    pub status: McpCall,
+    pub decision: DecisionMap,
+    /// Where in the status result the decider's name is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub by: Option<String>,
+    /// Where in the request's or the status' result a link to the request is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub link: Option<String>,
+    /// How often `status` is called (`5m` when absent, `30s` at least).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub poll: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(deny_unknown_fields)]
+pub struct McpCall {
+    pub tool: String,
+    #[serde(default, skip_serializing_if = "Value::is_null")]
+    #[cfg_attr(feature = "ts", ts(type = "unknown"))]
+    pub arguments: Value,
+}
+
+/// How a status result reads as a decision: the value at `path`, one of `approved` or of
+/// `rejected`; anything else is still waiting.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(deny_unknown_fields)]
+pub struct DecisionMap {
+    pub path: String,
+    pub approved: Vec<String>,
+    pub rejected: Vec<String>,
+}
+
+/// The poll interval of an MCP approval when it says none, and the shortest it may say.
+pub const DEFAULT_POLL_MS: u64 = 5 * 60 * 1000;
+pub const MIN_POLL_MS: u64 = 30 * 1000;
+
+impl McpApproval {
+    pub fn poll_ms(&self) -> u64 {
+        self.poll.as_deref().and_then(duration_ms).unwrap_or(DEFAULT_POLL_MS).max(MIN_POLL_MS)
+    }
+}
+
+/// A duration as definitions write it: `90s`, `30m`, `8h`, `3d`, or parts of them together
+/// (`1h30m`); `None` for anything else, zero included.
+pub fn duration_ms(s: &str) -> Option<u64> {
+    let s = s.trim();
+    if s.is_empty() {
+        return None;
+    }
+    let mut total: u64 = 0;
+    let mut num = String::new();
+    for c in s.chars() {
+        if c.is_ascii_digit() {
+            num.push(c);
+            continue;
+        }
+        let n: u64 = num.parse().ok()?;
+        num.clear();
+        let unit = match c {
+            's' => 1_000,
+            'm' => 60_000,
+            'h' => 3_600_000,
+            'd' => 86_400_000,
+            _ => return None,
+        };
+        total = total.checked_add(n.checked_mul(unit)?)?;
+    }
+    if !num.is_empty() {
+        return None;
+    }
+    (total > 0).then_some(total)
 }
 
 impl ExitCond {
@@ -488,7 +593,7 @@ impl ExitCond {
         let (label, made) = match self {
             Self::Output { label } => (label, "output".to_string()),
             Self::Gate { label, gate } => (label, format!("gate {gate}")),
-            Self::Confirm { label, who } => (
+            Self::Confirm { label, who, .. } => (
                 label,
                 who.as_ref()
                     .map_or("confirm".to_string(), |w| format!("confirm by {w}")),

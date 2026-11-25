@@ -58,6 +58,12 @@ impl Packs for SwapPacks {
     fn part_source(&self, kind: PartKind, name: &str) -> Option<String> {
         self.get().part_source(kind, name)
     }
+    fn governed(&self, flow: &str) -> bool {
+        self.get().governed(flow)
+    }
+    fn governed_part(&self, kind: PartKind, name: &str) -> bool {
+        self.get().governed_part(kind, name)
+    }
     fn save_flow(&self, yaml: &str) -> Result<String, String> {
         self.get().save_flow(yaml)
     }

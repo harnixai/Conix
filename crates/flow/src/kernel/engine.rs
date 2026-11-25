@@ -571,6 +571,7 @@ impl Engine {
                 input.parent.clone(),
             );
             place.apply(&mut rec);
+            rec.governed = packs.governed(&def.name);
             // A relative output directory is taken where the run works: a run of no project's own
             // directory is known only once it has its id.
             if let Some(d) = rec.output_dir.clone().filter(|d| !std::path::Path::new(d).is_absolute()) {
@@ -1186,10 +1187,15 @@ impl Engine {
                 return invalid(format!("station {station} is not waiting on its gates"));
             }
             let sdef = def.station(station).cloned();
+            // A gate, or an outside approval that could not be asked for (it errors, it never fails).
             let is_gate = |c: &CheckRec| {
                 c.cond
                     .and_then(|i| sdef.as_ref().and_then(|s| s.exit.get(i)))
-                    .is_some_and(|e| matches!(e, ExitCond::Gate { .. }))
+                    .is_some_and(|e| match e {
+                        ExitCond::Gate { .. } => true,
+                        ExitCond::Confirm { .. } => c.status == CheckStatus::Error,
+                        _ => false,
+                    })
             };
             let round = st.round;
             let again: Vec<String> = st
@@ -1211,6 +1217,142 @@ impl Engine {
             m.judge_later(station);
             t.settle().await?;
             Ok(json!({"run": run, "gates": again}))
+        })
+    }
+
+    // ── outside approvals ────────────────────────────────────────────────────
+
+    /// The station's `cond` exit, a `via: mcp` confirmation, still waiting this round.
+    fn waiting_approval(rec: &RunRecord, station: &str, round: u32, cond: usize) -> bool {
+        let Some(st) = rec.stations.get(station) else { return false };
+        let mcp = rec.def.station(station).and_then(|s| s.exit.get(cond)).is_some_and(|e| {
+            matches!(e, ExitCond::Confirm { via: Some(super::def::ConfirmVia::Mcp), .. })
+        });
+        rec.is_active()
+            && mcp
+            && st.round == round
+            && st.status == StationStatus::Working
+            && !st.confirms.iter().any(|c| c.round == round)
+    }
+
+    /// The request for an outside approval is open: what it gave back is kept, so it is polled
+    /// and not opened again. `value.applied` = false when nobody waits for it any more.
+    pub async fn approval_requested(
+        &self,
+        run: &str,
+        station: &str,
+        round: u32,
+        cond: usize,
+        request: Value,
+        link: Option<String>,
+    ) -> Result<Outcome> {
+        transact!(self, Actor::flow("approval"), |t| {
+            t.load(run).await?;
+            if !Self::waiting_approval(t.get(run), station, round, cond) {
+                return Ok(json!({"applied": false}));
+            }
+            let now = t.fx.now;
+            let mut m = t.m(run);
+            let Some(s) = m.rec.stations.get_mut(station) else { return Ok(json!({"applied": false})) };
+            if s.approvals.iter().any(|a| a.cond == cond && a.round == round) {
+                return Ok(json!({"applied": false}));
+            }
+            s.approvals.push(super::run::ApprovalRec {
+                cond,
+                round,
+                requested_at: now,
+                request: request.clone(),
+                link: link.clone(),
+                polled_at: None,
+            });
+            m.log("approval_requested", Some(station), None, json!({"cond": cond, "round": round, "request": request, "link": link}));
+            m.judge_later(station);
+            t.settle().await?;
+            Ok(json!({"applied": true}))
+        })
+    }
+
+    /// An outside approval decided: recorded as a confirmation by `by` (the decider, as the
+    /// approval system names them), via `mcp`, with the request's reference.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn approval_decided(
+        &self,
+        run: &str,
+        station: &str,
+        round: u32,
+        cond: usize,
+        pass: bool,
+        by: Actor,
+        reason: Option<String>,
+        reference: Option<String>,
+    ) -> Result<Outcome> {
+        transact!(self, Actor::flow("approval"), |t| {
+            t.load(run).await?;
+            if !Self::waiting_approval(t.get(run), station, round, cond) {
+                return Ok(json!({"applied": false}));
+            }
+            let now = t.fx.now;
+            let mut m = t.m(run);
+            if let Some(s) = m.rec.stations.get_mut(station) {
+                s.confirms.push(ConfirmRec {
+                    by: by.clone(),
+                    at: now,
+                    round,
+                    pass,
+                    reason: reason.clone(),
+                    via: Some(super::def::ConfirmVia::Mcp),
+                    reference: reference.clone(),
+                });
+                if let Some(a) = s.approvals.iter_mut().find(|a| a.cond == cond && a.round == round) {
+                    a.polled_at = Some(now);
+                }
+            }
+            let data = json!({"pass": pass, "reason": reason, "round": round, "via": "mcp", "ref": reference, "by": by});
+            m.emit("station.confirmed", Some(station), None, data.clone());
+            m.log("confirm", Some(station), None, data);
+            m.judge_later(station);
+            t.settle().await?;
+            Ok(json!({"applied": true}))
+        })
+    }
+
+    /// An outside approval could not be asked for or read: the confirmation is an `error` until
+    /// someone runs it again (`rerun_gates`).
+    pub async fn approval_failed(&self, run: &str, station: &str, round: u32, cond: usize, detail: &str) -> Result<Outcome> {
+        transact!(self, Actor::flow("approval"), |t| {
+            t.load(run).await?;
+            if !Self::waiting_approval(t.get(run), station, round, cond) {
+                return Ok(json!({"applied": false}));
+            }
+            let now = t.fx.now;
+            let mut m = t.m(run);
+            if let Some(s) = m.rec.stations.get_mut(station) {
+                for c in s.checks.iter_mut().filter(|c| c.cond == Some(cond) && c.round == round) {
+                    c.status = CheckStatus::Error;
+                    c.detail = detail.to_string();
+                    c.at = now;
+                }
+            }
+            m.log("approval_failed", Some(station), None, json!({"cond": cond, "round": round, "detail": detail}));
+            m.judge_later(station);
+            t.settle().await?;
+            Ok(json!({"applied": true}))
+        })
+    }
+
+    /// An outside approval was polled and is still open.
+    pub async fn approval_polled(&self, run: &str, station: &str, round: u32, cond: usize) -> Result<Outcome> {
+        transact!(self, Actor::flow("approval"), |t| {
+            t.load(run).await?;
+            if !Self::waiting_approval(t.get(run), station, round, cond) {
+                return Ok(json!({"applied": false}));
+            }
+            let now = t.fx.now;
+            let m = t.m(run);
+            if let Some(a) = m.rec.stations.get_mut(station).and_then(|s| s.approvals.iter_mut().find(|a| a.cond == cond && a.round == round)) {
+                a.polled_at = Some(now);
+            }
+            Ok(json!({"applied": true}))
         })
     }
 
@@ -1262,6 +1404,8 @@ impl Engine {
                     round,
                     pass,
                     reason: reason.map(String::from),
+                    via: None,
+                    reference: None,
                 });
             }
             let data = json!({"pass": pass, "reason": reason, "round": round});
@@ -1291,6 +1435,13 @@ impl Engine {
             let (_, st) = open_station(rec, station)?;
             if !st.status.is_open() {
                 return invalid(format!("station {station} is {:?}", st.status));
+            }
+            // A governed flow's conditions are the point of it: no one passes them by.
+            if rec.governed {
+                return invalid(format!(
+                    "run {run} is of the governed flow {}: a station of it cannot be forced, only met",
+                    rec.flow
+                ));
             }
             self.authorize(
                 &Op::Force {

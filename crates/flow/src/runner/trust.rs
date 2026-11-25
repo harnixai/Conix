@@ -45,7 +45,8 @@ pub(crate) async fn hear_active(rn: &Runner) {
 /// means the project's, which is not run until then. A plugin's flow another plugin's is offered
 /// over withholds nothing: the name runs the one offered.
 pub fn withheld(packs: &dyn Packs, flow: &str) -> crate::Result<()> {
-    match packs.withheld_flows().into_iter().find(|(n, why)| n == flow && *why != crate::Withheld::Shadowed) {
+    // A governed name runs the plugin's flow, as a shadowed one runs the plugin's offered.
+    match packs.withheld_flows().into_iter().find(|(n, why)| n == flow && !matches!(why, crate::Withheld::Shadowed | crate::Withheld::Governed)) {
         Some((_, crate::Withheld::Untrusted)) => Err(crate::FlowError::Denied(format!(
             "flow {flow} is the project's own, and the project is not trusted: trust the project first"
         ))),

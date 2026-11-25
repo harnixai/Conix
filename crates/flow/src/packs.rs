@@ -371,6 +371,8 @@ pub struct DirPacks {
     builtin: Option<MemPacks>,
     /// By name, sorted: the first that has a name offers it.
     plugins: Vec<(String, PathBuf)>,
+    /// The plugins that govern flows: all of theirs (`None`), or the ones named.
+    governed: BTreeMap<String, Option<BTreeSet<String>>>,
     top: Option<PathBuf>,
     catalog: Catalog,
 }
@@ -393,6 +395,7 @@ impl DirPacks {
             dirs: dirs.into_iter().map(Into::into).collect(),
             builtin: None,
             plugins: vec![],
+            governed: BTreeMap::new(),
             top: None,
             catalog: Catalog::default(),
         }
@@ -433,6 +436,13 @@ impl DirPacks {
         self.plugins.retain(|(n, _)| *n != name);
         self.plugins.push((name, dir.into()));
         self.plugins.sort_by(|a, b| a.0.cmp(&b.0));
+        self
+    }
+
+    /// A plugin's flows governed: all of them (`flows: None`), or those named. Its parts are then
+    /// governed too: a project cannot put its own in their place.
+    pub fn with_governed(mut self, plugin: impl Into<String>, flows: Option<Vec<String>>) -> Self {
+        self.governed.insert(plugin.into(), flows.map(|f| f.into_iter().collect()));
         self
     }
 
@@ -726,6 +736,18 @@ impl Packs for DirPacks {
         self.flow_plugin(flow).map(String::from)
     }
 
+    fn governed(&self, flow: &str) -> bool {
+        self.flow_plugin(flow).is_some_and(|p| match self.governed.get(p) {
+            Some(None) => true,
+            Some(Some(names)) => names.contains(flow),
+            None => false,
+        })
+    }
+
+    fn governed_part(&self, kind: PartKind, name: &str) -> bool {
+        self.part_plugin(kind, name).is_some_and(|p| self.governed.contains_key(p))
+    }
+
     /// A plugin's flow another plugin's of the same name is offered over, once a name.
     fn withheld_flows(&self) -> Vec<(String, Withheld)> {
         let names: BTreeSet<String> =
@@ -890,6 +912,11 @@ impl ProjectPacks {
             .collect()
     }
 
+    /// A name the project may have a flow of: not one a governed plugin's flow has.
+    fn may_own(&self, name: &str) -> bool {
+        !self.base.governed(name)
+    }
+
     /// The project's definition of `name`, when trusted and it is one, of that name.
     fn own_flow(&self, name: &str) -> Option<(FlowDef, String)> {
         let text = self.own_text(name)?;
@@ -898,14 +925,14 @@ impl ProjectPacks {
     }
 
     fn own_text(&self, name: &str) -> Option<String> {
-        if !self.trusted {
+        if !self.trusted || !self.may_own(name) {
             return None;
         }
         std::fs::read_to_string(self.flow_file(name)?).ok()
     }
 
     fn own_part(&self, kind: PartKind, name: &str) -> Option<String> {
-        if !self.trusted || !safe(name) {
+        if !self.trusted || !safe(name) || self.base.governed_part(kind, name) {
             return None;
         }
         DirPacks::part_in(&self.dir, kind, name)
@@ -950,7 +977,7 @@ impl ProjectPacks {
 
 impl Packs for ProjectPacks {
     fn flows(&self) -> Vec<String> {
-        let own = self.own_names();
+        let own: BTreeSet<String> = self.own_names().into_iter().filter(|n| self.may_own(n)).collect();
         let mut names: BTreeSet<String> =
             self.base.flows().into_iter().filter(|n| !own.contains(n)).collect();
         names.extend(own.into_iter().filter(|n| self.own_flow(n).is_some()));
@@ -958,10 +985,18 @@ impl Packs for ProjectPacks {
     }
 
     fn flow(&self, name: &str) -> Option<(FlowDef, String)> {
-        if self.flow_file(name).is_some() {
+        if self.flow_file(name).is_some() && self.may_own(name) {
             return self.own_flow(name);
         }
         self.base.flow(name)
+    }
+
+    fn governed(&self, flow: &str) -> bool {
+        self.base.governed(flow)
+    }
+
+    fn governed_part(&self, kind: PartKind, name: &str) -> bool {
+        self.base.governed_part(kind, name)
     }
 
     fn catalog(&self) -> Catalog {
@@ -969,7 +1004,7 @@ impl Packs for ProjectPacks {
     }
 
     fn flow_text(&self, name: &str) -> Option<String> {
-        if self.flow_file(name).is_some() {
+        if self.flow_file(name).is_some() && self.may_own(name) {
             return self.own_text(name);
         }
         self.base.flow_text(name)
@@ -996,7 +1031,7 @@ impl Packs for ProjectPacks {
     }
 
     fn origin(&self, flow: &str) -> Origin {
-        if self.flow_file(flow).is_some() {
+        if self.flow_file(flow).is_some() && self.may_own(flow) {
             Origin::Project
         } else {
             self.base.origin(flow)
@@ -1012,7 +1047,7 @@ impl Packs for ProjectPacks {
     }
 
     fn source(&self, flow: &str) -> Option<String> {
-        if self.flow_file(flow).is_some() {
+        if self.flow_file(flow).is_some() && self.may_own(flow) {
             None
         } else {
             self.base.source(flow)
@@ -1030,6 +1065,12 @@ impl Packs for ProjectPacks {
     fn save_flow(&self, yaml: &str) -> Result<String, String> {
         self.must_trust()?;
         let name = name_to_save(yaml)?;
+        if !self.may_own(&name) {
+            return Err(format!(
+                "flow {name} is governed by plugin {}: the project cannot have its own flow of that name",
+                self.base.source(&name).unwrap_or_default()
+            ));
+        }
         self.write(&self.dir.join(format!("{name}.yaml")), yaml)?;
         let _ = std::fs::remove_file(self.dir.join(format!("{name}.yml")));
         Ok(digest(yaml))
@@ -1054,6 +1095,12 @@ impl Packs for ProjectPacks {
         self.must_trust()?;
         if !is_part_name(kind, name) {
             return Err(format!("{kind} name {name:?} must match [a-z][a-z0-9-]*"));
+        }
+        if self.base.governed_part(kind, name) {
+            return Err(format!(
+                "{kind} {name} is governed by plugin {}: the project cannot have its own of that name",
+                self.base.part_source(kind, name).unwrap_or_default()
+            ));
         }
         self.write(&self.dir.join(kind.dir()).join(kind.file(name)), text)?;
         Ok(digest(text))
@@ -1087,7 +1134,9 @@ impl Packs for ProjectPacks {
             .filter(|(n, _)| !own.contains(n))
             .collect();
         out.extend(own.into_iter().filter_map(|n| {
-            if !self.trusted {
+            if !self.may_own(&n) {
+                Some((n, Withheld::Governed))
+            } else if !self.trusted {
                 Some((n, Withheld::Untrusted))
             } else {
                 self.own_flow(&n).is_none().then_some((n, Withheld::Unreadable))
@@ -1419,5 +1468,53 @@ mod plugin_tests {
         assert!(p.flow("both").is_some());
         #[cfg(feature = "runner")]
         assert!(crate::runner::withheld(&p, "both").is_ok());
+    }
+
+    /// A governed plugin's flows and parts are the plugin's in every project: the project's own of
+    /// those names are not read, and none can be saved.
+    #[test]
+    fn a_governed_plugins_flows_and_parts_are_not_the_projects_to_replace() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base: Arc<dyn Packs> = Arc::new(layered(tmp.path()).with_governed("beta", Some(vec!["shared".into()])));
+        let root = tmp.path().join("project");
+        let layout = ProjectLayout::new(".harnix", "/state/worktrees", "harnix/flow");
+        let dir = project_pack_dir(&root, &layout);
+        std::fs::create_dir_all(dir.join("rules")).unwrap();
+        std::fs::write(dir.join("shared.yaml"), flow("shared", "The project's")).unwrap();
+        std::fs::write(dir.join("beta-own.yaml"), flow("beta-own", "The project's")).unwrap();
+        std::fs::write(dir.join("rules/tone.md"), "# The project's").unwrap();
+        let p = ProjectPacks::new(base, &root, &layout, true);
+        // Governed: the plugin's, said so; the project's is withheld for it.
+        assert!(p.governed("shared"));
+        assert_eq!(p.flow("shared").unwrap().0.title, "Beta's");
+        assert_eq!((p.origin("shared"), p.source("shared").as_deref()), (Origin::Plugin, Some("beta")));
+        assert!(p.withheld_flows().contains(&("shared".to_string(), Withheld::Governed)));
+        #[cfg(feature = "runner")]
+        assert!(crate::runner::withheld(&p, "shared").is_ok());
+        assert!(p.save_flow(&flow("shared", "Mine")).unwrap_err().contains("governed by plugin beta"));
+        // The plugin's parts too, whichever flow uses them.
+        assert_eq!(p.rule("tone").unwrap().0, "# Beta");
+        assert!(p.save_part(PartKind::Rule, "tone", "# Mine").is_err());
+        // A flow of the plugin's it does not govern is the project's to replace.
+        assert!(!p.governed("beta-own"));
+        assert_eq!(p.flow("beta-own").unwrap().0.title, "The project's");
+    }
+    /// A run of a governed flow is marked so, and no station of it is forced.
+    #[tokio::test]
+    async fn a_run_of_a_governed_flow_cannot_be_forced() {
+        use crate::{Actor, CreateIn, Engine, MemStore};
+        let tmp = tempfile::tempdir().unwrap();
+        let packs = layered(tmp.path()).with_governed("beta", None);
+        let engine = Engine::new(Arc::new(MemStore::new()), Arc::new(packs));
+        let start = |flow: &str| CreateIn { flow: flow.into(), subject: "s".into(), ..Default::default() };
+        let o = engine.create(start("beta-own"), Actor::device("d")).await.unwrap();
+        let run = o.value["run"].as_str().unwrap().to_string();
+        assert!(engine.record(&run).await.unwrap().governed);
+        let e = engine.force(&run, "a", "in a hurry", Actor::device("d")).await.unwrap_err();
+        assert!(e.to_string().contains("cannot be forced"), "{e}");
+        // One not governed is forced as before.
+        let o = engine.create(start("base"), Actor::device("d")).await.unwrap();
+        let run = o.value["run"].as_str().unwrap().to_string();
+        assert!(engine.force(&run, "a", "in a hurry", Actor::device("d")).await.is_ok());
     }
 }

@@ -19,9 +19,18 @@ use crate::hub::tools::Scope;
 /// 说给模型：`flow` 参数也收 `#n`。
 const FLOW_TARGET: &str = "The flow: its name, or \"#3\" (its number in the flow list right now). Omit for the flow this conversation just created, or the run's own flow in a session inside a run.";
 
+/// 人的决定（design/flows.md §4）：确认、放行、强制放行只能人在流程标签里做（`authorize`），模型调了也一定被拒，
+/// 所以不给会话这几个工具。
+pub(crate) const PERSONS_ONLY: &[&str] = &[
+    author::TOOL_CONFIRM,
+    author::TOOL_FORCE,
+    author::TOOL_RELEASE,
+];
+
 pub(crate) fn declarations() -> Vec<Value> {
     author::tool_specs()
         .into_iter()
+        .filter(|t| !PERSONS_ONLY.contains(&t.name.as_str()))
         .map(|t| {
             let mut schema = t.input_schema;
             if let Some(p) = schema.pointer_mut("/properties/flow") {
@@ -213,7 +222,11 @@ mod tests {
     fn the_librarys_tools_are_declared_with_numbers_accepted_for_flows() {
         let d = declarations();
         let names: Vec<&str> = d.iter().map(|t| t["name"].as_str().unwrap()).collect();
-        assert!(names.contains(&"flow_update") && names.contains(&"flow_release"));
+        assert!(names.contains(&"flow_update") && names.contains(&"flow_rework"));
+        // A person's decisions are not offered to a session at all.
+        for t in PERSONS_ONLY {
+            assert!(!names.contains(t), "{t}");
+        }
         let show = d.iter().find(|t| t["name"] == "flow_show").unwrap();
         assert_eq!(show["read_only"], true);
         assert!(

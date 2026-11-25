@@ -36,6 +36,7 @@ fn record(id: &str, flow: &str, subject: &str, rev: u64, at: u64) -> RunRecord {
         trigger: Trigger::manual(Actor::new("user", "u")),
         shown_in: None,
         worktree: None,
+        governed: false,
         def,
     }
 }

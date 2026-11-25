@@ -33,6 +33,7 @@
 pub mod host;
 pub mod testing;
 
+mod approvals;
 mod checks;
 mod dispatch;
 mod files;
@@ -130,6 +131,8 @@ pub struct RunnerConfig {
     pub programs: Option<Arc<dyn Programs>>,
     /// The application's own checks `host` gates name.
     pub gates: Option<Arc<dyn Gates>>,
+    /// How `via: mcp` confirmations call their tools; without it they are errors.
+    pub approvals: Option<Arc<dyn crate::kernel::host::Approvals>>,
     /// How webhooks go out; [`Webhooks`] (feature `webhooks`) when none is given and the feature
     /// is on, else no hook is delivered.
     pub hook_transport: Option<Arc<dyn HookTransport>>,
@@ -155,6 +158,7 @@ impl Default for RunnerConfig {
             main_recording: None,
             programs: None,
             gates: None,
+            approvals: None,
             hook_transport: None,
             trust: Arc::default(),
         }
@@ -505,6 +509,12 @@ impl Packs for CatalogPacks {
     }
     fn part_source(&self, kind: crate::PartKind, name: &str) -> Option<String> {
         self.inner().part_source(kind, name)
+    }
+    fn governed(&self, flow: &str) -> bool {
+        self.inner().governed(flow)
+    }
+    fn governed_part(&self, kind: crate::PartKind, name: &str) -> bool {
+        self.inner().governed_part(kind, name)
     }
     fn save_part(&self, kind: crate::PartKind, name: &str, text: &str) -> Result<String, String> {
         self.inner().save_part(kind, name, text)
