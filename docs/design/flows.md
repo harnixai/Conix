@@ -261,7 +261,18 @@ exit: [{kind: children, require: all}]   # all（缺省）| any | 正整数：�
 每个任务交付时记 `delivery`：谁交的（`Actor`）、什么时候、以什么身份（会话、子 Agent 任务、程序步骤、外部认领、子运行），
 与输出放在一起。审计时一个任务"谁做的、凭什么"都在这一条里。
 
-## 7. 落点
+## 7. 流程包、制品与包的命令
+
+流程的组织与项目里的目录见 [layout.md](layout.md)：一个**流程包**自洽地放一个或几个流程（同一件事的几条路径）和它们用的全部件，
+件不跨包共享；运行在**制品目录**（缺省 `conix/`）里有自己的目录，结束后归档进包的数据；站用 `deliverables` **声明制品**
+（协议列给会话、骨架进站时放好、隐含一道"写好了"的检查）；包可以带**自己的命令**（QuickJS），站里的会话经 `flow_command`
+调，结构化的数据（规格增量、台账、工作包）由命令写。skill 只写这一站怎么干活，用户补充写 `local.md`。
+
+Conix 内置一个按这些写的开发流程包 `xforge`（能力与 xforge 插件对齐：规格驱动、按工作包实施、独立检查、可以打回、归档时
+并进规格），源头是演示项目 `examples/xforge/.conix/flows/xforge/`。它的流程就是流程本身，没有 `xflow` 这一层：运行的状态
+在流程里，结构化的数据由 `xspec`、`xledger`、`xpkg` 三个命令维护。
+
+## 8. 落点
 
 | 内容 | 位置 |
 |---|---|
@@ -278,8 +289,10 @@ exit: [{kind: children, require: all}]   # all（缺省）| any | 正整数：�
 | 人做的决定（`/confirm` 等） | `crates/model/src/flows.rs`（`person_op`）、`port::RunOp::Confirm{reject, reason}` |
 | 写流程的会话：试门禁、指南分章 | `crates/flow/src/author.rs`（`flow_gate_try`、`flow_guide {topic}`）、`runner/gate.rs`（`try_gate`）、`docs/guide/` |
 | 演示项目 | `examples/demo/`（流程、门禁、脚本、作业）；`crates/flow/tests/demo.rs` 不调模型地查它，`crates/conix/tests/live_demo.rs` 用真实模型跑它 |
+| 流程包、制品目录、归档、制品声明、包的命令 | `crates/flow/src/bundle.rs`、`packs.rs`、`kernel/layout.rs`（`with_artifacts_dir`）、`runner/archive.rs`、`runner/project.rs`（骨架）、`runner/script.rs`（`Writer`、`command`）、`runner/tools.rs`（`flow_command`） |
+| 内置的 xforge | `examples/xforge/`（项目与流程包）、`crates/host/build.rs`、`crates/host/src/flows/builtin.rs`；`crates/flow/tests/xforge.rs`、`crates/conix/tests/live_xforge.rs` |
 
-## 8. 往回迁
+## 9. 往回迁
 
 `crates/flow` 不跟 Conix 的格式化（目录里的 `rustfmt.toml` 关掉了），保持与 Harnix 那份逐行可比；新代码按原有风格写。
 每一项落地后在 `3rds/INDEX.md` 的分叉记录里记一行，整理成给 Harnix 的 issue 时按这张表来。

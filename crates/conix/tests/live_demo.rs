@@ -153,11 +153,22 @@ fn record(lv: &Live, id: &RunId) -> Value {
     lv.read_state(&format!("flow-runs/{}.json", id.0))
 }
 
-/// 一站最新的那条检查（`label` 是 `gate <名>`、`confirm by <谁>` 这种）。
+/// 一站最新的那条检查（`label` 是 `gate <名>`、`confirm by <谁>` 这种）。流程包里的门禁带包名
+/// （`gate brief/outline-shape`），按它自己的名字也认。
 fn check<'a>(rec: &'a Value, st: &str, label: &str) -> &'a Value {
+    let same = |l: &str| {
+        l == label
+            || l.strip_prefix("gate ")
+                .and_then(|r| r.split_once('/'))
+                .is_some_and(|(_, own)| format!("gate {own}") == label)
+    };
     rec["stations"][st]["checks"]
         .as_array()
-        .and_then(|cs| cs.iter().rev().find(|c| c["label"] == label))
+        .and_then(|cs| {
+            cs.iter()
+                .rev()
+                .find(|c| c["label"].as_str().is_some_and(same))
+        })
         .unwrap_or_else(|| panic!("站 {st} 没有检查 {label}：{}", rec["stations"][st]))
 }
 

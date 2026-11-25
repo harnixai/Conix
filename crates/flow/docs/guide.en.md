@@ -127,7 +127,31 @@ deliverables, the standards no gate can judge.
 - A skill has only `${output_dir}` put in; other references stay as written. A station's earlier results come with the
   work item, or from the files it wrote.
 
-## Examples
+### Bundles, deliverables and a bundle's commands
+
+Put a new flow in a **bundle**: a directory with a `bundle.yaml` (`name` as the directory's, `commands` listing the bundle's
+commands), one or more flow files (paths of one piece of work, `solid.yaml` and `quick.yaml` say; `flow.yaml` when there is
+one), and every part they use. A bundle is self-contained: a flow's `skill`, `gate`, `policies` are looked up in it and nowhere
+else. Its flows are named `<bundle>/<flow>`, its parts `<bundle>/<name>`; saving a `<bundle>/<flow>` makes the bundle.
+
+```text
+<bundle>/bundle.yaml  solid.yaml  quick.yaml
+         skills/<name>/SKILL.md (local.md: a section a user adds)  gates/  scripts/  policies/
+         templates/   skeletons of the deliverables stations declare
+         commands/    the bundle's commands (QuickJS)
+```
+
+- A bundle's flow says no `output_dir`: a run works in the directory the application gives it (`${output_dir}`), and what lasts
+  is in the bundle's data directory (`${data_dir}`). Once it finished, what it handed in is archived with a `record.json` to
+  `${data_dir}/archive/<name>/` (`archive: {name, keep, when}`).
+- A station declares the files it hands in, `deliverables: [{path, template, description}]`: told to its sessions, a skeleton put
+  in place on entry, and one more check (each there, not empty, the skeleton's `<!-- conix:template -->` gone). No gate is needed
+  for "was it written".
+- Structured data (deltas, ledgers, lists) is the bundle's commands': `commands/<name>.js` is `export default function (input,
+  flow)`, `input.args` its arguments, `flow` a gate script's plus `write`, `append`, `remove`, `print`, writing only the run's
+  directory and `${data_dir}`. A station's session runs one with `flow_command {command, args}`; a policy may refuse the model
+  writing those files, the command still can.
+
 
 ### In sequence: draft, then a person confirms
 

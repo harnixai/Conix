@@ -74,6 +74,21 @@ release: [carol]
 
 指南原文在仓库的 `crates/flow/docs/guide.zh-CN.md` 与 `crates/flow/docs/guide/`。
 
+## 流程包、制品目录与内置的 xforge
+
+- **流程包**：一个流程一个目录，`.conix/flows/<包>/`，里面有 `bundle.yaml`、流程文件（同一件事的几条路径可以放在一起，
+  比如 `solid.yaml`、`quick.yaml`）和它们用的全部件（`skills/`、`gates/`、`scripts/`、`policies/`、`templates/`、`commands/`）。
+  件不跨包共享，整个目录拷到别的项目就能用。流程的名字是 `<包>/<流程>`（`flow.yaml` 就叫包名）。
+- **制品目录**：项目下的 `conix/`（项目的 `.conix/conix.yaml` 或全局 `conix.yaml` 的 `flows.artifacts_dir` 可以改名）。
+  每次运行在 `conix/runs/<运行>/` 有自己的目录，不进 git；流程包的流程结束后，交付物连同 `record.json`（各站结论、门禁证据、
+  谁确认的）归档进 `conix/<包>/archive/`，进 git。制品目录与包同名时（比如 `xforge`），包的数据直接放在它下面。
+- **改内置的流程**：在项目里建一个同名目录、不放 `bundle.yaml`，只写 `skills/<名>/local.md`——它接在原 skill 后面（"本项目的补充"），
+  流程升级时还在。要改得更多，把整个包拷进项目的 `.conix/flows/`，项目里的就整包代替内置的。
+- **内置的 `xforge`**：规格驱动的开发流程，`xforge/solid`（提案、设计、独立检查、按工作包实施、验证、归档）与 `xforge/quick`
+  （提案、实施、验证、归档）。规格在 `conix/xforge/specs/`，站里的会话用 `xspec`、`xledger`、`xpkg` 三个命令记规格增量、
+  台账、工作包，归档时增量并进规格。项目要准备的：`.conix/governance/verify.sh`（实施站的出口跑它：单测、lint），
+  可选的 `.conix/governance/constitution.yaml`（设计逐条对照的原则）。完整的例子是仓库里的 `examples/xforge`。
+
 ## 运行的操作
 
 也都在对话里说，界面上不放这些键：启动（`flow_start`）、暂停 / 恢复（`flow_pause` / `flow_resume`）、

@@ -121,7 +121,27 @@ skill 写这一站怎么做好：读什么、按什么思路做，交付物的�
   或者在 skill 里指向规矩的出处（"读 `governance/policy.yaml`"）。
 - skill 里只有 `${output_dir}` 会被换掉；别的引用照原样留着。前一站的结果靠工作项、或读它写下的文件。
 
-## 例子
+### 流程包、制品与包的命令
+
+新写的流程放进一个**流程包**：一个目录，里面有 `bundle.yaml`（`name` 与目录同名，`commands` 列出包的命令），一个或几个流程文件
+（同一件事的几条路径，比如 `solid.yaml` 与 `quick.yaml`；只有一个时叫 `flow.yaml`），和它们用的全部件。包是自洽的：流程里写的
+`skill`、`gate`、`policies` 都在这个包里找，不往别处找。流程的名字是 `<包>/<流程>`，件是 `<包>/<名>`；存 `<包>/<流程>` 就建包。
+
+```text
+<包>/bundle.yaml  solid.yaml  quick.yaml
+     skills/<名>/SKILL.md（local.md：用户在后面补的一节）  gates/  scripts/  policies/
+     templates/   站声明的制品的骨架
+     commands/    包的命令（QuickJS）
+```
+
+- 包的流程不写 `output_dir`：运行在应用给的目录里（`${output_dir}`），流程的长期数据在包的数据目录（`${data_dir}`）。正常结束后
+  留下的制品连同 `record.json` 归档进 `${data_dir}/archive/<名>/`（`archive: {name, keep, when}`）。
+- 站用 `deliverables: [{path, template, description}]` 声明它交的文件：协议列给会话，有骨架的进站时放好，隐含一道检查
+  （都在、不空、骨架里的 `<!-- conix:template -->` 已去掉）。"写没写"不用再单写门禁。
+- 结构化的数据（增量、台账、清单）交给包的命令：`commands/<名>.js` 是 `export default function (input, flow)`，`input.args` 是参数，
+  `flow` 比脚本门禁的多 `write`、`append`、`remove`、`print`，只写得了运行的目录和 `${data_dir}`。站里的会话用
+  `flow_command {command, args}` 调；策略可以拒模型直接写这些文件，命令照样能写。
+
 
 ### 串行：起草 → 人确认
 

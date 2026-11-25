@@ -23,7 +23,7 @@ conix            # 在这个目录里起实例并接入
 | 流程 | 演示什么 |
 |---|---|
 | `brief` | 一次运行走遍流程的功能：多站、`foreach` 子 Agent、静态 `tasks` 两个工作项并行且各用一家模型；三类门禁（`check` 读 YAML / JSONL / Markdown，`command` 跑项目自己的命令行，`script` 读治理文件下结论）；不过自动打回；`sealed`；人签发；MCP 外部审批 |
-| `digest` / `digest-note` | 子流程：每份笔记开一个子运行，子流程声明 `result`；`children` 出口 `require: any`，个别失败也能过；`check: output` 查汇总 |
+| `digest`（带子流程 `digest/note`） | 子流程：每份笔记开一个子运行，子流程声明 `result`；`children` 出口 `require: any`，个别失败也能过；`check: output` 查汇总 |
 | `publish` | 单独的外部审批：`via: mcp` 经 MCP 工具建单、轮询。审批系统是 `tools/approvals_mcp.py` 模拟的 |
 
 ### `brief` 的每一站
@@ -40,16 +40,16 @@ outline（主会话）→ sections（每节一个子 Agent）→ assemble（独�
 | sections | `sections/<节>.md` | `sections-written`（`check: files`，不能有 TODO） |
 | assemble | `brief.md`；交付前自己跑一次 `notesctl stats` | `brief-shape`（`check: text`，要有摘要、结论、来源）、`brief-stats`（`command`：`tools/notesctl.py stats` 数字数） |
 | reviews | `reviews/facts.jsonl`（每条说法、依据的笔记、原文引文）、`reviews/policy.jsonl`（治理文件的每条 style 规矩判没判过） | `facts-shape`、`policy-shape`（`check: schema`，JSONL 读成数组）、`reviews-verified`（`command`：`tools/notesctl.py verify-reviews` 逐条到笔记里找引文） |
-| govern | — | `governance`（`script`，QuickJS：读 `governance/policy.yaml`，对照提纲、简报、两份审读，结论是"可以签发"或"不可签发"加上每一处） |
+| govern | — | `governance`（`script`，QuickJS：读 `.conix/governance/policy.yaml`，对照提纲、简报、两份审读，结论是"可以签发"或"不可签发"加上每一处） |
 | sign-off | — | `untouched`（`check: sealed`：过了门禁的文件后来没被改过），然后人 `confirm` |
 | publish | — | `confirm via: mcp`：在外部审批系统建单，批了才过 |
 
-交付物在 `briefs/brief-<日期><序号>/`。门禁不过时，`on_unmet` 把运行打回到那一站（govern 不过打回 assemble，
+运行在 `conix/runs/<运行>/`（不进 git）；结束后交付物连同 `record.json` 归档进 `conix/brief/archive/<日期序号>-brief/`。门禁不过时，`on_unmet` 把运行打回到那一站（govern 不过打回 assemble，
 审读跟着重做），新一轮的会话会拿到每条 finding。
 
 ### 治理文件
 
-`governance/policy.yaml` 是这个项目给简报定的规矩：要有哪几节、不能用哪些说法、多长；事实审读里至多几条没依据；
+`.conix/governance/policy.yaml` 是这个项目给简报定的规矩：要有哪几节、不能用哪些说法、多长；事实审读里至多几条没依据；
 `style` 里几条要读懂了才判得了的规矩和它们的 severity。审读员（模型）照 `style` 逐条判，脚本门禁 `governance`
 照整份文件下结论。改规矩改这个文件，不改门禁。
 
@@ -58,8 +58,8 @@ outline（主会话）→ sections（每节一个子 Agent）→ assemble（独�
 `tools/notesctl.py`（python3，只用标准库）是 command 门禁跑的工具，也可以在终端里用：
 
 ```sh
-python3 tools/notesctl.py stats briefs/<运行>/brief.md
-python3 tools/notesctl.py verify-reviews briefs/<运行>/reviews
+python3 tools/notesctl.py stats conix/runs/<运行>/brief.md
+python3 tools/notesctl.py verify-reviews conix/runs/<运行>/reviews
 ```
 
 每个子命令打一行门禁结果的 JSON（`{verdict, summary, findings, metrics}`）；门禁写的是 `result: json`。
@@ -96,16 +96,16 @@ python3 tools/approvals_mcp.py approve <单号>     # 或 reject
 
 ```
 notes/                      素材
-governance/policy.yaml      治理文件：简报要守的规矩
 tools/notesctl.py           项目自己的命令行，command 门禁跑它
 tools/approvals_mcp.py      模拟的外部审批系统（MCP server）
-.conix/flows/*.yaml         流程
-.conix/flows/gates/         门禁
-.conix/flows/scripts/       script 门禁的 JS
-.conix/flows/skills/        每一站照着做的 skill
+.conix/flows/brief/         流程包 brief：bundle.yaml、flow.yaml、gates/、scripts/、skills/
+.conix/flows/digest/        流程包 digest：flow.yaml 与子流程 note.yaml
+.conix/flows/publish/       流程包 publish
+.conix/governance/policy.yaml  治理文件：简报要守的规矩
 .conix/roles.yaml           确认的角色
 .conix/jobs.json            作业
 .conix/settings.json        项目的 Agix 设置（MCP server）
+conix/                      制品目录（Conix 建）：runs/ 不进 git，<包>/archive/ 进 git
 ```
 
 写流程、写门禁的规则见流程库的指南：`crates/flow/docs/guide.zh-CN.md` 与 `crates/flow/docs/guide/`（会话里是

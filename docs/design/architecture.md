@@ -273,13 +273,17 @@ loop {
 <项目>/                           实例必须有项目
 ├── .wkts/<运行>/                 `workspace: worktree` 的运行的 worktree，分支 `conix/flow/<运行>`；
 │                                 和引擎自己的 worktree 同一个目录（在仓库根），`.wkts/.gitignore` 是 `*`
-└── .conix/                       项目层目录（Agix 的 project_dir）
+├── conix/                        制品目录（名字可改：flows.artifacts_dir；layout.md）：runs/<运行>/ 不进 git
+│                                 （运行的目录，流程库的投影在其 _run/），<流程包>/ 进 git（包的数据、归档）
+└── .conix/                       项目层目录（Agix 的 project_dir）：脚手架
     ├── .gitignore                Agix 维护 state/、settings.local.json、mcp.local.json
     ├── settings.json  mcp.json   ┐
     ├── agents/  skills/  rules/  │ 进 git：项目的引擎配置，布局归 Agix
     ├── hooks/  commands/ …       ┘
     ├── settings.local.json …     个人配置，不进 git
-    ├── flows/                    进 git：项目自己的流程包（项目受信才读、才写，§8.6）
+    ├── conix.yaml                进 git：项目自己的 Conix 配置（现在只有 flows.artifacts_dir）
+    ├── flows/<包>/               进 git：项目自己的流程包（项目受信才读、才写，§8.6；layout.md §2）
+    ├── governance/               进 git：项目的原则、治理文件，流程的门禁读它
     ├── jobs.json                 进 git：作业定义（项目受信才读、才写，§8.5）
     └── state/                    不进 git：本机数据与过程数据
         ├── history/<id>/         Agix：受信项目的会话（转录、memory、checkpoints）
@@ -293,8 +297,7 @@ loop {
             ├── jobs/<作业 id>.jsonl  触发记录，一次一行
             ├── flow-runs/        流程运行的记录（harnix-flow 的 FileStore）
             ├── run-policies.json 流程作业起的运行：按运行记下发起它的作业与开站会话用的网络（§8.5），续跑时沿用
-            ├── runs/<运行>/      运行的过程目录（`ProjectLayout::with_runs_dir`，Harnix#69）：交付、门禁日志；
-            │                     Conix 在这里写 `conix-report.json`（§8.12）
+            ├── flows-builtin/    随 Conix 内置的流程包（xforge），实例起来时整个重写（layout.md §2）
             ├── job-runs/<作业>/<触发时刻>/  一次触发的运行时目录：`report.json`（§8.12）
             ├── workspaces/<运行>/ 没有项目的运行的工作目录（流程库要它；Conix 的运行都有项目）
             └── quarantine/<时刻>/ 认不出来的状态挪到这里，不读（§8.9）
@@ -659,7 +662,7 @@ schema；`job_validate` 不落盘，回下 5 次触发时刻与护栏的实际�
 
 | | 目录 | 写什么、何时写 |
 |---|---|---|
-| 流程运行 | `state/conix/runs/<运行>/`（流程库的过程目录） | `conix-report.json`：运行的摘要、各站（状态、耗时、用量、会话与模型）、主会话与模型、钉住的定义摘要；运行结束时写 |
+| 流程运行 | `<制品>/runs/<运行>/_run/`（流程库的过程目录，layout.md） | `conix-report.json`：运行的摘要、各站（状态、耗时、用量、会话与模型）、主会话与模型、钉住的定义摘要；运行结束时写 |
 | 作业触发 | `state/conix/job-runs/<作业>/<触发时刻>/` | `report.json`：触发记录（结局、耗时、用量、审计）、作业名与种类、会话与模型（流程作业是运行 id）、最后一轮回复的末尾（至多 4000 字）；起来时写一份 `running`，结束时重写 |
 
 `work_show` 回报告，运行还在跑时另附此刻的状态（`GetRun`），并写出目录在哪。

@@ -156,7 +156,14 @@ TUI 照常收到事件。
   不带 `run_id`、不 `plugin.cancel`：引擎嵌在实例里，实例停时调用随引擎一起停，门禁仍在运行里等着，流程库下次启动重跑它。
 - 带会话的调用这一版不用，留给以后面板上的操作。
 
+插件的流程包目录里也可以放**流程包**（带 `bundle.yaml` 的子目录，layout.md §2），和平铺的流程并存；包里的流程自洽，
+不用别的包或插件平铺的件。
+
 ## 6. 插件 `xforge`
+
+> Conix 现在**内置**一个能力对齐的开发流程包 `xforge`（`examples/xforge/.conix/flows/xforge/`，flows.md §7）：流程本身就是
+> 运行的状态，没有 `xflow`；规格、台账、工作包由包自己的命令（`xspec`、`xledger`、`xpkg`，QuickJS）维护，不要插件。
+> 这里的插件版留作"用插件写流程"的参考，两者同名不冲突：内置的叫 `xforge/solid`，插件的叫 `xforge-solid`。
 
 ### 6.1 包
 

@@ -239,12 +239,14 @@ fn guide_notes(topic: Option<&str>, zh: bool, command_gates: bool) -> Option<Str
     };
     let text = match (topic, zh) {
         (None, true) => format!(
-            "## 在 Conix 里\n\n- 流程和件存在项目的 `.conix/flows/`（文中的 `.harnix/` 在 Conix 里是 `.conix/`），随项目提交；项目受信才读、才写。\n\
+            "## 在 Conix 里\n\n- 流程和件存在项目的 `.conix/flows/`（文中的 `.harnix/` 在 Conix 里是 `.conix/`），随项目提交；项目受信才读、才写。新写的流程放进一个流程包：存 `<包>/<流程>` 就建 `.conix/flows/<包>/`，一个包自洽地放它的流程和件（Conix 的 docs/design/layout.md）。\n\
+             - 运行在项目的制品目录里有自己的目录（缺省 `conix/runs/<运行>/`，不进 git），包的流程结束后归档进 `conix/<包>/archive/`。Conix 内置一个开发流程包 `xforge`（`xforge/solid`、`xforge/quick`），可以直接用，也可以照它写。\n\
              - 确认、驳回、放行搁置的站、强制放行只能由用户做：你没有这些工具，需要时告诉用户在输入框里打 `/confirm`、`/reject <理由>`、`/release`、`/force <理由>`（可以带运行和站：`/confirm <运行> <站>`）。\n\
              - {cmd}\n- 写门禁前读 `flow_guide {{topic: \"gates\"}}`；要人批的读 `flow_guide {{topic: \"confirm\"}}`。"
         ),
         (None, false) => format!(
-            "## In Conix\n\n- Flows and parts are saved in the project's `.conix/flows/` (`.harnix/` above is `.conix/` in Conix), committed with it; read and written only while the project is trusted.\n\
+            "## In Conix\n\n- Flows and parts are saved in the project's `.conix/flows/` (`.harnix/` above is `.conix/` in Conix), committed with it; read and written only while the project is trusted. Put a new flow in a bundle: saving `<bundle>/<flow>` makes `.conix/flows/<bundle>/`, which holds its flows and parts on its own (Conix's docs/design/layout.md).\n\
+             - A run has its own directory in the project's artifacts (`conix/runs/<run>/` by default, not committed); a bundle's run is archived to `conix/<bundle>/archive/` once it finished. Conix ships a development bundle, `xforge` (`xforge/solid`, `xforge/quick`): use it as it is, or write one after it.\n\
              - Confirming, rejecting, releasing a held station and forcing are the user's: you have no tools for them; when one is needed, tell the user to type `/confirm`, `/reject <reason>`, `/release` or `/force <reason>` (a run and station may follow: `/confirm <run> <station>`).\n\
              - {cmd}\n- Read `flow_guide {{topic: \"gates\"}}` before writing a gate, `flow_guide {{topic: \"confirm\"}}` when someone must approve."
         ),
@@ -253,11 +255,11 @@ fn guide_notes(topic: Option<&str>, zh: bool, command_gates: bool) -> Option<Str
         (Some("confirm"), true) => "## 在 Conix 里\n\n\
             - 确认的人是实例的主人（操作系统用户），在输入框里打 `/confirm` 或 `/reject <理由>`。\n\
             - `who` 的角色在项目的 `.conix/roles.yaml` 里列出谁能确认（`reviewer: [alice, bob]`，按操作系统用户名）；没列出的角色任何人都行。主人不在名单里的站，要用 `via: mcp` 请名单上的人批。\n\
-            - `via: mcp` 的站只能由审批系统决定，用户在 Conix 里不能代批。它经 Agix 调 MCP 工具（`mcp.callTool`，harnixai/Agix#111）：引擎还不支持时，这条出口是 error。".to_string(),
+            - `via: mcp` 的站只能由审批系统决定，用户在 Conix 里不能代批。它经 Agix 调 MCP 工具（`mcp.callTool`）建单、轮询。".to_string(),
         (Some("confirm"), false) => "## In Conix\n\n\
             - The one who confirms is the instance's owner (the OS user), typing `/confirm` or `/reject <reason>`.\n\
             - A `who` role lists who may confirm in the project's `.conix/roles.yaml` (`reviewer: [alice, bob]`, by OS user name); a role not listed: anyone. Where the owner is not listed, use `via: mcp` to have a listed person approve.\n\
-            - A `via: mcp` station is decided by the approval system alone; the user cannot approve it in Conix. It calls MCP tools through Agix (`mcp.callTool`, harnixai/Agix#111): an engine without it makes this exit an error.".to_string(),
+            - A `via: mcp` station is decided by the approval system alone; the user cannot approve it in Conix. It calls MCP tools through Agix (`mcp.callTool`) to open the request and poll it.".to_string(),
         _ => return None,
     };
     Some(text)
