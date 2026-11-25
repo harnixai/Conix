@@ -42,7 +42,16 @@ pub struct ProjectLayout {
     /// Where runs' process directories go in the data directory, as a relative path (`runs`,
     /// [`RUNS_DIR`]; Codix: `state/codix/runs`): `<project>/<dir>/<runs>/<run>`.
     pub runs: String,
+    /// The project's directory of artifacts, by name (in Conix: `conix`; docs/design/layout.md):
+    /// when set, a run's own directory is `<project>/<artifacts>/runs/<run>/`, its process directory
+    /// `_run/` in it, and a bundle's data `<project>/<artifacts>/<bundle>/`. Unset: as before.
+    pub artifacts: Option<String>,
 }
+
+/// A run's process directory in its own directory, when there is a directory of artifacts.
+pub const PROCESS_DIR: &str = "_run";
+/// Runs' own directories in the directory of artifacts.
+pub const ARTIFACT_RUNS: &str = "runs";
 
 impl ProjectLayout {
     pub fn new(dir: impl Into<String>, worktrees_root: impl Into<PathBuf>, branch_prefix: impl Into<String>) -> Self {
@@ -52,6 +61,36 @@ impl ProjectLayout {
             branch_prefix: branch_prefix.into(),
             agent_dirs: vec![],
             runs: RUNS_DIR.into(),
+            artifacts: None,
+        }
+    }
+
+    /// The project's directory of artifacts (in Conix): one plain name, as `with_runs_dir` keeps it.
+    pub fn with_artifacts_dir(mut self, dir: impl Into<String>) -> Self {
+        let dir = dir.into();
+        let names: Vec<&str> = dir.split(['/', '\\']).filter(|n| !n.is_empty() && *n != "." && *n != "..").collect();
+        self.artifacts = (!names.is_empty()).then(|| names.join("/"));
+        self
+    }
+
+    /// The directory of artifacts in `base` (a project, or a worktree of it).
+    pub fn artifacts_dir(&self, base: &Path) -> Option<PathBuf> {
+        self.artifacts.as_ref().map(|a| base.join(a))
+    }
+
+    /// A run's own directory in `base`: `<base>/<artifacts>/runs/<run>` (the id made safe).
+    pub fn run_dir(&self, base: &Path, run: &str) -> Option<PathBuf> {
+        Some(super::refs::workspace_of(&self.artifacts_dir(base)?.join(ARTIFACT_RUNS), run))
+    }
+
+    /// A bundle's data directory in `base`: `<base>/<artifacts>/<bundle>`, or the directory of
+    /// artifacts itself when it is named as the bundle is (a project of one bundle: `xforge/`).
+    pub fn bundle_data_dir(&self, base: &Path, bundle: &str) -> Option<PathBuf> {
+        let a = self.artifacts_dir(base)?;
+        if a.file_name().and_then(|n| n.to_str()) == Some(bundle) {
+            Some(a)
+        } else {
+            Some(a.join(bundle))
         }
     }
 

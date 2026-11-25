@@ -15,6 +15,7 @@ use crate::kernel::host::{digest, Catalog, Origin, Packs, Withheld};
 use crate::kernel::layout::ProjectLayout;
 use crate::kernel::parts::PartKind;
 use crate::kernel::validate::is_part_name;
+use crate::bundle;
 
 /// A flow's name as a pack stores it: `[a-z][a-z0-9-]*`.
 fn is_flow_name(s: &str) -> bool {
@@ -348,6 +349,27 @@ impl Packs for MemPacks {
     }
 }
 
+/// A YAML text with its top-level `name:` line saying `name`, the rest as written.
+fn rename_top(yaml: &str, name: &str) -> String {
+    let mut done = false;
+    let lines: Vec<String> = yaml
+        .lines()
+        .map(|l| {
+            if !done && l.starts_with("name:") {
+                done = true;
+                format!("name: {name}")
+            } else {
+                l.to_string()
+            }
+        })
+        .collect();
+    let mut out = lines.join("\n");
+    if yaml.ends_with('\n') {
+        out.push('\n');
+    }
+    out
+}
+
 /// The `name:` a YAML text declares, if any.
 fn yaml_name(yaml: &str) -> String {
     serde_yaml::from_str::<serde_yaml::Value>(yaml)
@@ -559,6 +581,41 @@ impl DirPacks {
     fn top_dir(&self) -> Result<&Path, String> {
         self.top.as_deref().ok_or_else(|| "read-only".to_string())
     }
+
+    /// The bundle of that name below the writable layer, as a name is looked up (plugins by name,
+    /// then the directories, last given first), with the plugin that offers it.
+    fn bundle(&self, name: &str) -> Option<(PathBuf, Option<&str>)> {
+        self.plugins
+            .iter()
+            .find_map(|(p, d)| bundle::bundle_in(d, name).map(|b| (b, Some(p.as_str()))))
+            .or_else(|| self.dirs.iter().rev().find_map(|d| bundle::bundle_in(d, name).map(|b| (b, None))))
+    }
+
+    /// Every bundle offered, once a name (the first as looked up).
+    fn bundles(&self) -> Vec<(String, PathBuf)> {
+        let mut seen = BTreeSet::new();
+        let mut out = vec![];
+        for d in self.lookup_dirs() {
+            for (n, b) in bundle::bundles_in(d) {
+                if seen.insert(n.clone()) {
+                    out.push((n, b));
+                }
+            }
+        }
+        out
+    }
+
+    /// A bundle's flow by its full name: the definition, its text, and the plugin offering it. A
+    /// flow of the old layout of the same name comes first.
+    fn bundle_flow(&self, name: &str) -> Option<(FlowDef, String, Option<&str>)> {
+        if safe(name) && self.flow_text(name).is_some() {
+            return None;
+        }
+        let (b, stem) = bundle::flow_file_of(name)?;
+        let (dir, plugin) = self.bundle(b)?;
+        let (def, text) = bundle::read_flow(b, &dir, stem)?;
+        Some((def, text, plugin))
+    }
 }
 
 fn safe(name: &str) -> bool {
@@ -624,6 +681,9 @@ impl Packs for DirPacks {
         if let Some(b) = &self.builtin {
             names.extend(b.flows());
         }
+        for (n, dir) in self.bundles() {
+            names.extend(bundle::flow_names(&n, &dir));
+        }
         names
             .into_iter()
             .filter(|n| self.flow(n).is_some())
@@ -631,12 +691,24 @@ impl Packs for DirPacks {
     }
 
     fn flow(&self, name: &str) -> Option<(FlowDef, String)> {
-        let text = self.flow_text(name)?;
+        if let Some((def, text, _)) = self.bundle_flow(name) {
+            return Some((def, digest(&text)));
+        }
+        let text = DirPacks::flow_text(self, name)?;
         let def = FlowDef::parse(&text).ok()?;
         Some((def, digest(&text)))
     }
 
+    fn bundle_file(&self, name: &str, rel: &str) -> Option<String> {
+        bundle::file(&self.bundle(name)?.0, rel)
+    }
+
     fn part(&self, kind: PartKind, name: &str) -> Option<(String, String)> {
+        if let Some((b, local)) = bundle::split(name) {
+            let body = bundle::part_text(&self.bundle(b)?.0, kind, local)?;
+            let d = digest(&body);
+            return Some((body, d));
+        }
         if !safe(name) {
             return None;
         }
@@ -677,7 +749,7 @@ impl Packs for DirPacks {
     }
 
     fn flow_text(&self, name: &str) -> Option<String> {
-        DirPacks::flow_text(self, name)
+        DirPacks::flow_text(self, name).or_else(|| self.bundle_flow(name).map(|(_, t, _)| t))
     }
 
     fn parts(&self, kind: PartKind) -> Vec<String> {
@@ -688,10 +760,19 @@ impl Packs for DirPacks {
         if let Some(b) = &self.builtin {
             names.extend(b.parts(kind));
         }
+        for (n, dir) in self.bundles() {
+            names.extend(bundle::part_names(&n, &dir, kind));
+        }
         names.into_iter().collect()
     }
 
     fn part_origin(&self, kind: PartKind, name: &str) -> Origin {
+        if let Some((b, _)) = bundle::split(name) {
+            return match self.bundle(b) {
+                Some((_, Some(_))) => Origin::Plugin,
+                _ => Origin::Builtin,
+            };
+        }
         let saved = safe(name)
             && self
                 .top
@@ -711,6 +792,9 @@ impl Packs for DirPacks {
     }
 
     fn part_source(&self, kind: PartKind, name: &str) -> Option<String> {
+        if let Some((b, _)) = bundle::split(name) {
+            return self.bundle(b).and_then(|(_, p)| p.map(String::from));
+        }
         self.part_plugin(kind, name).map(String::from)
     }
 
@@ -719,6 +803,9 @@ impl Packs for DirPacks {
     }
 
     fn origin(&self, flow: &str) -> Origin {
+        if let Some((_, _, plugin)) = self.bundle_flow(flow) {
+            return if plugin.is_some() { Origin::Plugin } else { Origin::Builtin };
+        }
         let saved = safe(flow)
             && self
                 .top
@@ -733,11 +820,18 @@ impl Packs for DirPacks {
     }
 
     fn source(&self, flow: &str) -> Option<String> {
+        if let Some((_, _, plugin)) = self.bundle_flow(flow) {
+            return plugin.map(String::from);
+        }
         self.flow_plugin(flow).map(String::from)
     }
 
     fn governed(&self, flow: &str) -> bool {
-        self.flow_plugin(flow).is_some_and(|p| match self.governed.get(p) {
+        let plugin = match self.bundle_flow(flow) {
+            Some((_, _, p)) => p,
+            None => self.flow_plugin(flow),
+        };
+        plugin.is_some_and(|p| match self.governed.get(p) {
             Some(None) => true,
             Some(Some(names)) => names.contains(flow),
             None => false,
@@ -745,7 +839,11 @@ impl Packs for DirPacks {
     }
 
     fn governed_part(&self, kind: PartKind, name: &str) -> bool {
-        self.part_plugin(kind, name).is_some_and(|p| self.governed.contains_key(p))
+        let plugin = match bundle::split(name) {
+            Some((b, _)) => self.bundle(b).and_then(|(_, p)| p),
+            None => self.part_plugin(kind, name),
+        };
+        plugin.is_some_and(|p| self.governed.contains_key(p))
     }
 
     /// A plugin's flow another plugin's of the same name is offered over, once a name.
@@ -945,6 +1043,82 @@ impl ProjectPacks {
         part_names(&self.dir, kind)
     }
 
+    /// The project's bundle of that name (it has a `bundle.yaml`): it stands for the whole bundle,
+    /// whatever else offers one of that name. Whether or not the project is trusted.
+    fn own_bundle(&self, name: &str) -> Option<PathBuf> {
+        bundle::bundle_in(&self.dir, name)
+    }
+
+    /// The project's bundles, by name.
+    fn own_bundles(&self) -> Vec<(String, PathBuf)> {
+        bundle::bundles_in(&self.dir)
+    }
+
+    /// The project's own flow of a bundle, by its full name: `Some(None)` when the bundle is the
+    /// project's but the flow cannot be offered (not trusted, governed, unreadable, not there).
+    fn own_bundle_flow(&self, name: &str) -> Option<Option<(FlowDef, String)>> {
+        if self.flow_file(name).is_some() {
+            return None;
+        }
+        let (b, stem) = bundle::flow_file_of(name)?;
+        let dir = self.own_bundle(b)?;
+        if !self.trusted || !self.may_own(name) {
+            return Some(None);
+        }
+        Some(bundle::read_flow(b, &dir, stem))
+    }
+
+    /// The `local.md` the project adds to a skill of a bundle offered below it: in its directory of
+    /// the bundle's name that is not a bundle of its own.
+    fn local_skill(&self, name: &str) -> Option<String> {
+        let (b, local) = bundle::split(name)?;
+        if !self.trusted || !bundle::segment(b) || self.own_bundle(b).is_some() {
+            return None;
+        }
+        bundle::local_skill(&self.dir.join(b), local)
+    }
+
+    /// The bundle and local name of a full name to save in the project: its bundle must be the
+    /// project's (copy a bundle into the project whole before changing it there).
+    fn bundle_to_save<'n>(&self, name: &'n str) -> Result<Option<(&'n str, &'n str, PathBuf)>, String> {
+        let Some((b, local)) = bundle::split(name) else { return Ok(None) };
+        match self.own_bundle(b) {
+            Some(dir) => Ok(Some((b, local, dir))),
+            None => Err(format!(
+                "bundle {b} is not the project's: a bundle is changed as a whole — copy it into {} first, or create a flow {b}/<name> to start one",
+                self.dir.display()
+            )),
+        }
+    }
+
+    /// Save a flow of a bundle under its file's own name, the bundle made when it is new.
+    fn save_bundle_flow(&self, b: &str, stem: &str, yaml: &str) -> Result<String, String> {
+        if !bundle::segment(b) || !is_flow_name(b) || !is_flow_name(stem) {
+            return Err(format!("name {b}/{stem} must be <bundle>/<flow>, each matching [a-z][a-z0-9-]*"));
+        }
+        let name = bundle::qualified(b, stem);
+        if !self.may_own(&name) {
+            return Err(format!("flow {name} is governed by plugin {}: the project cannot have its own flow of that name", self.base.source(&name).unwrap_or_default()));
+        }
+        let dir = self.dir.join(b);
+        if self.own_bundle(b).is_none() {
+            if dir.exists() && std::fs::read_dir(&dir).map(|mut d| d.next().is_some()).unwrap_or(false) && !dir.join(bundle::BUNDLE_FILE).exists() {
+                // A directory that only adds local.md to a bundle offered below: making it a bundle
+                // would hide that one whole.
+                if self.base.flows().iter().any(|f| bundle::flow_file_of(f).is_some_and(|(x, _)| x == b)) {
+                    return Err(format!("{} adds to the bundle {b} offered below: copy that bundle in whole to change its flows", dir.display()));
+                }
+            }
+            self.write(&dir.join(bundle::BUNDLE_FILE), &format!("name: {b}\n"))?;
+        }
+        // On disk a flow says its file's name; it is offered under the full one.
+        let own = if stem == bundle::MAIN_FLOW { b } else { stem };
+        let text = rename_top(yaml, own);
+        self.write(&dir.join(format!("{stem}.yaml")), &text)?;
+        let _ = std::fs::remove_file(dir.join(format!("{stem}.yml")));
+        Ok(digest(yaml))
+    }
+
     /// Why nothing is written: the project is not trusted.
     fn must_trust(&self) -> Result<(), String> {
         if self.trusted {
@@ -978,9 +1152,14 @@ impl ProjectPacks {
 impl Packs for ProjectPacks {
     fn flows(&self) -> Vec<String> {
         let own: BTreeSet<String> = self.own_names().into_iter().filter(|n| self.may_own(n)).collect();
+        let bundles: BTreeSet<String> = self.own_bundles().into_iter().map(|(n, _)| n).collect();
+        let of_own_bundle = |n: &str| bundle::flow_file_of(n).is_some_and(|(b, _)| bundles.contains(b));
         let mut names: BTreeSet<String> =
-            self.base.flows().into_iter().filter(|n| !own.contains(n)).collect();
+            self.base.flows().into_iter().filter(|n| !own.contains(n) && !of_own_bundle(n)).collect();
         names.extend(own.into_iter().filter(|n| self.own_flow(n).is_some()));
+        for (b, dir) in self.own_bundles() {
+            names.extend(bundle::flow_names(&b, &dir).into_iter().filter(|n| matches!(self.own_bundle_flow(n), Some(Some(_)))));
+        }
         names.into_iter().collect()
     }
 
@@ -988,7 +1167,17 @@ impl Packs for ProjectPacks {
         if self.flow_file(name).is_some() && self.may_own(name) {
             return self.own_flow(name);
         }
+        if let Some(own) = self.own_bundle_flow(name) {
+            return own.map(|(def, text)| (def, digest(&text)));
+        }
         self.base.flow(name)
+    }
+
+    fn bundle_file(&self, name: &str, rel: &str) -> Option<String> {
+        match self.own_bundle(name) {
+            Some(dir) => self.trusted.then(|| bundle::file(&dir, rel)).flatten(),
+            None => self.base.bundle_file(name, rel),
+        }
     }
 
     fn governed(&self, flow: &str) -> bool {
@@ -1007,10 +1196,29 @@ impl Packs for ProjectPacks {
         if self.flow_file(name).is_some() && self.may_own(name) {
             return self.own_text(name);
         }
+        if let Some(own) = self.own_bundle_flow(name) {
+            let (b, stem) = bundle::flow_file_of(name)?;
+            return own.and_then(|_| bundle::flow_text(&self.own_bundle(b)?, stem));
+        }
         self.base.flow_text(name)
     }
 
     fn part(&self, kind: PartKind, name: &str) -> Option<(String, String)> {
+        if let Some((b, local)) = bundle::split(name) {
+            let text = match self.own_bundle(b) {
+                Some(dir) if self.trusted && !self.base.governed_part(kind, name) => bundle::part_text(&dir, kind, local)?,
+                Some(_) => return None,
+                None => {
+                    let (text, d) = self.base.part(kind, name)?;
+                    match (kind, self.local_skill(name)) {
+                        (PartKind::Skill, Some(l)) => bundle::with_local(text, Some(&l)),
+                        _ => return Some((text, d)),
+                    }
+                }
+            };
+            let d = digest(&text);
+            return Some((text, d));
+        }
         match self.own_part(kind, name) {
             Some(text) => {
                 let d = digest(&text);
@@ -1021,8 +1229,19 @@ impl Packs for ProjectPacks {
     }
 
     fn parts(&self, kind: PartKind) -> Vec<String> {
-        let mut names: BTreeSet<String> = self.base.parts(kind).into_iter().collect();
+        let bundles: BTreeSet<String> = self.own_bundles().into_iter().map(|(n, _)| n).collect();
+        let mut names: BTreeSet<String> = self
+            .base
+            .parts(kind)
+            .into_iter()
+            .filter(|n| !bundle::split(n).is_some_and(|(b, _)| bundles.contains(b)))
+            .collect();
         names.extend(self.own_parts(kind));
+        if self.trusted {
+            for (b, dir) in self.own_bundles() {
+                names.extend(bundle::part_names(&b, &dir, kind));
+            }
+        }
         names.into_iter().collect()
     }
 
@@ -1031,7 +1250,7 @@ impl Packs for ProjectPacks {
     }
 
     fn origin(&self, flow: &str) -> Origin {
-        if self.flow_file(flow).is_some() && self.may_own(flow) {
+        if (self.flow_file(flow).is_some() && self.may_own(flow)) || self.own_bundle_flow(flow).is_some() {
             Origin::Project
         } else {
             self.base.origin(flow)
@@ -1039,7 +1258,7 @@ impl Packs for ProjectPacks {
     }
 
     fn part_origin(&self, kind: PartKind, name: &str) -> Origin {
-        if self.own_part(kind, name).is_some() {
+        if self.own_part(kind, name).is_some() || bundle::split(name).is_some_and(|(b, _)| self.own_bundle(b).is_some()) {
             Origin::Project
         } else {
             self.base.part_origin(kind, name)
@@ -1047,7 +1266,7 @@ impl Packs for ProjectPacks {
     }
 
     fn source(&self, flow: &str) -> Option<String> {
-        if self.flow_file(flow).is_some() && self.may_own(flow) {
+        if (self.flow_file(flow).is_some() && self.may_own(flow)) || self.own_bundle_flow(flow).is_some() {
             None
         } else {
             self.base.source(flow)
@@ -1055,7 +1274,7 @@ impl Packs for ProjectPacks {
     }
 
     fn part_source(&self, kind: PartKind, name: &str) -> Option<String> {
-        if self.own_part(kind, name).is_some() {
+        if self.own_part(kind, name).is_some() || bundle::split(name).is_some_and(|(b, _)| self.own_bundle(b).is_some()) {
             None
         } else {
             self.base.part_source(kind, name)
@@ -1064,6 +1283,9 @@ impl Packs for ProjectPacks {
 
     fn save_flow(&self, yaml: &str) -> Result<String, String> {
         self.must_trust()?;
+        if let Some((b, stem)) = FlowDef::parse(yaml).ok().and_then(|d| bundle::split(&d.name).map(|(b, l)| (b.to_string(), l.to_string()))) {
+            return self.save_bundle_flow(&b, &stem, yaml);
+        }
         let name = name_to_save(yaml)?;
         if !self.may_own(&name) {
             return Err(format!(
@@ -1078,6 +1300,14 @@ impl Packs for ProjectPacks {
 
     fn delete_flow(&self, name: &str) -> Result<(), String> {
         self.must_trust()?;
+        if let Some((b, stem)) = bundle::split(name) {
+            let dir = self.own_bundle(b).ok_or_else(|| format!("flow {name} is not the project's: there is nothing of the project's to delete"))?;
+            let mut removed = false;
+            for ext in ["yaml", "yml"] {
+                removed |= std::fs::remove_file(dir.join(format!("{stem}.{ext}"))).is_ok();
+            }
+            return if removed { Ok(()) } else { Err(format!("flow {name} is not the project's: there is nothing of the project's to delete")) };
+        }
         let mut removed = false;
         if safe(name) {
             for ext in ["yaml", "yml"] {
@@ -1096,6 +1326,10 @@ impl Packs for ProjectPacks {
         if !is_part_name(kind, name) {
             return Err(format!("{kind} name {name:?} must match [a-z][a-z0-9-]*"));
         }
+        if let Some((_, local, dir)) = self.bundle_to_save(name)? {
+            self.write(&dir.join(kind.dir()).join(kind.file(local)), text)?;
+            return Ok(digest(text));
+        }
         if self.base.governed_part(kind, name) {
             return Err(format!(
                 "{kind} {name} is governed by plugin {}: the project cannot have its own of that name",
@@ -1108,6 +1342,14 @@ impl Packs for ProjectPacks {
 
     fn delete_part(&self, kind: PartKind, name: &str) -> Result<(), String> {
         self.must_trust()?;
+        if let Some((_, local, dir)) = self.bundle_to_save(name)? {
+            let path = match kind {
+                PartKind::Skill => dir.join(kind.dir()).join(local),
+                _ => dir.join(kind.dir()).join(kind.file(local)),
+            };
+            let r = if kind == PartKind::Skill { std::fs::remove_dir_all(&path) } else { std::fs::remove_file(&path) };
+            return r.map_err(|e| format!("{kind} {name} is not the project's: {e}"));
+        }
         if !is_part_name(kind, name) || self.own_part(kind, name).is_none() {
             return Err(format!("{kind} {name} is not the project's: there is nothing of the project's to delete"));
         }
@@ -1142,6 +1384,17 @@ impl Packs for ProjectPacks {
                 self.own_flow(&n).is_none().then_some((n, Withheld::Unreadable))
             }
         }));
+        for (b, dir) in self.own_bundles() {
+            out.extend(bundle::flow_names(&b, &dir).into_iter().filter_map(|n| {
+                if !self.may_own(&n) {
+                    Some((n, Withheld::Governed))
+                } else if !self.trusted {
+                    Some((n, Withheld::Untrusted))
+                } else {
+                    matches!(self.own_bundle_flow(&n), Some(None)).then_some((n, Withheld::Unreadable))
+                }
+            }));
+        }
         out.sort_by(|a, b| a.0.cmp(&b.0));
         out
     }

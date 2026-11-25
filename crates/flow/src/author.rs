@@ -1018,6 +1018,9 @@ struct WithParts<'a> {
 }
 
 impl Packs for WithParts<'_> {
+    fn bundle_file(&self, bundle: &str, rel: &str) -> Option<String> {
+        self.base.bundle_file(bundle, rel)
+    }
     fn flows(&self) -> Vec<String> {
         self.base.flows()
     }

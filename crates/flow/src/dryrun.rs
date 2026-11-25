@@ -220,6 +220,9 @@ fn take_in(c: &mut Catalog, def: &FlowDef, packs: &dyn Packs) {
 }
 
 impl Packs for SandboxPacks {
+    fn bundle_file(&self, bundle: &str, rel: &str) -> Option<String> {
+        self.base.bundle_file(bundle, rel)
+    }
     fn flows(&self) -> Vec<String> {
         let mut names = self.base.flows();
         if let Some((n, _)) = &self.extra {

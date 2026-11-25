@@ -503,6 +503,26 @@ is so as not to collide with Harnix's own next one; what changes for a host is l
   packs the conversation reads (a project's flows and parts), not only the application's — a project's flow was
   not found by a dry run before.
 
+- **Flow bundles** (module `bundle`; Conix's `docs/design/layout.md`): a subdirectory of a pack directory with a
+  `bundle.yaml` is a bundle — one or more flows and every part they use, offered as `<bundle>/<flow>` (`flow.yaml` as the
+  bundle's name) and `<bundle>/<name>`; read, every name a flow says is made the bundle's (`bundle::qualify`), nothing is
+  looked up elsewhere. `DirPacks` and `ProjectPacks` read bundles: a project's bundle with a `bundle.yaml` stands whole for
+  one of that name below, a directory without one only adds `local.md` to skills. `Packs::bundle_file` (default `None`)
+  reads a bundle's files (`templates/`, `commands/`); `Packs::gate`/`policy`/`hook` take a bundle part's own short name.
+  A run's id is its flow's name with `/` made `.` (`engine::id_base`).
+- **Artifacts and archive**: with `ProjectLayout::with_artifacts_dir` (`artifacts_dir`, `run_dir`, `bundle_data_dir`) a
+  run's directory is `<artifacts>/runs/<run>/`, its process projection in `_run/` there; a bundle's flow has it as
+  `${output_dir}`, and `${data_dir}` (`RunRecord::data_dir`, a new reference root) as its bundle's data directory; the
+  `.gitignore` line (`runs/`) goes in the artifacts directory. A bundle's run that finished is archived to
+  `<data_dir>/archive/<name>/` with a `record.json` (`FlowDef::archive`: `ArchiveDef`, `ArchiveWhen`,
+  `DEFAULT_ARCHIVE_NAME`; `FlowDef::bundle` is set when read).
+- **Deliverables**: `Station::deliverables` (`Deliverable{path, template, description}`) are told to sessions; one with a
+  `template` is put in the run's directory before the task is sent (`bundle::TEMPLATE_MARK`); read from a bundle, each such
+  station gets a `deliverables` gate (`<bundle>/deliverables@<flow>.<station>`).
+- **A bundle's commands** (`TOOL_COMMAND`, `flow_command {command, args}`): the `commands/<name>.js` its `bundle.yaml`
+  lists, pinned in `Pinned::commands`; run in the library's QuickJS with `write`, `append`, `remove` and `print` besides a
+  gate script's `flow`, writing only the run's directory (not `_run/`) and `${data_dir}`. Not a read-only tool.
+
 ### `FLOW_API_VERSION = 1`
 
 The library's first version: the kernel, stores, packs and dry runs move out of `harnix-ext-flow`;

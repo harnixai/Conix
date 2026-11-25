@@ -352,7 +352,8 @@ async fn with_session(rn: &Arc<Runner>, job: &SessionJob) {
         // The run's project's rules and skill: its own packs over the host's.
         message: (!resume).then(|| {
             let packs = engine.packs_for(rec.project_root.as_deref());
-            task_message_of(job, packs.as_ref(), rec.output_dir.as_deref())
+            super::project::place_templates(&rec, packs.as_ref(), &key.station);
+            task_message_of(job, packs.as_ref(), rec.output_dir.as_deref(), rec.data_dir.as_deref())
         }),
         resumed_running: resume && running,
     };
@@ -367,7 +368,7 @@ async fn with_session(rn: &Arc<Runner>, job: &SessionJob) {
 
 /// The protocol layer, the rules, then the skill (`${output_dir}` in it put in), from the packs
 /// of the run's project.
-fn task_message_of(job: &SessionJob, packs: &dyn crate::kernel::host::Packs, output_dir: Option<&str>) -> String {
+fn task_message_of(job: &SessionJob, packs: &dyn crate::kernel::host::Packs, output_dir: Option<&str>, data_dir: Option<&str>) -> String {
     let mut rules = vec![];
     for (name, pinned) in &job.rules {
         match packs.rule(name) {
@@ -387,7 +388,11 @@ fn task_message_of(job: &SessionJob, packs: &dyn crate::kernel::host::Packs, out
                 if job.skill_digest.as_ref().is_some_and(|d| *d != digest) {
                     tracing::warn!(skill = name, "the skill changed since the station was entered");
                 }
-                skill = Some((name.clone(), skill_with_output_dir(&body, output_dir)));
+                let body = skill_with_output_dir(&body, output_dir);
+                skill = Some((name.clone(), match data_dir {
+                    Some(d) => body.replace("${data_dir}", d),
+                    None => body,
+                }));
             }
             None => tracing::warn!(skill = name, "skill not found"),
         }

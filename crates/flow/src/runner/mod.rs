@@ -34,6 +34,7 @@ pub mod host;
 pub mod testing;
 
 mod approvals;
+mod archive;
 mod checks;
 mod dispatch;
 mod files;
@@ -76,7 +77,7 @@ pub use hooks::{HookTransport, QUEUE_KEPT};
 pub use state::{Binding, TaskKey};
 pub use testing::{ScriptedHost, Turn};
 pub use hooks::redact_url;
-pub use tools::{tool_specs, FlowTools, ToolReply, TOOL_PROPOSE, TOOL_STATE, TOOL_SUBMIT};
+pub use tools::{tool_specs, FlowTools, ToolReply, TOOL_COMMAND, TOOL_PROPOSE, TOOL_STATE, TOOL_SUBMIT};
 pub use trust::withheld;
 pub use turns::{NUDGE, NUDGE_STRUCTURED};
 pub use worktree::{info as worktree_info, EndError};
@@ -461,6 +462,9 @@ impl CatalogPacks {
 }
 
 impl Packs for CatalogPacks {
+    fn bundle_file(&self, bundle: &str, rel: &str) -> Option<String> {
+        self.inner().bundle_file(bundle, rel)
+    }
     fn flows(&self) -> Vec<String> {
         self.inner().flows()
     }

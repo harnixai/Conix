@@ -16,7 +16,7 @@ use super::def::{Assert, FlowDef, Work};
 use super::run::{RunRecord, TaskStatus};
 
 /// The roots a reference may start with.
-pub const ROOTS: &[&str] = &["run", "subject", "inputs", "stations", "item", "task", "workspace", "output_dir"];
+pub const ROOTS: &[&str] = &["run", "subject", "inputs", "stations", "item", "task", "workspace", "output_dir", "data_dir"];
 
 /// The directory a run works in under the application's workspaces (`<root>/<run>`, the run's id
 /// made safe as a name): `${workspace}`.
@@ -79,6 +79,7 @@ pub fn context_in(run: &RunRecord, item: Option<&Value>, task: Option<&str>, wor
         "task": task.map_or(Value::Null, |t| Value::String(t.into())),
         "workspace": workspace.map_or(Value::Null, |w| Value::String(w.into())),
         "output_dir": run.output_dir.as_deref().map_or(Value::Null, |d| Value::String(d.into())),
+        "data_dir": run.data_dir.as_deref().map_or(Value::Null, |d| Value::String(d.into())),
     })
 }
 

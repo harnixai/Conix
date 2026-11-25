@@ -240,7 +240,7 @@ impl<'e> Txn<'e> {
                     match apply_inputs(&def, &inputs) {
                         Err(e) => Err(e),
                         Ok(inputs) => {
-                            let id = self.eng.store.alloc_id(&flow).await?;
+                            let id = self.eng.store.alloc_id(&super::engine::id_base(&flow)).await?;
                             let title = format!("{} / {}", parent.run, parent.task);
                             let parts = super::parts::pin(&def, packs.as_ref());
                             let mut child = new_record(
@@ -260,6 +260,7 @@ impl<'e> Txn<'e> {
                             child.project_root = up.project_root.clone();
                             child.workspace = up.workspace;
                             child.output_dir = up.output_dir.clone();
+                            child.data_dir = up.data_dir.clone();
                             child.worktree = up.worktree.clone();
                             Ok(child)
                         }
@@ -361,6 +362,7 @@ pub(crate) fn new_record(
         project_root: None,
         workspace: Workspace::Scratch,
         output_dir: None,
+        data_dir: None,
         worktree: None,
         governed: false,
         def,

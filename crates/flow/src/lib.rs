@@ -49,6 +49,7 @@ pub const RUN_FORMAT: u32 = 1;
 
 #[cfg(feature = "runner")]
 pub mod author;
+pub mod bundle;
 pub mod dryrun;
 pub mod kernel;
 pub mod packs;

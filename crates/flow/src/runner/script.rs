@@ -49,6 +49,20 @@ const PRELUDE: &str = r#"(() => {
       validate: (value, schema) => JSON.parse(n.validate(JSON.stringify(value === undefined ? null : value), JSON.stringify(schema))),
     }),
     log: (...a) => n.log(a.map((x) => (typeof x === "string" ? x : JSON.stringify(x))).join(" ")),
+    ...(n.write ? {
+      write: Object.freeze({
+        text: (p, s) => n.write(String(p), String(s), "text"),
+        json: (p, v) => n.write(String(p), JSON.stringify(v, null, 2) + "\n", "text"),
+        yaml: (p, v) => n.write(String(p), JSON.stringify(v), "yaml"),
+        jsonl: (p, rows) => n.write(String(p), rows.map((r) => JSON.stringify(r)).join("\n") + (rows.length ? "\n" : ""), "text"),
+      }),
+      append: Object.freeze({
+        text: (p, s) => n.append(String(p), String(s)),
+        jsonl: (p, row) => n.append(String(p), JSON.stringify(row) + "\n"),
+      }),
+      remove: (p) => n.remove(String(p)),
+      print: (...a) => n.print(a.map((x) => (typeof x === "string" ? x : JSON.stringify(x, null, 2))).join(" ")),
+    } : {}),
   });
 })()"#;
 
@@ -56,6 +70,8 @@ const PRELUDE: &str = r#"(() => {
 #[derive(Default)]
 pub(crate) struct Trace {
     pub log: String,
+    /// What a command printed (`flow.print`).
+    pub out: String,
     /// The first path the script tried to read out of bounds: the gate is an `error` even if the
     /// script caught it.
     pub out_of_bounds: Option<String>,
@@ -201,7 +217,48 @@ fn message(ctx: &Ctx<'_>, e: rquickjs::Error) -> String {
 }
 
 fn install<'js>(ctx: &Ctx<'js>, reader: Arc<Reader>, trace: Arc<Mutex<Trace>>) -> rquickjs::Result<JsValue<'js>> {
+    install_with(ctx, reader, trace, None)
+}
+
+fn install_with<'js>(ctx: &Ctx<'js>, reader: Arc<Reader>, trace: Arc<Mutex<Trace>>, writer: Option<Arc<Writer>>) -> rquickjs::Result<JsValue<'js>> {
     let n = Object::new(ctx.clone())?;
+    if let Some(w) = writer {
+        let thrown = |ctx: &Ctx<'_>, e: String| rquickjs::Exception::throw_message(ctx, &e);
+        {
+            let w = w.clone();
+            n.set("write", Function::new(ctx.clone(), move |ctx: Ctx<'_>, p: String, text: String, as_: String| -> rquickjs::Result<()> {
+                let text = if as_ == "yaml" {
+                    let v: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
+                    serde_yaml::to_string(&v).map_err(|e| thrown(&ctx, e.to_string()))?
+                } else {
+                    text
+                };
+                w.write(&p, &text, false).map_err(|e| thrown(&ctx, e))
+            })?)?;
+        }
+        {
+            let w = w.clone();
+            n.set("append", Function::new(ctx.clone(), move |ctx: Ctx<'_>, p: String, text: String| -> rquickjs::Result<()> {
+                w.write(&p, &text, true).map_err(|e| thrown(&ctx, e))
+            })?)?;
+        }
+        {
+            let w = w.clone();
+            n.set("remove", Function::new(ctx.clone(), move |ctx: Ctx<'_>, p: String| -> rquickjs::Result<bool> {
+                w.remove(&p).map_err(|e| thrown(&ctx, e))
+            })?)?;
+        }
+        {
+            let trace = trace.clone();
+            n.set("print", Function::new(ctx.clone(), move |line: String| {
+                let mut t = trace.lock().unwrap();
+                if t.out.len() < MAX_RESULT {
+                    t.out.push_str(&line);
+                    t.out.push('\n');
+                }
+            })?)?;
+        }
+    }
     // A path out of bounds throws, and is remembered: the gate is an error even if caught.
     let oob = {
         let trace = trace.clone();
@@ -276,6 +333,173 @@ fn install<'js>(ctx: &Ctx<'js>, reader: Arc<Reader>, trace: Arc<Mutex<Trace>>) -
     }
     ctx.globals().set("__flow", n)?;
     ctx.eval::<JsValue, _>(PRELUDE)
+}
+
+// ── a bundle's commands (in Conix: docs/design/layout.md §2) ─────────────────
+
+/// Where a command may write: paths relative to the run's workspace, each inside one of `roots`
+/// (the run's own directory and its bundle's data directory), never inside `denied` (the run's
+/// process directory). Links are followed before judging, as far as the path exists.
+pub(crate) struct Writer {
+    pub workspace: std::path::PathBuf,
+    pub roots: Vec<std::path::PathBuf>,
+    pub denied: Vec<std::path::PathBuf>,
+    /// What was written, relative to the workspace, in order: told back to the session.
+    pub written: Mutex<Vec<String>>,
+}
+
+impl Writer {
+    fn target(&self, rel: &str) -> Result<std::path::PathBuf, String> {
+        use std::path::Component;
+        let p = std::path::Path::new(rel);
+        if p.components().any(|c| matches!(c, Component::ParentDir)) {
+            return Err(format!("{rel}: `..` is not written through"));
+        }
+        let full = if p.is_absolute() { p.to_path_buf() } else { self.workspace.join(p) };
+        // The deepest part that exists, resolved: a link there cannot lead the write out.
+        let mut existing = full.clone();
+        let mut rest = vec![];
+        while !existing.exists() {
+            let Some(name) = existing.file_name().map(|n| n.to_os_string()) else { break };
+            rest.push(name);
+            if !existing.pop() {
+                break;
+            }
+        }
+        let mut real = existing.canonicalize().map_err(|e| format!("{rel}: {e}"))?;
+        for n in rest.iter().rev() {
+            real.push(n);
+        }
+        let canon = |r: &std::path::PathBuf| r.canonicalize().unwrap_or_else(|_| r.clone());
+        if self.denied.iter().map(canon).any(|d| real.starts_with(&d)) {
+            return Err(format!("{rel}: the run's process directory is the flow's, not the command's"));
+        }
+        if !self.roots.iter().map(canon).any(|r| real.starts_with(&r)) {
+            return Err(format!(
+                "{rel}: a command writes only in the run's directory and its flow's data directory ({})",
+                self.roots.iter().map(|r| r.strip_prefix(&self.workspace).unwrap_or(r).display().to_string()).collect::<Vec<_>>().join(", ")
+            ));
+        }
+        Ok(real)
+    }
+
+    fn write(&self, rel: &str, text: &str, append: bool) -> Result<(), String> {
+        use std::io::Write;
+        let path = self.target(rel)?;
+        if let Some(d) = path.parent() {
+            std::fs::create_dir_all(d).map_err(|e| format!("{rel}: {e}"))?;
+        }
+        let mut f = std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .append(append)
+            .truncate(!append)
+            .open(&path)
+            .map_err(|e| format!("{rel}: {e}"))?;
+        f.write_all(text.as_bytes()).map_err(|e| format!("{rel}: {e}"))?;
+        self.written.lock().unwrap().push(rel.to_string());
+        Ok(())
+    }
+
+    fn remove(&self, rel: &str) -> Result<bool, String> {
+        let path = self.target(rel)?;
+        match std::fs::remove_file(&path) {
+            Ok(()) => {
+                self.written.lock().unwrap().push(rel.to_string());
+                Ok(true)
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            Err(e) => Err(format!("{rel}: {e}")),
+        }
+    }
+}
+
+/// What a command answered: what it printed and returned, or why it failed; the files it wrote.
+pub(crate) struct CommandOutcome {
+    pub ok: bool,
+    pub text: String,
+    pub written: Vec<String>,
+}
+
+/// Run a bundle's command: `source` an ES module whose default export is `function (input, flow)`,
+/// `flow` as a gate script's plus `write`, `append`, `remove` and `print`. What it returns (a string,
+/// or a value shown as JSON) follows what it printed; a throw is a failure.
+pub(crate) async fn command(source: String, input: Value, reader: Arc<Reader>, writer: Arc<Writer>, timeout: Duration) -> CommandOutcome {
+    let trace = Arc::new(Mutex::new(Trace::default()));
+    let (t, w) = (trace.clone(), writer.clone());
+    let deadline = Instant::now() + timeout;
+    let joined = tokio::time::timeout(
+        timeout + ABANDON_AFTER,
+        tokio::task::spawn_blocking(move || run_command(&source, &input, reader, w, t, deadline, timeout)),
+    )
+    .await;
+    let result = match joined {
+        Ok(Ok(r)) => r,
+        Ok(Err(e)) => Err(format!("the command did not finish: {e}")),
+        Err(_) => Err(format!("the command ran longer than {}s and did not stop", timeout.as_secs())),
+    };
+    let trace = std::mem::take(&mut *trace.lock().unwrap());
+    let written = std::mem::take(&mut *writer.written.lock().unwrap());
+    let mut text = trace.out;
+    let ok = match result {
+        Ok(v) => {
+            match v {
+                Value::Null => {}
+                Value::String(s) => text.push_str(&s),
+                other => text.push_str(&serde_json::to_string_pretty(&other).unwrap_or_default()),
+            }
+            if let Some(p) = &trace.out_of_bounds {
+                text.push_str(&format!("\n(read out of bounds: {p})"));
+            }
+            true
+        }
+        Err(e) => {
+            text.push_str(&e);
+            false
+        }
+    };
+    CommandOutcome { ok, text: text.trim_end().to_string(), written }
+}
+
+fn run_command(
+    source: &str,
+    input: &Value,
+    reader: Arc<Reader>,
+    writer: Arc<Writer>,
+    trace: Arc<Mutex<Trace>>,
+    deadline: Instant,
+    timeout: Duration,
+) -> Result<Value, String> {
+    let runtime = rquickjs::Runtime::new().map_err(|e| format!("no script runtime: {e}"))?;
+    runtime.set_memory_limit(MEMORY_LIMIT);
+    runtime.set_interrupt_handler(Some(Box::new(move || Instant::now() >= deadline)));
+    let context = rquickjs::Context::full(&runtime).map_err(|e| format!("no script context: {e}"))?;
+    context.with(|ctx| {
+        let fail = |e: rquickjs::Error| {
+            if Instant::now() >= deadline {
+                format!("the command ran longer than {}s", timeout.as_secs())
+            } else {
+                message(&ctx, e)
+            }
+        };
+        let flow = install_with(&ctx, reader, trace, Some(writer)).map_err(fail)?;
+        let main: Function = evaluate(&ctx, source).map_err(fail)?;
+        let input = ctx.json_parse(input.to_string()).map_err(fail)?;
+        let got: JsValue = main.call((input, flow)).map_err(fail)?;
+        let got = match got.as_promise() {
+            Some(p) => p.finish::<JsValue>().map_err(fail)?,
+            None => got,
+        };
+        if got.is_undefined() || got.is_null() {
+            return Ok(Value::Null);
+        }
+        let text = ctx.json_stringify(got).map_err(fail)?.map(|s| s.to_string()).transpose().map_err(fail)?;
+        match text {
+            Some(t) if t.len() > MAX_RESULT => Err(format!("the command's answer is larger than {} KiB", MAX_RESULT / 1024)),
+            Some(t) => Ok(serde_json::from_str(&t).unwrap_or(Value::String(t))),
+            None => Ok(Value::Null),
+        }
+    })
 }
 
 #[cfg(test)]

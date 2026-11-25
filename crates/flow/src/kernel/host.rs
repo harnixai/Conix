@@ -167,17 +167,35 @@ pub trait Packs: Send + Sync {
     /// A policy, parsed; `None` when there is none or it does not parse or is named otherwise.
     fn policy(&self, name: &str) -> Option<PolicyDef> {
         let (text, _) = self.part(PartKind::Policy, name)?;
-        super::def::parse_part::<PolicyDef>(&text, "policy").ok().filter(|p| p.name == name)
+        let mut p = super::def::parse_part::<PolicyDef>(&text, "policy").ok().filter(|p| crate::bundle::names_match(&p.name, name))?;
+        p.name = name.to_string();
+        Some(p)
     }
     /// A gate, parsed (as [`Packs::policy`]).
     fn gate(&self, name: &str) -> Option<GateDef> {
         let (text, _) = self.part(PartKind::Gate, name)?;
-        super::def::parse_part::<GateDef>(&text, "gate").ok().filter(|g| g.name == name)
+        let mut g = super::def::parse_part::<GateDef>(&text, "gate").ok().filter(|g| crate::bundle::names_match(&g.name, name))?;
+        g.name = name.to_string();
+        // A bundle's gate runs the bundle's script (Conix: docs/design/layout.md §2).
+        if let (Some((bundle, _)), Some(script)) = (crate::bundle::split(name), g.script.as_mut()) {
+            *script = crate::bundle::in_bundle(bundle, script);
+        }
+        Some(g)
     }
     /// A hook, parsed (as [`Packs::policy`]).
     fn hook(&self, name: &str) -> Option<HookDef> {
         let (text, _) = self.part(PartKind::Hook, name)?;
-        super::def::parse_part::<HookDef>(&text, "hook").ok().filter(|h| h.name == name)
+        let mut h = super::def::parse_part::<HookDef>(&text, "hook").ok().filter(|h| crate::bundle::names_match(&h.name, name))?;
+        h.name = name.to_string();
+        // A bundle's hook hears only the bundle's runs: the flows it names, or all of them.
+        if let Some((bundle, _)) = crate::bundle::split(name) {
+            if h.flows.is_empty() {
+                h.flows = vec![format!("{bundle}/*"), bundle.to_string()];
+            } else {
+                h.flows = h.flows.iter().map(|f| crate::bundle::flow_name(bundle, f)).collect();
+            }
+        }
+        Some(h)
     }
     /// Every hook that parses.
     fn hooks(&self) -> Vec<HookDef> {
@@ -185,6 +203,13 @@ pub trait Packs: Send + Sync {
             .iter()
             .filter_map(|n| self.hook(n))
             .collect()
+    }
+
+    /// A file of a bundle by its path in it (`templates/brief.md`, `commands/xspec.js`), from the
+    /// bundle of that name these packs offer (Conix: docs/design/layout.md §2). `None` when there
+    /// is none, or these packs have no bundles.
+    fn bundle_file(&self, _bundle: &str, _rel: &str) -> Option<String> {
+        None
     }
 
     // ── writing (xops-02, xops-04) ───────────────────────────────────────────

@@ -92,7 +92,12 @@ pub fn validate(def: &FlowDef, packs: &dyn Packs) -> Vec<Problem> {
         c.flow(why);
         return c.out;
     }
-    if !is_name(&def.name, &[]) {
+    // A bundle's flow is named `<bundle>/<flow>` (in Conix: docs/design/layout.md §2).
+    let named = match crate::bundle::split(&def.name) {
+        Some((b, f)) => def.bundle.as_deref() == Some(b) && is_name(b, &[]) && is_name(f, &[]),
+        None => is_name(&def.name, &[]),
+    };
+    if !named {
         c.flow(format!("name {:?} must match [a-z][a-z0-9-]*", def.name));
     } else if def.name.starts_with(DRY_PREFIX) {
         c.flow(format!(
@@ -151,6 +156,37 @@ pub fn validate(def: &FlowDef, packs: &dyn Packs) -> Vec<Problem> {
     if let Some(t) = &def.output_dir {
         for m in super::output::template_problems(t, &def.inputs) {
             c.flow(format!("output_dir {t:?}: {m}"));
+        }
+    }
+    // In Conix (docs/design/layout.md §3): a bundle's flow works in the run's own directory.
+    if def.bundle.is_some() && def.output_dir.is_some() {
+        c.flow("output_dir: a bundle's flow works in the run's own directory; say where it is archived with archive.name".to_string());
+    }
+    if let Some(a) = &def.archive {
+        if let Some(t) = &a.name {
+            for m in super::output::template_problems(t, &def.inputs) {
+                c.flow(format!("archive.name {t:?}: {m}"));
+            }
+        }
+        for k in &a.keep {
+            if !relative_inside(k) {
+                c.flow(format!("archive.keep {k:?}: a path in the run's directory, relative, without .."));
+            }
+        }
+    }
+    for s in &def.stations {
+        for d in &s.deliverables {
+            if !relative_inside(&d.path) {
+                c.at(&s.id, format!("deliverable {:?}: a path in the run's directory, relative, without ..", d.path));
+            }
+            if let (Some(t), Some(b)) = (&d.template, &def.bundle) {
+                if c.packs.bundle_file(b, &format!("templates/{t}")).is_none() {
+                    c.at(&s.id, format!("deliverable {:?}: no template {t} in the bundle's templates/", d.path));
+                }
+            }
+            if d.template.is_some() && def.bundle.is_none() {
+                c.at(&s.id, format!("deliverable {:?}: a template is a bundle's (templates/); this flow is in none", d.path));
+            }
         }
     }
     if def.workspace == Some(super::run::Workspace::Scratch) {
@@ -1022,6 +1058,10 @@ pub fn permission_problems(p: &Permission) -> Vec<String> {
 
 /// A part's name, as a pack can store it: `[a-z][a-z0-9-]*` (skills may have `_`).
 pub fn is_part_name(kind: PartKind, name: &str) -> bool {
+    // A bundle's part: `<bundle>/<name>`, each a name (Conix: docs/design/layout.md §2).
+    if let Some((bundle, local)) = crate::bundle::split(name) {
+        return is_name(bundle, &[]) && (crate::bundle::is_made(kind, local) || is_part_name(kind, local));
+    }
     match kind {
         PartKind::Skill => is_skill_name(name),
         _ => is_name(name, &[]),
@@ -1036,7 +1076,7 @@ pub fn part_problems(kind: PartKind, name: &str, text: &str, packs: &dyn Packs) 
         out.push(format!("name {name:?} must match [a-z][a-z0-9-]*"));
     }
     let named = |declared: &str, out: &mut Vec<String>| {
-        if declared != name {
+        if !crate::bundle::names_match(declared, name) {
             out.push(format!("it declares the name {declared:?}, but is saved as {name:?}"));
         }
     };
@@ -1304,4 +1344,9 @@ fn hook_problems(h: &HookDef) -> Vec<String> {
         out.push("secret_env is empty".to_string());
     }
     out
+}
+
+/// A path relative to a directory that stays in it: not absolute, no `..`, not empty.
+fn relative_inside(p: &str) -> bool {
+    !p.trim().is_empty() && !p.starts_with('/') && !p.starts_with('\\') && !p.split(['/', '\\']).any(|s| s == "..")
 }

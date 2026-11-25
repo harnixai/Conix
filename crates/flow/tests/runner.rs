@@ -112,7 +112,7 @@ async fn the_example_pack_runs_from_start_to_finish_in_the_main_session() {
     assert_eq!(main.delivery, Delivery::FlowSubmit);
     assert!(main.title.as_deref().unwrap().contains(&run), "{:?}", main.title);
     assert!(main.asks.iter().any(|a| a == "Write") && main.asks.iter().any(|a| a == "Bash"), "{:?}", main.asks);
-    assert_eq!(main.tools.iter().map(|t| t.name.as_str()).collect::<Vec<_>>(), ["flow_state", TOOL_SUBMIT, "flow_propose"]);
+    assert_eq!(main.tools.iter().map(|t| t.name.as_str()).collect::<Vec<_>>(), ["flow_state", TOOL_SUBMIT, "flow_propose", "flow_command"]);
     let main_id = host.session_of(&main.key).unwrap();
     assert_eq!(rec.main_session(), Some(main_id.as_str()));
     // The task's message: the protocol layer, the rule, the skill.

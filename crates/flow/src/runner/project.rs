@@ -135,6 +135,11 @@ pub(crate) fn prepare(engine: &Engine, input: &mut CreateIn, worktree: Option<&W
     let Some((def, _)) = engine.packs_for(input.project_root.as_deref()).flow(&input.flow) else {
         return Ok(None);
     };
+    // A bundle's flow works in the run's own directory, known once the run has its id (the kernel
+    // sets it; in Conix: docs/design/layout.md §3).
+    if def.bundle.is_some() && engine.layout().is_some_and(|l| l.artifacts.is_some()) {
+        return Ok(None);
+    }
     let template = input
         .output_dir
         .clone()
@@ -292,6 +297,17 @@ fn inside(real_base: &Path, dir: &Path) -> Result<(), String> {
 /// is not written in, nor a `.gitignore` that is a link (a cloned repository may point either
 /// anywhere): the file is opened without following links.
 pub(crate) fn ensure_gitignore(project: &Path, layout: &ProjectLayout) -> std::io::Result<()> {
+    // With a directory of artifacts the runs are in it, and only its `runs/` is ignored (in Conix:
+    // docs/design/layout.md §1); the data directory is not written in.
+    if let Some(a) = &layout.artifacts {
+        let dir = project.join(a);
+        std::fs::create_dir_all(&dir)?;
+        let rel = format!("{}/{}/", a.trim_end_matches('/'), crate::kernel::layout::ARTIFACT_RUNS);
+        if super::git::ignored(project, &rel) == Some(true) {
+            return Ok(());
+        }
+        return append_line(&dir.join(".gitignore"), &format!("{}/", crate::kernel::layout::ARTIFACT_RUNS));
+    }
     let dir = layout.data_dir(project);
     std::fs::create_dir_all(&dir)?;
     let own_dir = dir.symlink_metadata().is_ok_and(|m| m.is_dir());
@@ -347,7 +363,11 @@ pub(crate) fn process_dir(engine: &Engine, rec: &RunRecord) -> Option<PathBuf> {
         Some(root) => PathBuf::from(root),
         None => engine.workspace(&rec.id)?,
     };
-    Some(workspace_of(&engine.layout()?.runs_dir(&base), &rec.id))
+    let layout = engine.layout()?;
+    if let Some(dir) = layout.run_dir(&base, &rec.id) {
+        return Some(dir.join(crate::kernel::layout::PROCESS_DIR));
+    }
+    Some(workspace_of(&layout.runs_dir(&base), &rec.id))
 }
 
 /// A station's directory in the process directory.
@@ -374,6 +394,7 @@ pub(crate) fn project_run(engine: &Engine, rec: &RunRecord) {
     if let Err(e) = write_projection(&dir, rec) {
         tracing::warn!(run = rec.id, dir = %dir.display(), error = %e, "the run's process directory not written");
     }
+    super::archive::archive(engine, rec, &dir);
 }
 
 fn write_projection(dir: &Path, rec: &RunRecord) -> std::io::Result<()> {
@@ -464,6 +485,30 @@ fn write_if_changed(path: &Path, text: &str) -> std::io::Result<()> {
         return Ok(());
     }
     std::fs::write(path, text)
+}
+
+/// Put a station's deliverables' skeletons (its bundle's `templates/`) into the run's directory,
+/// each where no file is yet: a rework keeps what was written. A skeleton without the mark gets it
+/// at the top, so a station is not met while one is left as it was.
+pub(crate) fn place_templates(rec: &RunRecord, packs: &dyn crate::kernel::host::Packs, station: &str) {
+    let (Some(bundle), Some(dir)) = (&rec.def.bundle, &rec.output_dir) else { return };
+    let Some(st) = rec.def.stations.iter().find(|s| s.id == station) else { return };
+    for d in &st.deliverables {
+        let Some(t) = &d.template else { continue };
+        let dest = Path::new(dir).join(&d.path);
+        if dest.exists() {
+            continue;
+        }
+        let Some(text) = packs.bundle_file(bundle, &format!("templates/{t}")) else {
+            tracing::warn!(run = rec.id, template = t, "the deliverable's template is not in the bundle");
+            continue;
+        };
+        let text = if text.contains(crate::bundle::TEMPLATE_MARK) { text } else { format!("{}\n{text}", crate::bundle::TEMPLATE_MARK) };
+        let made = dest.parent().map_or(Ok(()), std::fs::create_dir_all).and_then(|_| std::fs::write(&dest, text));
+        if let Err(e) = made {
+            tracing::warn!(run = rec.id, path = %dest.display(), error = %e, "the deliverable's template not put in place");
+        }
+    }
 }
 
 #[cfg(test)]

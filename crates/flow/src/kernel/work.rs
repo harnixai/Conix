@@ -95,6 +95,7 @@ pub(crate) fn task_work(
         ),
         _ => (None, None, None),
     };
+    let commands: Vec<String> = rec.parts.commands.keys().cloned().collect();
     let protocol = match (&spec.executor, st) {
         (Executor::Session { .. } | Executor::Agent { .. }, Some(st)) => Some(protocol::render(&protocol::TaskContext {
             def: &rec.def,
@@ -112,6 +113,8 @@ pub(crate) fn task_work(
             guard: rec.def.guard,
             root: workspace.as_ref().and_then(|p| p.to_str()),
             output_dir: rec.output_dir.as_deref(),
+            data_dir: rec.data_dir.as_deref(),
+            commands: &commands,
             reworked: rec.stations.get(sid).and_then(|s| s.reworked.as_ref()),
         })),
         _ => None,

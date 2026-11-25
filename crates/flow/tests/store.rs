@@ -33,6 +33,7 @@ fn record(id: &str, flow: &str, subject: &str, rev: u64, at: u64) -> RunRecord {
         project_root: None,
         workspace: Workspace::Scratch,
         output_dir: None,
+        data_dir: None,
         trigger: Trigger::manual(Actor::new("user", "u")),
         shown_in: None,
         worktree: None,

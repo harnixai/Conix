@@ -899,7 +899,11 @@ impl HookDef {
                 Some(prefix) => kind.starts_with(prefix),
                 None => o == kind,
             });
-        on && (self.flows.is_empty() || self.flows.iter().any(|f| f == flow))
+        on && (self.flows.is_empty()
+            || self.flows.iter().any(|f| match f.strip_suffix("/*") {
+                Some(bundle) => flow.strip_prefix(bundle).is_some_and(|r| r.starts_with('/')),
+                None => f == flow,
+            }))
     }
 }
 
@@ -919,11 +923,14 @@ pub struct Pinned {
     /// not change how its gates judge.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub scripts: BTreeMap<String, String>,
+    /// Command name → source, for a bundle's commands (in Conix; `flow_command`): pinned as scripts.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub commands: BTreeMap<String, String>,
 }
 
 impl Pinned {
     pub fn is_empty(&self) -> bool {
-        self.policies.is_empty() && self.gates.is_empty() && self.scripts.is_empty()
+        self.policies.is_empty() && self.gates.is_empty() && self.scripts.is_empty() && self.commands.is_empty()
     }
 }
 
@@ -968,6 +975,19 @@ pub fn pin(def: &FlowDef, packs: &dyn super::host::Packs) -> Pinned {
                     }
                     out.gates.insert(gate.clone(), g);
                 }
+            }
+        }
+    }
+    // A bundle's commands, as its `bundle.yaml` lists them.
+    if let Some(b) = &def.bundle {
+        let listed = packs
+            .bundle_file(b, crate::bundle::BUNDLE_FILE)
+            .and_then(|t| serde_yaml::from_str::<crate::bundle::BundleMeta>(&t).ok())
+            .map(|m| m.commands)
+            .unwrap_or_default();
+        for c in listed {
+            if let Some(src) = packs.bundle_file(b, &format!("commands/{c}.js")) {
+                out.commands.insert(c, src);
             }
         }
     }

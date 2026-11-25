@@ -159,6 +159,10 @@ pub struct TaskContext<'a> {
     pub root: Option<&'a str>,
     /// Where the run's deliverables go, resolved.
     pub output_dir: Option<&'a str>,
+    /// The run's bundle's data directory (in Conix), when it is a bundle's.
+    pub data_dir: Option<&'a str>,
+    /// The commands of the run's bundle, by name (in Conix): run with `flow_command`.
+    pub commands: &'a [String],
     /// Why this round started over, when a rework started it.
     pub reworked: Option<&'a super::run::ReworkRec>,
 }
@@ -337,6 +341,32 @@ pub fn render(t: &TaskContext) -> String {
              output directory (it exists).\n"
         ));
     }
+    if !st.deliverables.is_empty() {
+        s.push_str("- This station hands in these files, in the run's output directory:\n");
+        for d in &st.deliverables {
+            let what = if d.description.is_empty() { String::new() } else { format!(" — {}", d.description) };
+            let from = if d.template.is_some() {
+                format!(" (it starts from a skeleton already there: write over it, its `{}` mark included)", crate::bundle::TEMPLATE_MARK)
+            } else {
+                String::new()
+            };
+            s.push_str(&format!("  - `{}`{what}{from}\n", d.path));
+        }
+    }
+    if let Some(dir) = t.data_dir {
+        s.push_str(&format!(
+            "- What lasts beyond this run — the flow's own data, kept in the project — is in `{dir}`: \
+             read it, and change it only with the flow's commands.\n"
+        ));
+    }
+    if !t.commands.is_empty() {
+        s.push_str(&format!(
+            "- The flow's commands: {}. Run one with `flow_command {{command, args}}` (`args` a list of \
+             strings, as on a command line; `help` lists what it does). Structured data the flow keeps \
+             (records, ledgers, deltas) is written with them, not by hand.\n",
+            t.commands.iter().map(|c| format!("`{c}`")).collect::<Vec<_>>().join(", ")
+        ));
+    }
     s.push_str(
         "- No one answers questions while the task works: decide for yourself, and say in what you \
          hand in what you assumed. A person looks at the work where the flow asks them to.\n",
@@ -474,6 +504,8 @@ mod tests {
             guard: Guard::Strict,
             root: None,
             output_dir: None,
+            data_dir: None,
+            commands: &[],
             reworked: None,
         }
     }

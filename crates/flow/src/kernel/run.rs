@@ -680,6 +680,10 @@ pub struct RunRecord {
     /// directory), resolved from its template when the run was started; `${output_dir}`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_dir: Option<String>,
+    /// Its bundle's data directory (in Conix: docs/design/layout.md §3), absolute: where the
+    /// bundle's commands keep what lasts beyond a run, and its archive; `${data_dir}`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data_dir: Option<String>,
     /// How it came to be started.
     #[serde(default)]
     pub trigger: Trigger,

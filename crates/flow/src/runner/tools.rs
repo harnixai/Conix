@@ -6,6 +6,7 @@
 //! | `flow_state` | the run as far as this task is concerned: the station, what is still unmet |
 //! | `flow_submit {output}` | hands the output in under the session's claim; problems come back to fix |
 //! | `flow_propose {kind, to?, reason}` | writes a `proposal` note; a person accepts it or not |
+//! | `flow_command {command, args}` | runs a command of the run's bundle (in Conix): it writes only the run's directory and the bundle's data |
 
 use std::sync::Weak;
 
@@ -21,6 +22,9 @@ use crate::kernel::FlowError;
 pub const TOOL_STATE: &str = "flow_state";
 pub const TOOL_SUBMIT: &str = "flow_submit";
 pub const TOOL_PROPOSE: &str = "flow_propose";
+pub const TOOL_COMMAND: &str = "flow_command";
+/// How long a bundle's command may run.
+const COMMAND_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// What a tool answers: text for the model, and whether it is an error.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -71,6 +75,7 @@ impl FlowTools {
             TOOL_STATE => state(&rn, &b).await,
             TOOL_SUBMIT => submit(&rn, &b, session, input).await,
             TOOL_PROPOSE => propose(&rn, &b, session, input).await,
+            TOOL_COMMAND => command(&rn, &b, input).await,
             other => ToolReply::error(format!("no flow tool `{other}`")),
         }
     }
@@ -121,11 +126,82 @@ pub fn tool_specs() -> Vec<ToolSpec> {
             }),
             read_only: true,
         },
+        ToolSpec {
+            name: TOOL_COMMAND.into(),
+            description: "Run one of this flow's own commands (the flow protocol names them), as on a command \
+                 line: `args` a list of strings (`[\"help\"]` says what it does). A command reads the project \
+                 and writes only this run's directory and the flow's data directory; structured data the \
+                 flow keeps is written with them."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["command"],
+                "properties": {
+                    "command": {"type": "string"},
+                    "args": {"type": "array", "items": {"type": "string"}}
+                }
+            }),
+            // It writes, but only where the run keeps its own: no person is asked.
+            read_only: false,
+        },
     ]
 }
 
 fn pretty(v: &Value) -> String {
     serde_json::to_string_pretty(v).unwrap_or_else(|_| v.to_string())
+}
+
+/// Run one of the run's bundle's commands (pinned when the run started) for the task's session.
+async fn command(rn: &Runner, b: &Binding, input: Value) -> ToolReply {
+    let engine = rn.engine();
+    let rec = match engine.record(&b.run).await {
+        Ok(r) => r,
+        Err(e) => return ToolReply::error(e.to_string()),
+    };
+    let have = || rec.parts.commands.keys().map(|c| format!("`{c}`")).collect::<Vec<_>>().join(", ");
+    let Some(name) = input.get("command").and_then(Value::as_str).map(str::trim) else {
+        return ToolReply::error(format!("say which command: {{command, args}}; this flow has {}", have()));
+    };
+    let Some(source) = rec.parts.commands.get(name) else {
+        return ToolReply::error(if rec.parts.commands.is_empty() {
+            format!("this flow has no commands (no `{name}`)")
+        } else {
+            format!("no command `{name}`; this flow has {}", have())
+        });
+    };
+    let args: Vec<String> = match input.get("args") {
+        None | Some(Value::Null) => vec![],
+        Some(Value::Array(a)) => a.iter().map(|v| v.as_str().map(String::from).unwrap_or_else(|| v.to_string())).collect(),
+        Some(Value::String(s)) => s.split_whitespace().map(String::from).collect(),
+        Some(other) => return ToolReply::error(format!("args is a list of strings, not {other}")),
+    };
+    let Some(ws) = engine.workspace_for(&rec) else {
+        return ToolReply::error("the run has no place it works in");
+    };
+    let reader = match super::files::Reader::new(&ws) {
+        Ok(r) => r,
+        Err(e) => return ToolReply::error(e.0),
+    };
+    let roots: Vec<std::path::PathBuf> = [&rec.output_dir, &rec.data_dir].into_iter().flatten().map(std::path::PathBuf::from).collect();
+    let denied: Vec<std::path::PathBuf> = super::project::process_dir(engine, &rec).into_iter().collect();
+    let rel = |p: &Option<String>| -> Value {
+        p.as_deref().map_or(Value::Null, |p| {
+            Value::String(std::path::Path::new(p).strip_prefix(&ws).map(|r| r.to_string_lossy().into_owned()).unwrap_or_else(|_| p.to_string()))
+        })
+    };
+    let given = json!({
+        "command": name, "args": args, "run": rec.id, "flow": rec.def.name, "station": b.station, "task": b.task,
+        "subject": rec.subject, "inputs": rec.inputs, "output_dir": rel(&rec.output_dir), "data_dir": rel(&rec.data_dir),
+    });
+    let writer = super::script::Writer { workspace: ws.clone(), roots, denied, written: Default::default() };
+    let out = super::script::command(source.clone(), given, std::sync::Arc::new(reader), std::sync::Arc::new(writer), COMMAND_TIMEOUT).await;
+    let mut text = out.text;
+    if !out.written.is_empty() {
+        let mut w = out.written.clone();
+        w.dedup();
+        text.push_str(&format!("\n(written: {})", w.join(", ")));
+    }
+    if out.ok { ToolReply::text(text) } else { ToolReply::error(text) }
 }
 
 async fn state(rn: &Runner, b: &Binding) -> ToolReply {
@@ -305,11 +381,11 @@ mod tests {
     }
 
     #[test]
-    fn the_tools_touch_nothing() {
+    fn the_tools_touch_nothing_but_a_bundles_command_its_own() {
         let rn = Runner::for_tests(Arc::new(Engine::new(Arc::new(MemStore::new()), Arc::new(MemPacks::new()))), ScriptedHost::new());
         let names: Vec<&str> = rn.tools().specs().iter().map(|t| t.name.as_str()).collect();
-        assert_eq!(names, [TOOL_STATE, TOOL_SUBMIT, TOOL_PROPOSE]);
-        assert!(rn.tools().specs().iter().all(|t| t.read_only));
+        assert_eq!(names, [TOOL_STATE, TOOL_SUBMIT, TOOL_PROPOSE, TOOL_COMMAND]);
+        assert!(rn.tools().specs().iter().all(|t| t.read_only == (t.name != TOOL_COMMAND)));
     }
 
     #[tokio::test]

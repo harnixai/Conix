@@ -367,6 +367,22 @@ Conix 在 Harnix 0.4.7 分叉了这个库，先把站的治理（门禁、确认
 - **指南分章**（`GUIDE_TOPICS`、`guide_topic`）：`flow_guide {topic}` 给 `gates`、`confirm`、`deliver` 的整章，总览里只留
   要点并指过去；**`AuthorHost::guide_notes`** 让宿主在后面接上它自己的做法（谁确认、流程存在哪、打开了什么）。
 
+- **流程包**（`bundle` 模块；Conix 的 `docs/design/layout.md`）：流程包目录里带 `bundle.yaml` 的子目录是一个包，里面一个或几个流程
+  加它们用的全部件，对外叫 `<包>/<流程>`（`flow.yaml` 就叫包名），件叫 `<包>/<名>`；读进来时流程里写的名字都改成包里的
+  （`bundle::qualify`），不往别处找。`DirPacks`、`ProjectPacks` 都认包：项目里带 `bundle.yaml` 的同名包整包代替下面的，
+  不带的只给 skill 加 `local.md`。`Packs::bundle_file`（缺省 `None`）读包里的文件（`templates/`、`commands/`）；
+  `Packs::gate`/`policy`/`hook` 认包里件自己写的短名。运行的 id 由流程名把 `/` 换成 `.` 得来（`engine::id_base`）。
+- **制品目录与归档**：`ProjectLayout::with_artifacts_dir`（`artifacts_dir`、`run_dir`、`bundle_data_dir`）给了制品目录时，
+  一次运行的目录是 `<制品>/runs/<运行>/`、过程投影在它的 `_run/`，包的流程的 `${output_dir}` 就是它，`${data_dir}`
+  （`RunRecord::data_dir`，新的引用根）是包的数据目录；`.gitignore` 写在制品目录里（`runs/`），不再写数据目录。包的流程
+  正常结束时归档到 `<data_dir>/archive/<名>/`，带 `record.json`（`FlowDef::archive`：`ArchiveDef`、`ArchiveWhen`、
+  `DEFAULT_ARCHIVE_NAME`；`FlowDef::bundle` 由读包时填）。
+- **制品声明**：`Station::deliverables`（`Deliverable{path, template, description}`）：协议列给会话；有 `template` 的在派任务前
+  放进运行目录（`bundle::TEMPLATE_MARK`）；读包时每站加一道 `deliverables` 门禁（`<包>/deliverables@<流程>.<站>`）。
+- **包的命令**（`TOOL_COMMAND`，`flow_command {command, args}`）：`bundle.yaml` 的 `commands` 列出的 `commands/<名>.js`，
+  随运行钉进 `Pinned::commands`；在库自己的 QuickJS 里跑，`flow` 比脚本门禁的多 `write`、`append`、`remove`、`print`，
+  只写得了运行目录（`_run/` 除外）与 `${data_dir}`。它不是只读的工具。
+
 - **试运行用会话所在的流程包**：`Sandbox::start_in(input, by, packs)`；`flow_dry_run` 用会话读的那份（项目的流程、件），
   不再只看应用自己的包——项目里的流程以前试运行时找不到。
 

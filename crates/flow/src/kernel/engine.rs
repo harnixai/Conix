@@ -532,7 +532,7 @@ impl Engine {
             .packs_for(project_root)
             .flow(flow)
             .ok_or_else(|| FlowError::NotFound(format!("flow {flow}")))?;
-        Ok(self.store.alloc_id(&def.name).await?)
+        Ok(self.store.alloc_id(&id_base(&def.name)).await?)
     }
 
     /// Start a run of a pack's flow; the definition is validated and pinned.
@@ -556,7 +556,7 @@ impl Engine {
         transact!(self, by.clone(), |t| {
             let id = match &prepared.id {
                 Some(id) => id.clone(),
-                None => self.store.alloc_id(&def.name).await?,
+                None => self.store.alloc_id(&id_base(&def.name)).await?,
             };
             let mut rec = new_record(
                 id.clone(),
@@ -577,6 +577,16 @@ impl Engine {
             if let Some(d) = rec.output_dir.clone().filter(|d| !std::path::Path::new(d).is_absolute()) {
                 if let Some(base) = self.workspace_for(&rec) {
                     rec.output_dir = Some(base.join(d).to_string_lossy().into_owned());
+                }
+            }
+            // A bundle's flow works in the run's own directory, and keeps what lasts in its bundle's
+            // (in Conix: docs/design/layout.md §3).
+            if let (Some(layout), Some(bundle), Some(base)) = (self.layout(), rec.def.bundle.clone(), self.workspace_for(&rec)) {
+                if let (Some(run_dir), Some(data)) = (layout.run_dir(&base, &id), layout.bundle_data_dir(&base, &bundle)) {
+                    if rec.output_dir.is_none() {
+                        rec.output_dir = Some(run_dir.to_string_lossy().into_owned());
+                    }
+                    rec.data_dir = Some(data.to_string_lossy().into_owned());
                 }
             }
             t.insert_new(rec);
@@ -1880,4 +1890,10 @@ pub fn view(mut record: RunRecord) -> RunView {
         unmet,
         phase,
     }
+}
+
+/// What a run's id is made from: its flow's name, a bundle's `<bundle>/<flow>` as `<bundle>.<flow>`
+/// (an id names files and directories; Conix: docs/design/layout.md §2).
+pub fn id_base(flow: &str) -> String {
+    flow.replace('/', ".")
 }

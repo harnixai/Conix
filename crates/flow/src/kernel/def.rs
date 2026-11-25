@@ -76,7 +76,60 @@ pub struct FlowDef {
     /// output}}`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub result: Option<FlowResult>,
+    /// What is kept once a run is over, and under what name (in Conix: docs/design/layout.md §3).
+    /// A bundle's flow is archived when this is absent too.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub archive: Option<ArchiveDef>,
+    /// The bundle the flow was read from: set when it is read (`crate::bundle`), not written.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bundle: Option<String>,
     pub stations: Vec<Station>,
+}
+
+/// What a run leaves in its bundle's archive (in Conix: docs/design/layout.md §3).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(deny_unknown_fields)]
+pub struct ArchiveDef {
+    /// The archive's directory name: a template as `output_dir`'s; absent [`DEFAULT_ARCHIVE_NAME`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// Paths or globs in the run's directory kept; absent: the stations' deliverables, or all.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub keep: Vec<String>,
+    /// When a run is archived; absent: when it finished.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub when: Option<ArchiveWhen>,
+}
+
+/// When a run is archived.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "snake_case")]
+pub enum ArchiveWhen {
+    /// Once it finished.
+    #[default]
+    Finished,
+    /// Once it is over, finished or cancelled.
+    Always,
+}
+
+/// An archive's name when the flow says none: the date, a number, the flow's own name.
+pub const DEFAULT_ARCHIVE_NAME: &str = "${date}${seq}-${flow}";
+
+/// A file a station hands in (in Conix: docs/design/layout.md §4), in the run's directory.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(deny_unknown_fields)]
+pub struct Deliverable {
+    /// Relative to the run's directory (`${output_dir}`).
+    pub path: String,
+    /// A file of the bundle's `templates/` the deliverable starts from, put there when the station
+    /// is entered (not over one already there).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub template: Option<String>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub description: String,
 }
 
 /// A definition's format when it says none: the first.
@@ -266,6 +319,10 @@ pub struct Station {
     /// Permissions this station works under besides the flow's.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub permissions: Vec<Permission>,
+    /// The files it hands in (in Conix): told to its sessions, and checked on exit — each there, not
+    /// empty, its template's mark gone.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub deliverables: Vec<Deliverable>,
 }
 
 /// One task of a static `tasks` list.
