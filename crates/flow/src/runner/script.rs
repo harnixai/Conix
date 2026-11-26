@@ -419,6 +419,9 @@ pub(crate) struct CommandOutcome {
     pub ok: bool,
     pub text: String,
     pub written: Vec<String>,
+    /// What it returned, as a value (`null` when it returned nothing or failed): a command step's
+    /// output.
+    pub value: Value,
 }
 
 /// Run a bundle's command: `source` an ES module whose default export is `function (input, flow)`,
@@ -441,8 +444,10 @@ pub(crate) async fn command(source: String, input: Value, reader: Arc<Reader>, w
     let trace = std::mem::take(&mut *trace.lock().unwrap());
     let written = std::mem::take(&mut *writer.written.lock().unwrap());
     let mut text = trace.out;
+    let mut value = Value::Null;
     let ok = match result {
         Ok(v) => {
+            value = v.clone();
             match v {
                 Value::Null => {}
                 Value::String(s) => text.push_str(&s),
@@ -458,7 +463,57 @@ pub(crate) async fn command(source: String, input: Value, reader: Arc<Reader>, w
             false
         }
     };
-    CommandOutcome { ok, text: text.trim_end().to_string(), written }
+    CommandOutcome { ok, text: text.trim_end().to_string(), written, value }
+}
+
+/// Run a read-only script for the value it returns (`foreach: {script}`): `flow` as a gate
+/// script's, the value whatever JSON it gives. A throw, a time-out or a read out of bounds is an
+/// `Err`.
+pub(crate) async fn value(source: String, input: Value, reader: Arc<Reader>, timeout: Duration) -> Result<Value, String> {
+    let trace = Arc::new(Mutex::new(Trace::default()));
+    let t = trace.clone();
+    let deadline = Instant::now() + timeout;
+    let joined = tokio::time::timeout(
+        timeout + ABANDON_AFTER,
+        tokio::task::spawn_blocking(move || {
+            let runtime = rquickjs::Runtime::new().map_err(|e| format!("no script runtime: {e}"))?;
+            runtime.set_memory_limit(MEMORY_LIMIT);
+            runtime.set_interrupt_handler(Some(Box::new(move || Instant::now() >= deadline)));
+            let context = rquickjs::Context::full(&runtime).map_err(|e| format!("no script context: {e}"))?;
+            context.with(|ctx| {
+                let fail = |e: rquickjs::Error| {
+                    if Instant::now() >= deadline {
+                        format!("the script ran longer than {}s", timeout.as_secs())
+                    } else {
+                        format!("the script failed: {}", message(&ctx, e))
+                    }
+                };
+                let flow = install(&ctx, reader, t).map_err(fail)?;
+                let main: Function = evaluate(&ctx, &source).map_err(fail)?;
+                let input = ctx.json_parse(input.to_string()).map_err(fail)?;
+                let got: JsValue = main.call((input, flow)).map_err(fail)?;
+                let got = match got.as_promise() {
+                    Some(p) => p.finish::<JsValue>().map_err(fail)?,
+                    None => got,
+                };
+                match ctx.json_stringify(got).map_err(fail)?.map(|s| s.to_string()).transpose().map_err(fail)? {
+                    Some(t) if t.len() > MAX_RESULT => Err(format!("the script's result is larger than {} KiB", MAX_RESULT / 1024)),
+                    Some(t) => serde_json::from_str(&t).map_err(|e| format!("the script's result is not JSON: {e}")),
+                    None => Err("the script returned nothing".to_string()),
+                }
+            })
+        }),
+    )
+    .await;
+    let out = match joined {
+        Ok(Ok(r)) => r,
+        Ok(Err(e)) => Err(format!("the script did not finish: {e}")),
+        Err(_) => Err(format!("the script ran longer than {}s and did not stop", timeout.as_secs())),
+    };
+    if let Some(p) = &trace.lock().unwrap().out_of_bounds {
+        return Err(format!("the script read out of bounds: {p}"));
+    }
+    out
 }
 
 fn run_command(

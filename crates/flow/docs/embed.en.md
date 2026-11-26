@@ -522,6 +522,15 @@ is so as not to collide with Harnix's own next one; what changes for a host is l
 - **A bundle's commands** (`TOOL_COMMAND`, `flow_command {command, args}`): the `commands/<name>.js` its `bundle.yaml`
   lists, pinned in `Pinned::commands`; run in the library's QuickJS with `write`, `append`, `remove` and `print` besides a
   gate script's `flow`, writing only the run's directory (not `_run/`) and `${data_dir}`. Not a read-only tool.
+- **Command steps, scripted items, item order, task-level exits** (Conix's M3, M9):
+  `Executor::Command{command, args}` (`kind: command`) runs a bundle's declared command as a station's task, no model;
+  it returns the output (a non-object as `{result}`). `Station::foreach` is a `Foreach` (`Ref` or
+  `Script(ForeachScript)`); a script's items are asked for with **`WorkItem::Items`** and reported through
+  **`Engine::foreach_items`**. An item's `after: [<id>]` holds its task back until those items' tasks are done.
+  `Station::task_exit` (gates only) judges each hand-in before it is taken: **`WorkItem::TaskGate`**, reported through
+  **`Engine::task_gate_result`**; `TaskRec::task_exit` (`TaskExitRec`) keeps the hand-in and its checks, event
+  `task.checked`. `Gates::run_for_task` (default: `Gates::run`) is a host gate on one task. `Work::Foreach::items`
+  is now a `Foreach` (was a `String`); `Mocks::items` mocks a script's items in a dry run.
 
 ### `FLOW_API_VERSION = 1`
 

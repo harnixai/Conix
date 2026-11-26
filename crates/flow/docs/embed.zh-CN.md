@@ -382,6 +382,13 @@ Conix 在 Harnix 0.4.7 分叉了这个库，先把站的治理（门禁、确认
 - **包的命令**（`TOOL_COMMAND`，`flow_command {command, args}`）：`bundle.yaml` 的 `commands` 列出的 `commands/<名>.js`，
   随运行钉进 `Pinned::commands`；在库自己的 QuickJS 里跑，`flow` 比脚本门禁的多 `write`、`append`、`remove`、`print`，
   只写得了运行目录（`_run/` 除外）与 `${data_dir}`。它不是只读的工具。
+- **命令步骤、脚本给的工作项、工作项的先后、任务级出口**（Conix 的 M3、M9）：`Executor::Command{command, args}`
+  （`kind: command`）不用模型，把包声明的命令当作站的任务跑，返回值就是输出（不是对象时包成 `{result}`）。`Station::foreach`
+  是 `Foreach`（`Ref` 或 `Script(ForeachScript)`）；脚本的工作项用 **`WorkItem::Items`** 要、经 **`Engine::foreach_items`**
+  报回。工作项的 `after: [<id>]` 让它等那几项的任务做完再派。`Station::task_exit`（只收门禁）在收下每次交付之前判它：
+  **`WorkItem::TaskGate`**，经 **`Engine::task_gate_result`** 报回；`TaskRec::task_exit`（`TaskExitRec`）记交付与结果，
+  事件 `task.checked`。`Gates::run_for_task`（缺省同 `Gates::run`）是对一个任务跑的宿主门禁。`Work::Foreach::items`
+  改成了 `Foreach`（原来是 `String`）；试运行里 `Mocks::items` 给脚本的工作项。
 
 - **试运行用会话所在的流程包**：`Sandbox::start_in(input, by, packs)`；`flow_dry_run` 用会话读的那份（项目的流程、件），
   不再只看应用自己的包——项目里的流程以前试运行时找不到。

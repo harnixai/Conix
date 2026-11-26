@@ -25,26 +25,45 @@ pub(crate) async fn run_gate(rn: &Arc<Runner>, run: String, station: String, rou
             return;
         }
     };
-    let result = match rec.parts.gates.get(&gate) {
+    let result = judge_gate(rn, &rec, &station, round, &gate, None).await;
+    let r = offer_result(engine, rn.cancelled(), &run, &station, round, &gate, result).await;
+    settle(rn, &run, "gate_result", r).await;
+}
+
+/// The task a `task_exit` gate judges the hand-in of: what its references and its context see as
+/// `${task}` and `${item}`.
+pub(crate) struct ForTask<'a> {
+    pub task: &'a str,
+    pub item: Option<&'a Value>,
+}
+
+/// Judge a gate of the run, for its station or (`task`) for one task's hand-in.
+pub(crate) async fn judge_gate(rn: &Arc<Runner>, rec: &RunRecord, station: &str, round: u32, gate: &str, task: Option<&ForTask<'_>>) -> GateResult {
+    let engine = rn.engine();
+    match rec.parts.gates.get(gate) {
         // A command runs on this machine: a project's run gets to run one only while the project
         // is trusted, as its hooks and its own servers do.
         Some(g) if g.kind == GateKind::Command && rec.project_root.as_deref().is_some_and(|r| !rn.cfg.trust.trusted(r)) => {
             GateResult::errored(format!("the project is not trusted: its command gate {} does not run", g.name))
         }
         Some(g) if g.kind == GateKind::Command => {
-            command_gate(rn.cfg.command_gates, &rn.cfg.env_deny, engine, &rec, &station, g).await
+            command_gate(rn.cfg.command_gates, &rn.cfg.env_deny, engine, rec, station, g, task).await
         }
-        Some(g) if g.kind == GateKind::Check => own_gate(engine, &rec, &station, round, g).await,
-        Some(g) if g.kind == GateKind::Script && g.script.is_some() => own_gate(engine, &rec, &station, round, g).await,
-        Some(g) => match (&rn.cfg.gates, g.host_function()) {
-            (Some(gs), Some(f)) => gs.run(&rec, &station, f).await,
-            (None, _) => GateResult::errored(format!("the host runs no checks: {gate} cannot run")),
-            (_, None) => GateResult::errored(format!("gate {gate} is not one the host runs")),
+        Some(g) if g.kind == GateKind::Check => own_gate(engine, rec, station, round, g, task).await,
+        Some(g) if g.kind == GateKind::Script && g.script.is_some() => own_gate(engine, rec, station, round, g, task).await,
+        Some(g) => match (&rn.cfg.gates, g.host_function(), task) {
+            (Some(gs), Some(f), None) => gs.run(rec, station, f).await,
+            (Some(gs), Some(f), Some(t)) => gs.run_for_task(rec, station, t.task, t.item, f).await,
+            (None, _, _) => GateResult::errored(format!("the host runs no checks: {gate} cannot run")),
+            (_, None, _) => GateResult::errored(format!("gate {gate} is not one the host runs")),
         },
         None => GateResult::errored(format!("gate {gate} was not in the packs when the run started")),
-    };
-    let r = offer_result(engine, rn.cancelled(), &run, &station, round, &gate, result).await;
-    settle(rn, &run, "gate_result", r).await;
+    }
+}
+
+/// The reference context a gate is judged against: the run's, with the task's when it judges one.
+fn gate_context(rec: &RunRecord, task: Option<&ForTask<'_>>, ws: Option<&str>) -> Value {
+    crate::kernel::refs::context_in(rec, task.and_then(|t| t.item), task.map(|t| t.task), ws)
 }
 
 /// The first wait before a gate's result is offered again after a conflict; it doubles each time.
@@ -108,6 +127,7 @@ pub(crate) async fn command_gate(
     rec: &RunRecord,
     station: &str,
     g: &crate::GateDef,
+    task: Option<&ForTask<'_>>,
 ) -> GateResult {
     // Everything up to the command's own conclusion is the gate not getting to one.
     let fail = GateResult::errored;
@@ -117,7 +137,7 @@ pub(crate) async fn command_gate(
     let (Some(ws), Some(station_dir)) = (engine.workspace_for(rec), super::project::station_dir(engine, rec, station)) else {
         return fail(format!("gate {}: the run has no workspace", g.name));
     };
-    let ctx = crate::kernel::refs::context_in(rec, None, None, ws.to_str());
+    let ctx = gate_context(rec, task, ws.to_str());
     command_at(env_deny, g, &GateSite { run: &rec.id, station, ws: &ws, station_dir: &station_dir, ctx: &ctx }).await
 }
 
@@ -294,7 +314,7 @@ fn passed_env(
 }
 
 /// Run a gate the library judges itself, `check` or `script`, against the run's workspace.
-async fn own_gate(engine: &Engine, rec: &RunRecord, station: &str, round: u32, g: &crate::GateDef) -> GateResult {
+async fn own_gate(engine: &Engine, rec: &RunRecord, station: &str, round: u32, g: &crate::GateDef, task: Option<&ForTask<'_>>) -> GateResult {
     let Some(ws) = engine.workspace_for(rec) else {
         return GateResult::errored(format!("gate {}: the run has no workspace", g.name));
     };
@@ -302,7 +322,7 @@ async fn own_gate(engine: &Engine, rec: &RunRecord, station: &str, round: u32, g
         Ok(r) => std::sync::Arc::new(r),
         Err(e) => return GateResult::errored(format!("gate {}: {e}", g.name)),
     };
-    let ctx = crate::kernel::refs::context_in(rec, None, None, ws.to_str());
+    let ctx = gate_context(rec, task, ws.to_str());
     if g.kind == GateKind::Check {
         return super::checks::run(g, &ctx, rec, &reader);
     }
@@ -341,6 +361,9 @@ async fn script_gate(
         "data_dir": rec.data_dir,
         "workspace": ctx.get("workspace"),
         "params": crate::kernel::refs::resolve(&g.params, ctx),
+        // A `task_exit` gate's task and item; null for a station's own gate.
+        "task": ctx.get("task"),
+        "item": ctx.get("item"),
     });
     let (result, trace) = super::script::run(source, input, reader, Duration::from_secs(g.script_seconds())).await;
     if !trace.log.is_empty() {

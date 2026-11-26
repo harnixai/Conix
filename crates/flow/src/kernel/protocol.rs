@@ -334,6 +334,26 @@ pub fn render(t: &TaskContext) -> String {
             GateKind::Script | GateKind::Host => s.push_str(&format!("- Gate `{gate}`: {what}\n")),
         }
     }
+    let task_gates: Vec<String> = st
+        .task_exit
+        .iter()
+        .filter_map(|e| match e {
+            ExitCond::Gate { gate, .. } => Some(match t.gates.get(gate).filter(|g| !g.description.is_empty()) {
+                Some(g) => format!("`{gate}` ({})", g.description),
+                None => format!("`{gate}`"),
+            }),
+            _ => None,
+        })
+        .collect();
+    if !task_gates.is_empty() {
+        s.push_str(&format!(
+            "- What you hand in is taken only once it passes these checks of your own task: {}. They run \
+             when you hand in; until they answer, the hand-in waits. If one does not pass, it is not \
+             taken: what it found comes back to you — fix the work and hand in again, as for an output \
+             the contract refuses.\n",
+            task_gates.join("; ")
+        ));
+    }
     s.push_str(&permissions_text(t.permissions, t.guarded, t.guard, t.root));
     if let Some(dir) = t.output_dir {
         s.push_str(&format!(

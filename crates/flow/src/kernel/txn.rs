@@ -16,7 +16,7 @@ use super::def::{Executor, FlowDef, TaskSpec, Work};
 use super::engine::{Engine, MAX_FOREACH_ITEMS, MAX_LEASE_MS, MAX_SUBFLOW_DEPTH};
 use super::host::{ChangeSet, Event, Outcome, WorkItem};
 use super::parts::{GateKind, Pinned};
-use super::refs::{asserts_fail, context_in, resolve, resolve_str, station_output};
+use super::refs::{asserts_fail, context_in, resolve, station_output};
 use super::run::{
     Actor, CheckRec, CheckStatus, History, Lease, ParentRef, RunRecord, RunStatus, StationRec,
     StationStatus, TaskRec, TaskStatus, Trigger, Workspace,
@@ -170,7 +170,7 @@ impl<'e> Txn<'e> {
                     let mut m = self.m(&parent.run);
                     m.by = Actor::flow("dispatch");
                     match result {
-                        Ok(out) => m.task_submitted(&parent.station, &parent.task, out),
+                        Ok(out) => m.hand_in(&parent.station, &parent.task, out, None).await,
                         Err(e) => m.task_failed(&parent.station, &parent.task, e),
                     }
                     self.fx.advance.insert(parent.run);
@@ -427,7 +427,7 @@ pub(crate) fn check_output(
 
 /// Task ids for foreach items: the items themselves (strings, or an object's `id`/`name`)
 /// when they are all present and distinct, otherwise positions `0`, `1`, ….
-fn item_ids(items: &[Value]) -> Vec<String> {
+pub(super) fn item_ids(items: &[Value]) -> Vec<String> {
     let key = |v: &Value| match v {
         Value::String(s) => Some(s.clone()),
         Value::Number(n) => Some(n.to_string()),
@@ -449,7 +449,7 @@ fn item_ids(items: &[Value]) -> Vec<String> {
 }
 
 /// Why a `foreach` list did not resolve.
-fn foreach_problem(items: &str, got: &Value) -> String {
+pub(super) fn foreach_problem(items: &str, got: &Value) -> String {
     match got {
         Value::Array(list) => format!(
             "{items} has {} items; a station fans out to at most {MAX_FOREACH_ITEMS}",
@@ -685,36 +685,10 @@ impl<'a> M<'a> {
                         .iter()
                         .map(|t| TaskRec::new(t.id.clone(), None))
                         .collect(),
-                    Work::Foreach { items, .. } => match resolve_str(items, &ctx) {
-                        Value::Array(list) if list.len() <= MAX_FOREACH_ITEMS => item_ids(&list)
-                            .into_iter()
-                            .zip(list)
-                            .map(|(id, v)| TaskRec::new(id, Some(v)))
-                            .collect(),
-                        other => {
-                            let r = self.st(sid);
-                            r.clear_tasks();
-                            r.status = StationStatus::Unmet;
-                            r.checks = vec![CheckRec {
-                                cond: None,
-                                kind: "foreach".into(),
-                                label: "foreach".into(),
-                                round,
-                                status: CheckStatus::Fail,
-                                detail: foreach_problem(items, &other),
-                                at: now,
-                                ..Default::default()
-}];
-                            self.emit("station.entered", Some(sid), None, json!({"round": round}));
-                            self.emit("station.unmet", Some(sid), None, json!({"round": round}));
-                            self.log(
-                                "enter",
-                                Some(sid),
-                                None,
-                                json!({"round": round, "error": "foreach"}),
-                            );
-                            return;
-                        }
+                    // Resolved now, or worked out by a script; `None`: left unmet (`items.rs`).
+                    Work::Foreach { items, .. } => match self.foreach_entered(sid, items, &ctx, round) {
+                        Some(tasks) => tasks,
+                        None => return,
                     },
                 };
                 let ids = tasks.iter().map(|t| t.id.clone()).collect();
@@ -767,6 +741,8 @@ impl<'a> M<'a> {
         let Some(st) = self.def.station(sid).cloned() else {
             return;
         };
+        // An item after one that failed for good cannot start (`items.rs`).
+        self.fail_unreachable(sid);
         let Some(r) = self.rec.stations.get(sid) else {
             return;
         };
@@ -788,7 +764,7 @@ impl<'a> M<'a> {
         let ready: Vec<String> = r
             .tasks
             .iter()
-            .filter(|t| t.status == TaskStatus::Ready)
+            .filter(|t| t.status == TaskStatus::Ready && !super::items::waits(r, t))
             .map(|t| t.id.clone())
             .collect();
         for tid in ready {
@@ -800,7 +776,7 @@ impl<'a> M<'a> {
             };
             match &spec.executor {
                 Executor::External { .. } => continue,
-                Executor::Session { .. } | Executor::Agent { .. } | Executor::Program { .. } => {
+                Executor::Session { .. } | Executor::Agent { .. } | Executor::Program { .. } | Executor::Command { .. } => {
                     self.claim_push(sid, &tid, &spec)
                 }
                 Executor::Subflow { flow, inputs } => self.claim_subflow(sid, &tid, flow, inputs),
@@ -1009,23 +985,13 @@ impl<'a> M<'a> {
         let mut checks = vec![];
         let r = self.rec.stations[sid].clone();
         // A fan-out whose list never resolved has no tasks, and an `output` exit over no tasks
-        // would pass: the station stays unmet until a rework enters it again.
-        if let Work::Foreach { items, .. } = st.work() {
-            if r.tasks.is_empty() {
-                match resolve_str(&items, &self.ctx(None, None)) {
-                    Value::Array(list) if list.len() <= MAX_FOREACH_ITEMS => {}
-                    other => checks.push(CheckRec {
-                        cond: None,
-                        kind: "foreach".into(),
-                        label: "foreach".into(),
-                        round,
-                        status: CheckStatus::Fail,
-                        detail: foreach_problem(&items, &other),
-                        at: now,
-                        ..Default::default()
-}),
-                }
+        // would pass: the station stays unmet until a rework enters it again. One whose script
+        // is still working out its items has nothing to judge yet.
+        if let Some(c) = self.foreach_judged(sid) {
+            if c.status == CheckStatus::Wait {
+                return false;
             }
+            checks.push(c);
         }
         // A `children` exit short of `all` counts the failed children itself.
         let partial = st.exit.iter().any(|e| matches!(e, super::def::ExitCond::Children { require: Some(q), .. } if !q.is_all()));
@@ -1409,7 +1375,9 @@ impl<'a> M<'a> {
         let mut expired = vec![];
         for (sid, r) in &self.rec.stations {
             for t in &r.tasks {
+                // A hand-in waiting on its `task_exit` gates waits on the flow, not the worker.
                 if t.status == TaskStatus::Claimed
+                    && !t.checking()
                     && t.lease.as_ref().is_some_and(|l| l.until <= now)
                 {
                     expired.push((sid.clone(), t.id.clone()));

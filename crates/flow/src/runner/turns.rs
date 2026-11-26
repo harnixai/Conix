@@ -23,6 +23,7 @@ use serde_json::Value;
 use super::dispatch::{apply, dispatcher, fail, renew, renew_every, settle, settle_quiet};
 use super::host::{Frame, SessionHost, SessionId, TurnEnd};
 use super::session::{standing, Standing};
+use super::steps::{wait_checked, Checked};
 use super::state::{Binding, TaskKey};
 use super::Runner;
 use crate::kernel::host::Delivery;
@@ -180,15 +181,37 @@ where
         // A structured output is the turn's hand-in, whichever way the session was told to hand
         // in: the dispatcher submits it under the task's claim.
         let mut problem: Option<String> = None;
+        // What the station's `task_exit` gates found in the last hand-in, when they sent it back.
+        let mut sent_back: Option<String> = None;
         if let Some(output) = handed {
             let r = engine.submit(&key.run, &key.station, &key.task, token, output, dispatcher()).await;
             match r {
-                Ok(o) => apply(rn, Some(&key.run), o).await,
+                Ok(o) => {
+                    let checking = o.value.get("checking").and_then(Value::as_bool).unwrap_or(false);
+                    let back = o.value.get("sent_back").and_then(Value::as_str).map(String::from);
+                    apply(rn, Some(&key.run), o).await;
+                    problem = match (back, checking) {
+                        (Some(why), _) => Some(format!("the checks of your task did not pass: {why}")),
+                        (None, true) => match wait_checked(rn, key, token).await {
+                            Checked::SentBack(why) => Some(format!("the checks of your task did not pass: {why}")),
+                            Checked::Taken | Checked::Open => None,
+                            Checked::Gone => return false,
+                        },
+                        (None, false) => None,
+                    };
+                }
                 Err(FlowError::Contract(m)) => problem = Some(m),
                 Err(e) => {
                     tracing::debug!(run = key.run, error = %e, "structured output not taken");
                     return false;
                 }
+            }
+        } else {
+            // A hand-in by `flow_submit` (or one made before a restart) may still be checked:
+            // its answer comes before the turn is judged.
+            match wait_checked(rn, key, token).await {
+                Checked::SentBack(why) => sent_back = Some(why),
+                Checked::Taken | Checked::Open | Checked::Gone => {}
             }
         }
         settle(rn, &key.run, "evaluate", engine.evaluate(&key.run).await).await;
@@ -245,8 +268,14 @@ where
             Delivery::FlowSubmit => NUDGE,
             Delivery::StructuredOutput => NUDGE_STRUCTURED,
         };
-        own.texts.push(nudge.to_string());
-        if let Err(e) = session.send(nudge).await {
+        // Sent back by the task's own checks: what they found goes with the reminder, so a session
+        // that never saw the reply (a restart in between) knows what to fix.
+        let nudge = match &sent_back {
+            Some(why) => format!("{nudge} What you handed in last was not taken: the checks of your task did not pass: {why}."),
+            None => nudge.to_string(),
+        };
+        own.texts.push(nudge.clone());
+        if let Err(e) = session.send(&nudge).await {
             fail(rn, key, token, &format!("the reminder was not sent: {e}")).await;
             return false;
         }

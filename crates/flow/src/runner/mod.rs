@@ -47,6 +47,7 @@ mod project;
 pub(crate) mod script;
 mod session;
 mod state;
+mod steps;
 mod tools;
 mod trust;
 mod turns;

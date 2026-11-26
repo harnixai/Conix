@@ -172,6 +172,8 @@ macro_rules! transact {
         }
     }};
 }
+// The operations of `items.rs` and `handin.rs` are transactions like these.
+pub(crate) use transact;
 
 fn invalid<T>(m: impl Into<String>) -> Result<T> {
     Err(FlowError::Invalid(m.into()))
@@ -903,6 +905,9 @@ impl Engine {
                     tr.status
                 )));
             }
+            if super::items::waits(st, tr) {
+                return invalid(format!("task {station}/{task} comes after items not done yet"));
+            }
             if let super::def::Work::Foreach {
                 max_parallel: Some(m),
                 ..
@@ -1056,7 +1061,11 @@ impl Engine {
             if !matches!(st.status, StationStatus::Working | StationStatus::Unmet) {
                 return invalid(format!("station {station} is {:?}", st.status));
             }
-            held(st, station, task, token, now)?;
+            if held(st, station, task, token, now)?.checking() {
+                return invalid(format!(
+                    "task {station}/{task}: what it handed in last is still being checked (task_exit); wait for the result"
+                ));
+            }
             let sdef = def.station(station).cloned();
             let executor = task_executor(def, station, task)?;
             hand_in_by(&executor, &by, station, task)?;
@@ -1077,15 +1086,13 @@ impl Engine {
             check_output(sdef.and_then(|s| s.output).as_ref(), &output).map_err(|e| {
                 FlowError::Contract(format!("output does not satisfy the contract: {e}"))
             })?;
-            let mut m = t.m(run);
-            m.task_submitted(station, task, output.clone());
-            if let Some(a) = agent.clone() {
-                if let Some(d) = m.task_mut(station, task).and_then(|x| x.delivery.as_mut()) {
-                    d.agent = Some(a);
-                }
-            }
+            // Taken now, or held for the station's `task_exit` gates (`handin.rs`).
+            t.m(run).hand_in(station, task, output.clone(), agent.clone()).await;
             t.settle().await?;
-            Ok(json!({"run": run, "station": t.get(run).stations[station].status}))
+            let after = &t.get(run).stations[station];
+            let checking = after.task(task).is_some_and(|x| x.checking());
+            let sent_back = after.task(task).and_then(super::handin::sent_back);
+            Ok(json!({"run": run, "station": after.status, "checking": checking, "sent_back": sent_back}))
         })
     }
 
@@ -1754,7 +1761,7 @@ fn hand_in_by(
     let ok = match executor {
         E::External { .. } => true,
         E::Session { .. } | E::Agent { .. } => by.kind == FLOW_KIND || by.kind == AGENT_KIND,
-        E::Program { .. } | E::Subflow { .. } => by.kind == FLOW_KIND,
+        E::Program { .. } | E::Command { .. } | E::Subflow { .. } => by.kind == FLOW_KIND,
     };
     if ok {
         Ok(())

@@ -282,9 +282,11 @@ pub struct Station {
     /// Several tasks, each with its own id.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tasks: Option<Vec<TaskSpec>>,
-    /// A reference to a list; one task per item.
+    /// The list of items, one task each: a reference (`${stations.<id>.output.<list>}`), or a
+    /// bundle's script that gives it (`{script: <name>}`), evaluated on entry. An item that is an
+    /// object may say `after: [<id>…]`: other items' `id`s whose tasks must be done first.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub foreach: Option<String>,
+    pub foreach: Option<Foreach>,
     /// With `foreach`: how many tasks may be in flight at once.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_parallel: Option<u32>,
@@ -301,6 +303,11 @@ pub struct Station {
     /// All must hold for the station to pass.
     #[serde(default)]
     pub exit: Vec<ExitCond>,
+    /// Gates each task's hand-in must pass before it is taken (only `gate` conditions), judged with
+    /// that task's context (`${item}`, `${task}`). One that does not pass sends the hand-in back to
+    /// the task to fix; the station's own `exit` is judged only over hand-ins taken.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub task_exit: Vec<ExitCond>,
     /// Stations (this one or an ancestor) a rework from here may go back to.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub rework_to: Vec<String>,
@@ -399,6 +406,14 @@ pub enum Executor {
     },
     /// The application's own code (`Programs`).
     Program { step: String },
+    /// A command of the run's bundle (`commands/<name>.js`), run by the flow with no model: what
+    /// it returns is the task's output (a value that is not an object as `{result: <value>}`), a
+    /// throw fails the attempt. `args` may hold references (`${item.id}`), resolved at dispatch.
+    Command {
+        command: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        args: Vec<String>,
+    },
     /// Waits to be claimed from outside: a person or an external agent. `who` is an opaque
     /// label handed to the authorizer.
     External {
@@ -420,6 +435,7 @@ impl Executor {
             Self::Session { .. } => "session",
             Self::Agent { .. } => "agent",
             Self::Program { .. } => "program",
+            Self::Command { .. } => "command",
             Self::External { .. } => "external",
             Self::Subflow { .. } => "subflow",
         }
@@ -429,7 +445,7 @@ impl Executor {
     pub fn is_push(&self) -> bool {
         matches!(
             self,
-            Self::Session { .. } | Self::Agent { .. } | Self::Program { .. }
+            Self::Session { .. } | Self::Agent { .. } | Self::Program { .. } | Self::Command { .. }
         )
     }
 
@@ -767,10 +783,49 @@ pub enum Work {
     One(TaskSpec),
     Tasks(Vec<TaskSpec>),
     Foreach {
-        items: String,
+        items: Foreach,
         max_parallel: Option<u32>,
         task: TaskSpec,
     },
+}
+
+/// Where a `foreach` station's items come from.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(untagged)]
+pub enum Foreach {
+    /// One reference to a list (`${stations.<id>.output.<list>}`).
+    Ref(String),
+    /// A script of the bundle that returns the list.
+    Script(ForeachScript),
+}
+
+/// `foreach: {script: <name>}`: `scripts/<name>.js`, read-only as a gate script is, given the run
+/// (`inputs`, the stations' `outputs`, `run`, `output_dir`, `data_dir`) and returning the items.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(deny_unknown_fields)]
+pub struct ForeachScript {
+    pub script: String,
+}
+
+impl Foreach {
+    /// The script that gives the items, when a script does.
+    pub fn script(&self) -> Option<&str> {
+        match self {
+            Self::Script(s) => Some(&s.script),
+            Self::Ref(_) => None,
+        }
+    }
+}
+
+impl std::fmt::Display for Foreach {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Ref(r) => f.write_str(r),
+            Self::Script(s) => write!(f, "script {}", s.script),
+        }
+    }
 }
 
 impl Work {

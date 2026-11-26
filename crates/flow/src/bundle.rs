@@ -246,10 +246,13 @@ pub fn qualify(def: &mut FlowDef, bundle: &str, has_flow: &dyn Fn(&str) -> bool)
         if let Some(Executor::Subflow { flow, .. }) = &mut s.executor {
             *flow = subflow(bundle, flow, has_flow);
         }
-        for e in &mut s.exit {
+        for e in s.exit.iter_mut().chain(s.task_exit.iter_mut()) {
             if let ExitCond::Gate { gate, .. } = e {
                 *gate = in_bundle(bundle, gate);
             }
+        }
+        if let Some(crate::kernel::def::Foreach::Script(f)) = &mut s.foreach {
+            f.script = in_bundle(bundle, &f.script);
         }
     }
 }
