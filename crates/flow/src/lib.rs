@@ -63,7 +63,7 @@ pub mod wire;
 pub use dryrun::{Mocks, Sandbox};
 pub use kernel::def::{
     definition_schema, duration_ms, Assert, Binds, BindsWord, ConfirmVia, RejectRule, BINDS_DELIVERABLES, DecisionMap, Executor, ExitCond, FlowResult, McpApproval, McpCall, FlowDef, Guard, InputDef, MainSession,
-    OnUnmet, Require, RequireWord, Retry, SessionBinding, Station, TaskSpec, Work, DEFAULT_OUTPUT_DIR, DEFAULT_REWORK_LIMIT,
+    OnUnmet, Pace, Require, RequireWord, Retry, SessionBinding, Station, TaskSpec, Work, DEFAULT_OUTPUT_DIR, DEFAULT_REWORK_LIMIT,
     EFFORTS, MAIN_SESSION_KEY, MAX_REWORK_LIMIT,
 };
 pub use kernel::engine::{
@@ -86,6 +86,8 @@ pub use kernel::run::{
     StationStatus, TaskRec, TaskStatus, Trigger, Usage, Votes, Workspace, WorktreeEnd, WorktreeOutcome,
     WorktreeRec, AGENT_KIND, DEVICE_KIND, FLOW_KIND,
 };
+pub use kernel::route::{Route, RouteCandidate};
+pub use kernel::run::{ProposalKind, ProposalRec, ProposalStatus, RoutedBy, RoutedRec, SwitchRec};
 pub use kernel::schema::minimal;
 pub use kernel::validate::{part_problems, validate, validate_yaml, Problem};
 pub use kernel::{FlowError, Result};

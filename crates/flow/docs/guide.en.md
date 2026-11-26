@@ -151,6 +151,15 @@ else. Its flows are named `<bundle>/<flow>`, its parts `<bundle>/<name>`; saving
   flow)`, `input.args` its arguments, `flow` a gate script's plus `write`, `append`, `remove`, `print`, writing only the run's
   directory and `${data_dir}`. A station's session runs one with `flow_command {command, args}`; a policy may refuse the model
   writing those files, the command still can.
+- Several flows of one bundle are paths of one piece of work. `flows: [quick, solid, major]` orders them; a start naming the
+  bundle alone takes the first of `start.route` (default: `flows`) whose `inputs` schemas accept what it was given — so the
+  schemas say what each path is for (`risk: {schema: {enum: [low]}}`). When the inputs given cannot decide, `start.triage: <skill>`
+  names the skill a model judges them by before starting. A run may switch to another flow of its bundle (`flow_switch`) while its
+  first station is open, if that flow starts with the same station.
+- `pace: step` (in `bundle.yaml`, a flow, or a start) holds every station on entry for a person to release, one by one.
+- A gate may say where a failure goes back to: `{kind: gate, gate: spec-delta, rework_to: propose}` — over `on_unmet.rework_to`,
+  counted in `on_unmet.max`; it is the station itself, its `rework_to` or its `on_unmet.rework_to`. A station's session proposes a
+  rework only to those points (`flow_propose`), and the run records what it proposed until a person takes it or it is moot.
 
 
 ### In sequence: draft, then a person confirms

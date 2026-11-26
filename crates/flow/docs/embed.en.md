@@ -555,6 +555,26 @@ is so as not to collide with Harnix's own next one; what changes for a host is l
   to the runner or answers them as it would any gate. `RunView::votes` (`Votes{cond, approvals, rejections, min}`) says
   where each `confirm` exit stands.
 
+- **Starting by a bundle, triage, switching** (module `kernel::route`): `bundle.yaml` gains `flows` (their order),
+  `start: {route, triage}` (`bundle::StartDef`) and `pace`; what they name is checked with every flow of the bundle. A start
+  naming a bundle with no flow of its own name is routed — the first flow of `start.route` whose inputs accept the start's —
+  by `Engine::create` itself, `Engine::resolve_start` (for a host that makes something for the flow first; the runner's
+  `start_run` does) and `Engine::route(name, inputs, project_root)` (`Route::Flow{flow, by, reason}` or
+  `Route::Triage{bundle, skill, candidates}`, `RouteCandidate`). `CreateIn::routed` says how the starter chose (`RoutedRec`,
+  `RoutedBy`: `named`, `route`, `triage`); `RunRecord::routed` keeps it. `flow_start` answers a triage with the skill's text
+  and the candidates, nothing started. **`Engine::switch(run, to, reason, inputs, by)`** (`Op::Switch`, `flow_switch`,
+  `TOOL_SWITCH`): to another flow of the run's bundle while its first station is the one open, re-pinned, the station entered
+  again; `RunRecord::switched` (`SwitchRec`), event `run.switched`. `RUN_TOOLS` is nine long.
+- **Pace** (`Pace`: `auto`, `step`): `FlowDef::pace`, the bundle's, `CreateIn::pace`; `RunRecord::pace`. `step` holds every
+  station on entry as `hold: true` holds one.
+- **Rework points**: `ExitCond::Gate` gains `rework_to` — where `on_unmet` goes when that gate fails (the earliest of the
+  failing checks' points); `Station::rework_points` lists a station's (`rework_to`, `on_unmet.rework_to`, its gates').
+- **Proposals on the run**: `Engine::propose(run, station, task, token, kind, to, reason, by)` (`Op::Propose`;
+  `flow_propose` calls it, then sends its note as before) checks `to` against the station's rework points and records a
+  `ProposalRec` (`ProposalKind`, `ProposalStatus`) in `RunRecord::proposals`; a rework there accepts it, the station moving on
+  dismisses it, `Engine::dismiss_proposal` (`Op::DismissProposal`) too. `RunView::proposals` lists the open ones; events
+  `proposal.opened`, `proposal.accepted`, `proposal.dismissed`.
+
 ### `FLOW_API_VERSION = 1`
 
 The library's first version: the kernel, stores, packs and dry runs move out of `harnix-ext-flow`;
