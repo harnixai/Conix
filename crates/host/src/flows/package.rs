@@ -853,7 +853,7 @@ mod tests {
         assert!(!text.contains("/Users") && !text.contains("home"), "{text}");
         let r = import(&z, b.path(), &opts(false)).unwrap();
         assert_eq!(r.package.name, "xforge");
-        assert_eq!(r.package.flows, ["xforge/quick", "xforge/solid"]);
+        assert_eq!(r.package.flows, ["xforge/major", "xforge/quick", "xforge/solid"]);
         assert!(r.package.commands.contains(&"xspec".to_string()));
         assert!(r.package.command_gates > 0);
         assert_eq!(r.shadows.as_deref(), Some("builtin"));
