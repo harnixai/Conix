@@ -16,9 +16,30 @@ const DETACH_ARM_MS: u64 = 800;
 
 /// 本地命令（交互 §4.5）：不联系后端，或只换个后端命令。
 const LOCAL: &[&str] = &[
-    "help", "new", "rename", "sessions", "model", "goal", "btw", "trust", "doctor", "plugin",
-    "confirm", "reject", "release", "force", "rework", "quit", "exit", "stop", "mouse", "events",
-    "notify", "copy",
+    "help",
+    "new",
+    "rename",
+    "sessions",
+    "model",
+    "goal",
+    "btw",
+    "trust",
+    "doctor",
+    "plugin",
+    "confirm",
+    "reject",
+    "release",
+    "force",
+    "rework",
+    "quit",
+    "exit",
+    "stop",
+    "mouse",
+    "events",
+    "notify",
+    "copy",
+    "flow:export",
+    "flow:import",
 ];
 
 /// 补全候选的来源：项目里的文件（`@` 提及）。
@@ -70,7 +91,7 @@ impl State {
             .iter()
             .map(|n| SlashCommand {
                 name: n.to_string(),
-                description: i18n::tr(&format!("chat_update.cmd_{n}")),
+                description: i18n::tr(&format!("chat_update.cmd_{}", n.replace(':', "_"))),
                 source: "conix".into(),
             })
             .collect();
@@ -761,6 +782,7 @@ fn local_command(s: &mut State, name: &str, arg: String) -> Option<Vec<Effect>> 
         "copy" => copy_block(s),
         "doctor" => vec![s.call(Pending::Doctor, Command::Doctor)],
         "plugin" => crate::plugins::command(s, &arg),
+        "flow:export" | "flow:import" => crate::flows::package_command(s, name, &arg),
         "confirm" | "reject" | "release" | "force" | "rework" => {
             crate::flows::person_op(s, name, &arg)
         }
@@ -923,6 +945,23 @@ pub(crate) fn chat_reply(s: &mut State, what: Pending, reply: Reply) -> Vec<Effe
         }
         (Pending::PluginRemoved(name), Reply::Ok) => {
             s.notice(i18n::t!("plugins.removed", name = name), false);
+            vec![]
+        }
+        (Pending::FlowExported, Reply::FlowExported(e)) => {
+            s.notice(
+                i18n::t!(
+                    "flows.package_exported",
+                    name = e.package.name,
+                    version = e.package.version,
+                    files = e.package.files,
+                    file = e.file
+                ),
+                false,
+            );
+            vec![]
+        }
+        (Pending::FlowImported, Reply::FlowImported(r)) => {
+            crate::flows::imported(s, r);
             vec![]
         }
         (Pending::Doctor, Reply::Doctor(checks)) => {

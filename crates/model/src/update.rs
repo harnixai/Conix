@@ -115,6 +115,9 @@ pub(crate) enum Pending {
     Notified,
     /// `/doctor`：自检。
     Doctor,
+    /// `/flow:export`、`/flow:import`：导出的文件、导入的报告。
+    FlowExported,
+    FlowImported,
     /// `/model` 不带参数：列出可选的模型。
     Models,
     /// `/plugin`：列表。
