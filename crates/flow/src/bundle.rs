@@ -65,6 +65,9 @@ pub struct BundleMeta {
     /// How its runs go from station to station when a flow says nothing ([`Pace`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pace: Option<Pace>,
+    /// What running it needs of the host (checked when a package is imported).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub requires: Option<BundleRequires>,
 }
 
 /// What `bundle.yaml` says of one command.
@@ -299,6 +302,39 @@ pub fn offered_stems(packs: &dyn crate::Packs, bundle: &str) -> BTreeSet<String>
         .collect()
 }
 
+/// What a bundle needs of the host that runs it.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BundleRequires {
+    /// The oldest Conix that runs it, `>=x.y.z`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conix: Option<String>,
+}
+
+/// Names a bundle cannot have: they are the words of `conix flow export` / `import`, which a flow
+/// address (`/flow:export`) is told apart from a bundle by.
+pub const RESERVED_BUNDLES: [&str; 2] = ["export", "import"];
+
+/// Whether a name may be a bundle's: `[a-z][a-z0-9-]*`, not a reserved one.
+pub fn is_bundle_name(s: &str) -> bool {
+    is_name(s) && !RESERVED_BUNDLES.contains(&s)
+}
+
+/// A requirement `>=x.y.z`, as the version it names. Only this form: a bundle says the oldest
+/// host it runs on, nothing cleverer to disagree about.
+pub fn parse_requirement(s: &str) -> Result<(u64, u64, u64), String> {
+    let v = s.trim().strip_prefix(">=").ok_or_else(|| format!("requirement {s:?} must be written >=x.y.z"))?;
+    parse_version(v.trim()).ok_or_else(|| format!("requirement {s:?} must be written >=x.y.z"))
+}
+
+/// `x.y.z` (a build suffix `-…` is ignored) as numbers.
+pub fn parse_version(v: &str) -> Option<(u64, u64, u64)> {
+    let core = v.split(['-', '+']).next()?;
+    let mut it = core.split('.').map(|n| n.parse::<u64>().ok());
+    let r = (it.next()??, it.next()??, it.next()??);
+    it.next().is_none().then_some(r)
+}
+
 /// A bundle's name and the local name in a full name: `xforge/solid` → `("xforge", "solid")`.
 pub fn split(name: &str) -> Option<(&str, &str)> {
     let (b, l) = name.split_once('/')?;
@@ -361,6 +397,12 @@ pub fn meta(dir: &Path) -> Result<BundleMeta, String> {
     if m.name != named {
         return Err(format!("{BUNDLE_FILE}: name {:?} is not the directory's ({named:?})", m.name));
     }
+    if RESERVED_BUNDLES.contains(&m.name.as_str()) {
+        return Err(format!("{BUNDLE_FILE}: name {:?} is reserved (it is a word of flow export / import)", m.name));
+    }
+    if let Some(c) = m.requires.as_ref().and_then(|r| r.conix.as_deref()) {
+        parse_requirement(c).map_err(|e| format!("{BUNDLE_FILE}: requires.conix: {e}"))?;
+    }
     Ok(m)
 }
 
@@ -373,7 +415,7 @@ pub fn bundles_in(dir: &Path) -> Vec<(String, PathBuf)> {
         .filter(|p| p.is_dir() && is_bundle(p))
         .filter_map(|p| {
             let n = p.file_name()?.to_str()?.to_string();
-            (segment(&n) && is_name(&n)).then_some((n, p))
+            (segment(&n) && is_name(&n) && !RESERVED_BUNDLES.contains(&n.as_str())).then_some((n, p))
         })
         .collect();
     out.sort();
@@ -382,7 +424,7 @@ pub fn bundles_in(dir: &Path) -> Vec<(String, PathBuf)> {
 
 /// The bundle of that name in a pack directory.
 pub fn bundle_in(dir: &Path, name: &str) -> Option<PathBuf> {
-    if !segment(name) {
+    if !segment(name) || RESERVED_BUNDLES.contains(&name) {
         return None;
     }
     let d = dir.join(name);
@@ -690,6 +732,26 @@ mod tests {
         assert!(t.contains("做事。") && t.ends_with("## 本项目的补充\n\n我们这里还要写英文摘要。\n"), "{t}");
         assert_eq!(part_names("dev", &dir, PartKind::Skill), ["dev/s".to_string()].into());
         assert!(names_match("s", "dev/s") && names_match("dev/s", "dev/s") && !names_match("t", "dev/s"));
+    }
+
+    #[test]
+    fn a_bundle_cannot_take_a_reserved_name_or_an_odd_requirement() {
+        let d = tempfile::tempdir().unwrap();
+        for n in RESERVED_BUNDLES {
+            let b = d.path().join(n);
+            std::fs::create_dir_all(&b).unwrap();
+            std::fs::write(b.join("bundle.yaml"), format!("name: {n}\n")).unwrap();
+            assert!(meta(&b).unwrap_err().contains("reserved"));
+        }
+        assert!(bundles_in(d.path()).is_empty() && bundle_in(d.path(), "export").is_none());
+        let b = d.path().join("dev");
+        std::fs::create_dir_all(&b).unwrap();
+        std::fs::write(b.join("bundle.yaml"), "name: dev\nrequires: {conix: \"^0.1\"}\n").unwrap();
+        assert!(meta(&b).unwrap_err().contains(">=x.y.z"));
+        std::fs::write(b.join("bundle.yaml"), "name: dev\nrequires: {conix: \">=0.1.10\"}\n").unwrap();
+        assert_eq!(meta(&b).unwrap().requires.unwrap().conix.as_deref(), Some(">=0.1.10"));
+        assert_eq!(parse_version("0.1.10-2026112502"), Some((0, 1, 10)));
+        assert_eq!(parse_version("0.1"), None);
     }
 
     #[test]

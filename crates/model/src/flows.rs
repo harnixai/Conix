@@ -964,3 +964,76 @@ pub(crate) fn person_op(s: &mut State, name: &str, arg: &str) -> Vec<Effect> {
         },
     )]
 }
+
+/// `/flow:export <包> [文件]`、`/flow:import <文件> [--force]`：流程包与包文件互转（design/flows.md §7.12）。
+/// 两个词是流程包的保留名，所以不会与某个包的名字混；发给实例，不经模型。文件相对项目根。
+pub(crate) fn package_command(s: &mut State, name: &str, arg: &str) -> Vec<Effect> {
+    let mut words: Vec<&str> = arg.split_whitespace().collect();
+    if name == "flow:export" {
+        if words.is_empty() || words.len() > 2 {
+            s.notice(i18n::t!("flows.package_usage_export"), true);
+            return vec![];
+        }
+        let bundle = words.remove(0).to_string();
+        let file = words.pop().map(String::from);
+        return vec![s.call(Pending::FlowExported, Command::ExportFlow { bundle, file })];
+    }
+    let force = words.contains(&"--force");
+    words.retain(|w| *w != "--force");
+    if words.is_empty() {
+        s.notice(i18n::t!("flows.package_usage_import"), true);
+        return vec![];
+    }
+    vec![s.call(
+        Pending::FlowImported,
+        Command::ImportFlow {
+            file: words.join(" "),
+            force,
+        },
+    )]
+}
+
+/// 导入的报告：装了什么、谁导出的，以及要留意的（覆盖了谁、遮住了谁、命令门禁）。
+pub(crate) fn imported(s: &mut State, r: port::FlowImported) {
+    let p = &r.package;
+    let join = |v: &[String]| {
+        if v.is_empty() {
+            i18n::t!("flows.package_none")
+        } else {
+            v.join(", ")
+        }
+    };
+    let mut lines = vec![
+        i18n::t!(
+            "flows.package_line_bundle",
+            name = p.name,
+            version = p.version
+        ),
+        i18n::t!(
+            "flows.package_line_by",
+            conix = p.conix_version,
+            at = p.exported_at
+        ),
+        i18n::t!("flows.package_line_flows", flows = join(&p.flows)),
+        i18n::t!("flows.package_line_commands", commands = join(&p.commands)),
+        i18n::t!("flows.package_line_installed", dir = r.installed),
+    ];
+    if let Some(b) = &r.backup {
+        lines.push(i18n::t!("flows.package_warn_backup", dir = b));
+    }
+    if let Some(by) = &r.shadows {
+        lines.push(i18n::t!(
+            "flows.package_warn_shadows",
+            name = p.name,
+            by = by
+        ));
+    }
+    if p.command_gates > 0 {
+        lines.push(i18n::t!("flows.package_warn_gates", n = p.command_gates));
+    }
+    s.ui.overlay = Some(crate::state::Overlay::Text {
+        title: i18n::t!("flows.package_imported_title", name = p.name),
+        lines,
+        scroll: 0,
+    });
+}

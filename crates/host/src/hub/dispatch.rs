@@ -501,6 +501,8 @@ impl Hub {
             | C::StartRun { .. }
             | C::ListBundles
             | C::FlowCommand { .. }
+            | C::ExportFlow { .. }
+            | C::ImportFlow { .. }
             | C::RunOp { .. }) => match self.flows() {
                 Some(f) => f.command(cmd).await,
                 None => match cmd {

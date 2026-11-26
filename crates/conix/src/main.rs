@@ -13,6 +13,7 @@ use futures::StreamExt;
 use model::{InstOp, Mouse, MouseButton, MouseKind, Msg};
 use port::Instances;
 
+mod flow_cli;
 mod host_main;
 mod instance_config;
 mod supervise;
@@ -56,6 +57,11 @@ enum Cmd {
     Start { name: String },
     /// 停止实例。
     Stop { name: String },
+    /// 流程包：导出成 zip、从 zip 导入、查看。
+    Flow {
+        #[command(subcommand)]
+        cmd: flow_cli::FlowCmd,
+    },
     /// 实例进程的入口，由 new / start 拉起，用户不直接调用。
     #[command(hide = true)]
     Host {
@@ -81,6 +87,7 @@ fn localized_command() -> clap::Command {
         })
         .mut_subcommand("start", |c| c.about(i18n::t!("app.cli.start")))
         .mut_subcommand("stop", |c| c.about(i18n::t!("app.cli.stop")))
+        .mut_subcommand("flow", flow_cli::localize)
 }
 
 fn now_ms() -> u64 {
@@ -106,6 +113,9 @@ async fn main() -> Result<()> {
             return host_main::run(name, project).await;
         }
         return supervise::run(name, project).await;
+    }
+    if let Some(Cmd::Flow { cmd }) = cli.command {
+        return flow_cli::run(cmd, || project_here(&cfg));
     }
     let (settings, more) = cfg.settings();
     problems.extend(more);
@@ -179,7 +189,7 @@ async fn main() -> Result<()> {
             println!("{}", i18n::t!("app.stopped", name = name));
             return Ok(());
         }
-        Some(Cmd::List { .. } | Cmd::Host { .. }) => unreachable!(),
+        Some(Cmd::List { .. } | Cmd::Host { .. } | Cmd::Flow { .. }) => unreachable!(),
         None => {
             let all = instances.list(true).await?;
             let running: Vec<_> = all

@@ -477,7 +477,11 @@ async fn completion_knows_bundles_flows_commands_and_stations() {
     h.type_str("/flow:").await;
     assert_eq!(
         names(&h),
-        [("flow:xforge".to_string(), "flow-bundle".to_string())]
+        [
+            ("flow:export".to_string(), "conix".to_string()),
+            ("flow:import".to_string(), "conix".to_string()),
+            ("flow:xforge".to_string(), "flow-bundle".to_string())
+        ]
     );
     h.core.state.ui.composer.clear();
     h.type_str("/flow:xforge:").await;

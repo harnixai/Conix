@@ -198,6 +198,10 @@ pub(crate) fn route(s: &mut State, name: &str, arg: &str) -> Option<Vec<Effect>>
         return Some(list_bundles(s));
     }
     if let Some(addr) = name.strip_prefix("flow:") {
+        // `export` 与 `import` 是包的保留名（bundle::RESERVED_BUNDLES）：不会是哪个包，在查包之前接下。
+        if matches!(addr, "export" | "import") {
+            return Some(crate::flows::package_command(s, name, arg));
+        }
         return Some(global(s, addr, arg));
     }
     let (b, seg) = match name.split_once(':') {
@@ -599,11 +603,23 @@ pub(crate) fn candidates(s: &State, prefix: &str) -> Option<Vec<SlashCommand>> {
     };
     if let Some(rest) = prefix.strip_prefix("flow:") {
         return Some(match rest.split_once(':') {
-            None => bundle_names(s)
-                .iter()
-                .filter_map(|n| s.bundle_info(n))
-                .filter(|b| b.name.starts_with(rest))
-                .map(|b| mk(format!("flow:{}", b.name), b.title, SRC_BUNDLE))
+            None => ["export", "import"]
+                .into_iter()
+                .filter(|w| w.starts_with(rest))
+                .map(|w| {
+                    mk(
+                        format!("flow:{w}"),
+                        i18n::tr(&format!("chat_update.cmd_flow_{w}")),
+                        "conix",
+                    )
+                })
+                .chain(
+                    bundle_names(s)
+                        .iter()
+                        .filter_map(|n| s.bundle_info(n))
+                        .filter(|b| b.name.starts_with(rest))
+                        .map(|b| mk(format!("flow:{}", b.name), b.title, SRC_BUNDLE)),
+                )
                 .collect(),
             Some((b, tail)) => {
                 let cat = s.bundle_info(b)?;

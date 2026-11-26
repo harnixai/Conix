@@ -1482,6 +1482,7 @@ dependencies = [
  "tracing",
  "uuid",
  "wire",
+ "zip",
 ]
 
 [[package]]

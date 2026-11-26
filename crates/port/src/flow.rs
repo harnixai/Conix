@@ -296,3 +296,56 @@ pub enum RunOp {
     Resume,
     Cancel,
 }
+
+/// 流程包（zip）的 `MANIFEST.yaml` 里给人看的那部分：导出的结果、导入的报告、`conix flow inspect` 都用它。
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FlowPackageInfo {
+    pub name: String,
+    pub version: String,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub description: String,
+    /// 导出它的 Conix：`x.y.z` 与完整的构建号。
+    #[serde(default)]
+    pub conix_version: String,
+    #[serde(default)]
+    pub conix_build: String,
+    #[serde(default)]
+    pub exported_at: String,
+    /// 要求的最低 Conix（`>=x.y.z`）。
+    #[serde(default)]
+    pub requires_conix: String,
+    #[serde(default)]
+    pub files: u32,
+    /// 带的流程（全名）与命令。
+    #[serde(default)]
+    pub flows: Vec<String>,
+    #[serde(default)]
+    pub commands: Vec<String>,
+    /// 其中 `command` 类门禁的个数：它们只在受信任的项目里跑。
+    #[serde(default)]
+    pub command_gates: u32,
+}
+
+/// `/flow:export` 的结果：写出的文件。
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FlowExported {
+    pub file: String,
+    pub package: FlowPackageInfo,
+}
+
+/// `/flow:import` 的结果。
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FlowImported {
+    pub package: FlowPackageInfo,
+    /// 装到哪了。
+    #[serde(default)]
+    pub installed: String,
+    /// `--force` 覆盖时，旧的那份移到哪了。
+    #[serde(default)]
+    pub backup: Option<String>,
+    /// 遮住了同名的插件（`plugin <名>`）或内置的（`builtin`）流程包。
+    #[serde(default)]
+    pub shadows: Option<String>,
+}

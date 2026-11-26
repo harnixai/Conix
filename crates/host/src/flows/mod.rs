@@ -8,6 +8,7 @@ pub mod builtin;
 mod frames;
 mod goto;
 mod map;
+pub mod package;
 pub(crate) mod policy;
 pub(crate) mod session_host;
 mod swap;
@@ -47,7 +48,7 @@ const AGENT_DIRS: [&str; 2] = ["state/scratchpad", "state/memory"];
 const RUNS_DIR: &str = "state/conix/runs";
 
 /// 定义里写的场景就是 Agix 的场景名；Conix 只开 `code`。
-const SCENE: &str = "code";
+pub(crate) const SCENE: &str = "code";
 
 /// 引擎放 worktree 的目录名（Agix 的 `worktree_dir` 缺省值）：在仓库根，Agix 认得它下面第一层是
 /// worktree，把那里的路径映射回主仓库做保护，所以运行的 worktree 只能是 `.wkts/<运行>`，不能再分一层。
@@ -728,6 +729,67 @@ impl Flows {
         }
     }
 
+    /// 启用着的插件的流程目录（按插件名）：导出找来源、导入提醒遮住了谁。
+    async fn plugin_flow_dirs(&self) -> Vec<(String, PathBuf)> {
+        let Some(hub) = self.hub.upgrade() else {
+            return vec![];
+        };
+        hub.mounted_plugins()
+            .await
+            .iter()
+            .filter_map(|m| m.flows_dir().map(|d| (m.name.clone(), d)))
+            .collect()
+    }
+
+    /// `/flow:export`：项目的、插件的、内置的流程包都能导出；文件省略就写在项目根下。
+    async fn export_bundle(
+        &self,
+        bundle: &str,
+        file: Option<String>,
+    ) -> Result<port::FlowExported, PortError> {
+        let project = Path::new(&self.project);
+        let plugins = self.plugin_flow_dirs().await;
+        let (dir, _) = package::locate(project, &plugins, self.builtin_dir.as_deref(), bundle)
+            .ok_or_else(|| PortError::Failed(format!("no flow bundle {bundle} in this project")))?;
+        let out = file.as_deref().map(|f| project.join(f));
+        let project = project.to_path_buf();
+        tokio::task::spawn_blocking(move || package::export(&dir, out.as_deref(), &project))
+            .await
+            .map_err(|e| PortError::Failed(e.to_string()))?
+            .map_err(PortError::Failed)
+    }
+
+    /// `/flow:import`：装进项目、再让列表跟着变。
+    async fn import_package(
+        &self,
+        file: &str,
+        force: bool,
+    ) -> Result<port::FlowImported, PortError> {
+        let project = PathBuf::from(&self.project);
+        let from = project.join(file);
+        let plugins = self.plugin_flow_dirs().await;
+        let catalog = self.packs().catalog();
+        let done = tokio::task::spawn_blocking({
+            let project = project.clone();
+            move || {
+                package::import(
+                    &from,
+                    &project,
+                    &package::ImportOptions {
+                        force,
+                        catalog,
+                        plugin_dirs: &plugins,
+                    },
+                )
+            }
+        })
+        .await
+        .map_err(|e| PortError::Failed(e.to_string()))?
+        .map_err(PortError::Failed)?;
+        self.flows_changed().await;
+        Ok(done)
+    }
+
     /// 启用着的插件变了：重建流程包、换上新的门禁与步骤，列表跟着刷新。在跑的运行不受影响。
     pub(crate) async fn set_plugins(&self, mounted: &[crate::plugins::Mounted]) {
         let map = crate::plugins::PluginMap::build(mounted);
@@ -916,6 +978,12 @@ impl FlowPort for Flows {
                 self.op(&run.0, op).await?;
                 Ok(Reply::Ok)
             }
+            Command::ExportFlow { bundle, file } => Ok(Reply::FlowExported(
+                self.export_bundle(&bundle, file).await?,
+            )),
+            Command::ImportFlow { file, force } => Ok(Reply::FlowImported(
+                self.import_package(&file, force).await?,
+            )),
             other => Err(PortError::Unsupported(other.name().into())),
         }
     }
