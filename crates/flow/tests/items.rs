@@ -281,3 +281,17 @@ fn validation_says_what_task_exit_items_and_commands_may_be() {
     assert_eq!(def.stations[0].foreach, Some(Foreach::Ref("${inputs.x}".into())));
     assert_eq!(serde_json::to_value(&def.stations[0].foreach).unwrap(), json!("${inputs.x}"));
 }
+
+#[tokio::test]
+async fn a_dry_run_mocks_a_scripts_items_and_the_tasks_gates() {
+    let p = scripted().flow(
+        "name: both\nstations:\n  - id: work\n    foreach: {script: pending}\n    executor: {kind: program, step: work}\n    output: {type: object}\n    task_exit: [{kind: gate, gate: lint}]\n    exit: [{kind: output}]\n",
+    );
+    let sb = Sandbox::new(std::sync::Arc::new(p), Default::default());
+    let input = serde_json::from_value(json!({"flow": "both", "mocks": {"items": {"work": [{"id": "x"}, {"id": "y", "after": ["x"]}]}}})).unwrap();
+    let run = sb.start(input, me()).await.unwrap();
+    let p = sb.run(&run).await.unwrap();
+    let kinds: Vec<&str> = p.steps.iter().map(|s| s.kind.as_str()).collect();
+    assert_eq!(kinds, ["items", "task", "task_gate", "task", "task_gate"], "{:?}", p.steps);
+    assert_eq!(p.status, Some(RunStatus::Finished));
+}

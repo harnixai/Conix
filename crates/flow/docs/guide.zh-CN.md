@@ -211,6 +211,26 @@ stations:
     exit: [{kind: output}]
 ```
 
+包里的流程，列表可以由脚本给，干活也可以不用模型：
+
+```yaml
+  - id: build
+    foreach: {script: pending-packages}   # scripts/pending-packages.js 返回工作项
+    max_parallel: 2
+    executor: {kind: command, command: xpkg, args: [build, "${item.id}"]}
+    output: {type: object}
+    task_exit: [{kind: gate, gate: package-verify}]   # 每次交付都判，带着它的 ${item}
+    exit: [{kind: output}]
+```
+
+- `foreach: {script}`：进站时跑，脚本像门禁脚本一样只读，返回列表；抛错或不是列表，这一站没达标并说明原因。
+- 工作项写成 `{id, after: [<id>…]}`：它点名的几项做完（交了、收下了）才派它，`max_parallel` 里照样守着；`after` 指不到、
+  或者成环，这一站没达标；前面那项彻底失败，它也跟着失败。
+- `executor: {kind: command}` 不用模型，跑包声明的命令：返回值就是输出（不是对象时包成 `{result}`），抛错就是这次失败
+  （`retry` 管）；`input.by` 是 `{kind: station}`。
+- `task_exit`（只收门禁）在收下每个任务的交付之前判它。不过就退回：会话、子 Agent 收到发现、改了再交（同输出不合契约），
+  命令、程序这次失败。站自己的 `exit` 只看收下的交付。
+
 ### 规则、策略、门禁
 
 ```yaml

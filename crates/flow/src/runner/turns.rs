@@ -443,7 +443,13 @@ mod tests {
             .gate_def("{name: zero, kind: tool, tool: count, args: {run: '${run}'}, assert: [{path: total, eq: 0}]}")
             .flow(FLOW)
             .flow(COUNTED)
+            .flow(CHECKED)
     }
+
+    /// The same, the tool judging each hand-in before it is taken (`task_exit`).
+    const CHECKED: &str = "{name: checked, stations: [\
+        {id: a, executor: {kind: session, scene: harnix}, skill: do, output: {type: object}, task_exit: [{kind: gate, gate: zero}], exit: [{kind: output}]},\
+        {id: b, exit: [{kind: confirm}]}]}";
 
     /// `count`: what is left to fix, outside the run — what a session's work changes.
     struct Count(Arc<AtomicI64>);
@@ -575,6 +581,20 @@ mod tests {
         t.carry(turns(Delivery::StructuredOutput)).await;
         assert_eq!(t.sent(), ["Do the task.", NUDGE_STRUCTURED]);
         assert_eq!(t.station().await, StationStatus::Passed);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_hand_in_its_tasks_gate_sends_back_goes_back_and_the_reminder_says_what_was_found() {
+        let left = Arc::new(AtomicI64::new(2));
+        let mut t = start_on(Arc::new(MemStore::new()), "checked", left, vec![ends(Some(json!({"n": 1}))), ends(None), ends(None)]).await;
+        t.carry(turns(Delivery::StructuredOutput)).await;
+        let sent = t.sent();
+        assert_eq!(sent.len(), 3, "{sent:?}");
+        assert!(sent[1].starts_with("The flow did not take your output: the checks of your task did not pass: gate zero"), "{}", sent[1]);
+        assert!(sent[2].starts_with(NUDGE_STRUCTURED) && sent[2].contains("What you handed in last was not taken"), "{}", sent[2]);
+        let task = t.task().await;
+        assert_eq!(task.status, TaskStatus::Failed);
+        assert_eq!(task.task_exit.map(|x| x.status), Some(CheckStatus::Fail));
     }
 
     #[tokio::test(start_paused = true)]

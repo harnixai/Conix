@@ -30,3 +30,4 @@ workspace 的成员。为什么分叉、改成什么样见 `docs/design/flows.md
 | 试运行用会话读的流程包（`Sandbox::start_in`）：项目里的流程以前试运行时找不到 | — | 594f782 | 否 |
 | 流程包（`bundle` 模块，`<包>/<名>`，自洽、项目里整包代替或加 `local.md`，`Packs::bundle_file`）；制品目录（`ProjectLayout::with_artifacts_dir`，运行的目录与 `_run/` 投影，`${data_dir}`、`RunRecord::data_dir`）；归档（`FlowDef::archive`、`record.json`）；制品声明（`Station::deliverables`、骨架、隐含的 deliverables 门禁）；包的命令（`flow_command`、`Pinned::commands`、可写的 QuickJS）；运行 id 由流程名把 `/` 换成 `.` | layout.md | b73663e | 否 |
 | `flow_gate_try` 带 `data_dir`；包里门禁的脚本按包的名字找（校验与试门禁） | layout.md §2 | 1bea032 | 否 |
+| 命令步骤（`Executor::Command`，只认包声明的命令）；`foreach: {script}`（`Foreach`、`WorkItem::Items`、`Engine::foreach_items`）；工作项的 `after`；任务级出口 `Station::task_exit`（`WorkItem::TaskGate`、`Engine::task_gate_result`、`TaskRec::task_exit`、`task.checked`、`Gates::run_for_task`）；`Work::Foreach::items` 改成 `Foreach` | flows.md（M3、M9） | c2f5292 | 否 |
