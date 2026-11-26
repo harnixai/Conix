@@ -1,0 +1,5 @@
+# 场景 m22：流程包 xforge——地址（/flow:<包>…、流程上下文里 /<包>:<站>）、步进、分诊、建议、多人确认。
+# 数据都在种子 xforge 里；测试里按需要推事件。
+name: m22-xforge
+seed: xforge
+timeline: []

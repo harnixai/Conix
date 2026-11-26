@@ -17,6 +17,8 @@ pub struct Seed {
     pub tasks: Vec<Task>,
     pub task_output: BTreeMap<TaskId, String>,
     pub flows: Vec<FlowSeed>,
+    /// 流程包的目录（`ListBundles`）；不在包里的流程不进来。
+    pub bundles: Vec<port::BundleInfo>,
     pub runs: Vec<RunView>,
     pub jobs: Vec<JobSeed>,
     /// 可装的插件包；装好的不进种子，从 `nothing installed` 起步。
@@ -157,11 +159,14 @@ pub fn busy() -> Seed {
                 started_ms: 1_763_000_000_000,
                 ended_ms: None,
                 usage: Usage::default(),
+                bundle: None,
+                pace: port::Pace::Auto,
             },
             main_session: SessionId::from("b001"),
             stations: vec![],
             def_digest: String::new(),
             def_state: port::DefState::Current,
+            proposals: vec![],
         })
         .collect();
     Seed {
@@ -175,6 +180,7 @@ pub fn busy() -> Seed {
                 origin: FlowOrigin::Builtin,
                 active_runs: 20,
                 source: None,
+                bundle: None,
             },
             stations: vec![],
             yaml: String::new(),

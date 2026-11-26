@@ -119,6 +119,7 @@ fn flow_summaries(info: &PluginInfo) -> Vec<FlowSummary> {
             origin: FlowOrigin::Plugin,
             active_runs: 0,
             source: Some(info.name.clone()),
+            bundle: None,
         })
         .collect()
 }

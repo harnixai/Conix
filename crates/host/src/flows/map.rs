@@ -38,6 +38,8 @@ pub(crate) fn flow_summary(d: &DefRow, active_runs: u32) -> port::FlowSummary {
         origin: origin(d.origin),
         active_runs,
         source: d.source.clone(),
+        // 流程包的归属等宿主接上流程库的包之后再填。
+        bundle: None,
     }
 }
 
@@ -122,6 +124,7 @@ pub(crate) fn def_stations(def: &FlowDef) -> Vec<port::StationView> {
             usage: port::Usage::default(),
             unmet: None,
             session: None,
+            votes: None,
         })
         .collect()
 }
@@ -161,6 +164,8 @@ fn summary_of(rec: &RunRecord, phase: &Phase, now: u64) -> port::RunSummary {
         started_ms: rec.created_at,
         ended_ms: rec.finished_at,
         usage: usage(&rec.usage()),
+        bundle: None,
+        pace: port::Pace::Auto,
     }
 }
 
@@ -181,6 +186,8 @@ pub(crate) fn run_summary(s: &harnix_flow::RunSummary) -> port::RunSummary {
         started_ms: s.created_at,
         ended_ms: s.finished_at,
         usage: usage(&s.usage),
+        bundle: None,
+        pace: port::Pace::Auto,
     }
 }
 
@@ -243,6 +250,7 @@ pub(crate) fn run_view(v: &harnix_flow::RunView) -> port::RunView {
                 usage: r.map(|r| usage(&r.usage())).unwrap_or_default(),
                 unmet: unmet.filter(|u| !u.is_empty()),
                 session: own,
+                votes: None,
             }
         })
         .collect();
@@ -252,5 +260,6 @@ pub(crate) fn run_view(v: &harnix_flow::RunView) -> port::RunView {
         stations,
         def_digest: rec.def_digest.clone(),
         def_state: port::DefState::Current,
+        proposals: vec![],
     }
 }

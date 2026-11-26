@@ -101,6 +101,7 @@ mod tests {
             origin: FlowOrigin::Project,
             active_runs: 0,
             source: None,
+            bundle: None,
         };
         let flows_in = [f("weekly"), f("deploy")];
         assert_eq!(flows(&flows_in)[0].name, "deploy");

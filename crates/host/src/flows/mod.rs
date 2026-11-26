@@ -437,6 +437,11 @@ impl Flows {
         let by = Self::by();
         let e = &self.engine;
         let r = match &op {
+            RunOp::Goto { .. } | RunOp::Switch { .. } => {
+                return Err(PortError::Unsupported(
+                    "station operations by address are not supported yet".into(),
+                ));
+            }
             RunOp::Pause => e.pause(run, by).await,
             RunOp::Resume => e.resume(run, by).await,
             RunOp::Cancel => e.cancel(run, "cancelled from Conix", by).await,
@@ -601,6 +606,8 @@ impl FlowPort for Flows {
     async fn command(&self, cmd: Command) -> Result<Reply, PortError> {
         match cmd {
             Command::ListFlows => Ok(Reply::Flows(self.summaries().await)),
+            // 流程库的包目录与包命令的地址接上之前，TUI 看到的是没有包。
+            Command::ListBundles => Ok(Reply::Bundles(vec![])),
             Command::GetFlow { name } => Ok(Reply::Flow(Box::new(self.detail(&name).await?))),
             Command::ListRuns { flow } => {
                 // 库的列表摘要不带各站，站数要从运行记录算；读不到记录的退回列表摘要。
@@ -621,6 +628,17 @@ impl FlowPort for Flows {
                 flow,
                 subject,
                 inputs,
+                step,
+                ..
+            } if step => {
+                let _ = (flow, subject, inputs);
+                Err(PortError::Unsupported("step pace is not supported yet".into()))
+            }
+            Command::StartRun {
+                flow,
+                subject,
+                inputs,
+                ..
             } => Ok(Reply::RunStarted(
                 self.start_run(&flow, &subject, inputs, None).await?,
             )),

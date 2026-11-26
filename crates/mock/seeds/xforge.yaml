@@ -1,0 +1,137 @@
+# 流程包 xforge 的种子（场景 m22）：包 xforge 带 quick / solid 两条流程，三个命令；
+# x1 步进着停在「实施」（搁置），x2 是 quick 刚起第一站，x3 的检查站要两票、已有一票并有一条打回建议。
+
+commands:
+  - {name: help, description: 列出可用命令, source: builtin}
+  - {name: review, description: 审查当前改动, source: user}
+
+sessions:
+  - summary:
+      id: ux
+      title: 随便聊聊
+      state: idle
+      provenance:
+        instance: dev
+        host: ops-01
+        project: ~/work/auth
+        scene: code
+        model: claude-sonnet-5-5
+        origin: user
+      updated_ms: 1763279950000
+  - summary:
+      id: sx1
+      title: 登录加 OAuth（主会话）
+      state: idle
+      provenance:
+        instance: dev
+        host: ops-01
+        project: ~/work/auth
+        scene: code
+        model: claude-sonnet-5-5
+        origin: {flow_station: {run: x1, flow_title: XForge, subject: 登录加 OAuth, station: spec, station_title: 规格}}
+      updated_ms: 1763279950000
+  - summary:
+      id: sx2
+      title: 修缓存抖动（主会话）
+      state: idle
+      provenance:
+        instance: dev
+        host: ops-01
+        project: ~/work/auth
+        scene: code
+        model: claude-sonnet-5-5
+        origin: {flow_station: {run: x2, flow_title: XForge, subject: 修缓存抖动, station: spec, station_title: 规格}}
+      updated_ms: 1763279950000
+  - summary:
+      id: sx3
+      title: 导出报表（主会话）
+      state: idle
+      provenance:
+        instance: dev
+        host: ops-01
+        project: ~/work/auth
+        scene: code
+        model: claude-sonnet-5-5
+        origin: {flow_station: {run: x3, flow_title: XForge, subject: 导出报表, station: spec, station_title: 规格}}
+      updated_ms: 1763279950000
+
+bundles:
+  - name: xforge
+    title: XForge 开发流程
+    flows: [quick, solid]
+    commands:
+      - {name: xspec, read_only: [list, get, delta, check, help], description: 规格增量}
+      - {name: xledger, read_only: [list, help], description: 台账}
+      - {name: xpkg, read_only: [list, help], description: 工作包}
+    stations: [spec, design, check, apply, archive]
+    triage: true
+
+flows:
+  - summary: {name: xforge/quick, title: XForge 快速, origin: builtin, active_runs: 0, bundle: xforge}
+    stations:
+      - {"id": "spec", "title": "规格", "work": "session", "exit": ["output"], "status": "pending"}
+      - {"id": "apply", "title": "实施", "work": "agent × 2", "exit": ["output", "gate: verify"], "status": "pending"}
+      - {"id": "archive", "title": "归档", "work": "command", "exit": ["output"], "status": "pending"}
+  - summary: {name: xforge/solid, title: XForge 稳妥, origin: builtin, active_runs: 0, bundle: xforge}
+    stations:
+      - {"id": "spec", "title": "规格", "work": "session", "exit": ["output"], "status": "pending"}
+      - {"id": "design", "title": "设计", "work": "session", "exit": ["output"], "status": "pending"}
+      - {"id": "check", "title": "检查", "work": "confirm", "exit": ["confirm"], "status": "pending", "votes": {"approvals": 0, "rejections": 0, "min": 2}}
+      - {"id": "apply", "title": "实施", "work": "agent × 2", "exit": ["output", "gate: verify"], "status": "pending"}
+      - {"id": "archive", "title": "归档", "work": "command", "exit": ["output"], "status": "pending"}
+
+runs:
+  - summary:
+      id: x1
+      flow: xforge/solid
+      subject: 登录加 OAuth
+      status: {"waiting": {"reason": "搁置：实施"}}
+      current: 实施
+      stations_done: 3
+      stations_total: 5
+      started_ms: 1763275200000
+      bundle: xforge
+      pace: step
+    main_session: sx1
+    stations:
+      - {"id": "spec", "title": "规格", "work": "session", "exit": ["output"], "status": "passed"}
+      - {"id": "design", "title": "设计", "work": "session", "exit": ["output"], "status": "passed"}
+      - {"id": "check", "title": "检查", "work": "confirm", "exit": ["confirm"], "status": "passed", "votes": {"approvals": 2, "rejections": 0, "min": 2}}
+      - {"id": "apply", "title": "实施", "work": "agent × 2", "exit": ["output", "gate: verify"], "status": "held"}
+      - {"id": "archive", "title": "归档", "work": "command", "exit": ["output"], "status": "pending"}
+  - summary:
+      id: x2
+      flow: xforge/quick
+      subject: 修缓存抖动
+      status: running
+      current: 规格
+      stations_done: 0
+      stations_total: 3
+      started_ms: 1763275200000
+      bundle: xforge
+      pace: auto
+    main_session: sx2
+    stations:
+      - {"id": "spec", "title": "规格", "work": "session", "exit": ["output"], "status": "working"}
+      - {"id": "apply", "title": "实施", "work": "agent × 2", "exit": ["output", "gate: verify"], "status": "pending"}
+      - {"id": "archive", "title": "归档", "work": "command", "exit": ["output"], "status": "pending"}
+  - summary:
+      id: x3
+      flow: xforge/solid
+      subject: 导出报表
+      status: {"waiting": {"reason": "待确认：检查"}}
+      current: 检查
+      stations_done: 2
+      stations_total: 5
+      started_ms: 1763275200000
+      bundle: xforge
+      pace: auto
+    main_session: sx3
+    proposals:
+      - {"id": "p1", "station": "check", "kind": "rework", "to": "design", "reason": "接口缺取消语义", "by": "reviewer", "status": "open"}
+    stations:
+      - {"id": "spec", "title": "规格", "work": "session", "exit": ["output"], "status": "passed"}
+      - {"id": "design", "title": "设计", "work": "session", "exit": ["output"], "status": "passed"}
+      - {"id": "check", "title": "检查", "work": "confirm", "exit": ["confirm"], "status": "working", "votes": {"approvals": 1, "rejections": 0, "min": 2}}
+      - {"id": "apply", "title": "实施", "work": "agent × 2", "exit": ["output", "gate: verify"], "status": "pending"}
+      - {"id": "archive", "title": "归档", "work": "command", "exit": ["output"], "status": "pending"}
