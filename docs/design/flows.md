@@ -9,7 +9,7 @@
 | Harnix-v0.4.7 | 流程库的分叉基线：`crates/flow` 从这个发布标签的 `crates/flow` 分出来，之后在 Conix 里改，稳定后整理成 issue 提给 Harnix |
 | harnixai/Agix#111 | 宿主不带会话直接调 MCP 工具（`mcp.callTool`）：确认走外部审批要用它 |
 
-## 1. 为什么要改
+## 1. 为什么要改，以及怎么分层
 
 企业的治理要的是"每一站凭证据过，证据事后查得到"。分叉前的流程库做不到：
 
@@ -21,6 +21,43 @@
   询问拦着，会话切到 `bypassPermissions` 就拦不住。项目里存一份同名流程就盖掉了插件下发的那份，门禁随之可以删掉。
 - **交付没有形状。** 子流程交给父任务的是子运行每一站输出拼成的对象；`agent` 站的交付由主 Agent 转述，子 Agent 实际
   有没有跑完，流程不核对。
+
+### 1.1 分层与扩展点
+
+流程的东西分三层，每一层的写法与读者不同：
+
+| 层 | 写在哪 | 是什么 | 谁读 |
+|---|---|---|---|
+| 契约 | YAML（`bundle.yaml`、流程定义） | 有哪些流程与站、怎么出站、谁来批、能打回到哪、能写哪里、怎么选路 | 人、流程标签、校验与试运行、引擎、写流程的模型 |
+| 机制 | Rust（`crates/flow` 与 Conix 宿主） | 持久的状态机、派工、选路与换路、授权、写入执法、确认与审批、证据、原语（文件、git、运行查询、锁） | 无：它执行契约 |
+| 策略 | JS（包里的 QuickJS） | 门禁怎么判、命令怎么改数据、不用模型的步骤、工作项从哪来 | 无：它被契约引用 |
+
+契约是声明的，所以能被工具检查、被界面画出来、被模型读懂；策略藏在脚本里，只能被执行。因此**能写进契约的不写进脚本**：
+谁能批、能退到哪、能写哪里这类治理上的东西，必须在 YAML 里看得见。
+
+新能力放哪，按下面的判据：
+
+| 放哪 | 判据 |
+|---|---|
+| Rust | 要持久（跨重启）、要可信（流程作者与模型绕不过）、要并发与锁、要执法、跨流程通用 |
+| 包 JS | 只依赖项目文件与运行数据、确定、随运行钉住、只为这一个应用 |
+| Agix 插件 | 要 Agix 的工具管线（`tools.Bash`、MCP、权限规则、hook）、要独立于项目分发、要在流程之外给所有会话用 |
+
+### 1.2 两个 QuickJS：分工，不合并
+
+| | 流程库自己的（包 JS） | Agix 的（插件命令、插件函数） |
+|---|---|---|
+| 定位 | 流程的零件：门禁脚本、命令、命令步骤、选值脚本 | 通用扩展；要工具与 MCP 的门禁与步骤 |
+| 生命周期 | 随运行钉住（`Pinned`） | 装了就生效 |
+| 能力 | `flow.*`（§7.7），没有 shell、没有网络 | `tools.*`、`agix.*`、`conix.*` |
+| 授权 | 流程库按范围限写，不问人 | Agix 的权限与披露 |
+| 依赖 | 不依赖 Agix（往回提给 Harnix 也成立） | Agix |
+
+不合并的原因：包 JS 要随运行钉住、要确定、要在没有 Agix 时也成立；插件函数跑在工具管线里，结论会随会话设置变。
+
+**对齐写法**：两边的入口都是 `export default function (input, flow)`；`flow.*` 的纯计算函数与 `agix.*` 同名同义
+（`yaml`、`glob`、`schema`、`sha256`、`path`）。同一段逻辑在包与插件之间搬，只换宿主对象。包 JS 要跑 shell 或调 MCP
+时不开口子：写成 `command` 门禁，或交给插件函数（`[x-conix.gates]` / `steps`）。
 
 ## 2. 门禁：按"检查逻辑写在哪"分三类
 
@@ -128,10 +165,10 @@ export default function (input, flow) {
 - **`flow` 只有只读的东西**：
   - `flow.read.text / json / yaml / jsonl / frontmatter(path)`：读不到是 `null`；
   - `flow.glob(pattern)`、`flow.stat(path)`（`{size, sha256}` 或 `null`）；
-  - `flow.schema.validate(value, schema)`（回 `{ok, errors}`）；
+  - `flow.schema.validate(value, schema)`（回 `{ok, errors}`；§7.7 里叫 `flow.validate`，两个名字同义）；
   - `flow.log(...)`（进 `gate-<名>.log`）。
 
-  路径规则同上。没有写、没有命令、没有网络、没有 `import`。
+  路径规则同上。没有写、没有命令、没有网络。包内的 `import`、`flow.git`、`flow.runs` 见 §7.6–§7.7。
 - **证据由运行时记**：脚本读过、stat 过的每个文件，路径与 sha256 自动进结果的 `evidence`，脚本自己写的 `evidence`
   不算数——证据造不了假。
 - **限额**：时限（中断回调）、内存上限（64 MiB）、返回值至多 1 MiB。
@@ -214,6 +251,26 @@ exit:
 **每个决定都留记录**：`ConfirmRec{by, via, at, round, pass, reason, ref}`，`ref` 是外部审批单号或链接。驳回就是这一条出口
 不过，站未达标，按 `on_unmet` 打回（沿用）。`timeout` 到了没有决定，同样不过，`summary` 写"3 天内没有决定"。
 
+### 4.1 多人确认与绑定修订
+
+```yaml
+- kind: confirm
+  who: reviewer
+  min: 2                 # 至少几个人批准；缺省 1
+  distinct: true         # 一人一票（缺省）
+  reject: any            # any（缺省：一人驳回就不过）| majority
+  not: [author]          # 可选：作者不能投
+  binds: [deliverables]  # 批的是什么：deliverables（缺省）| 路径 glob 列表
+```
+
+- 每个 `/confirm` 记一票（`ConfirmRec` 加上票序），够 `min` 才过；`distinct` 下同一个人投两次只算一票。
+- **职责分离不强制**：缺省作者也能投。要分开就写 `not: [author]`；作者指这次运行里交付过的会话、子 Agent 的发起人。为什么不缺省强制：
+  一个人用 Conix 时作者与批准人就是同一人，强制了流程就走不通。
+- **`reject: any`** 缺省：一人驳回，这条出口就不过；`majority` 是驳回票过半才不过。
+- **绑定**：通过时记下 `binds` 每个文件的摘要，`deliverables` 是本站及之前各站声明的制品。之后每一站出站、运行结束前，引擎自动核对一遍
+  （隐含的出口，同 `sealed` 的做法）；被改过就**不过**，findings 写"检查站批过的 design.md 改了"，出路是打回那一站重批。
+- 要多个模型独立检查：站写 `tasks:`，每个任务一个执行者或模型，台账汇总，出口照旧；这与多人确认是两件事。
+
 ## 5. 强制放行与受管流程
 
 - **强制放行要人、要理由**（理由沿用），记 `ForcedRec{by, reason, unmet}`。
@@ -274,6 +331,145 @@ Conix 内置一个按这些写的开发流程包 `xforge`（能力与 xforge 插
 并进规格），源头是演示项目 `examples/xforge/.conix/flows/xforge/`。它的流程就是流程本身，没有 `xflow` 这一层：运行的状态
 在流程里，结构化的数据由 `xspec`、`xledger`、`xpkg` 三个命令维护。
 
+### 7.1 包：`bundle.yaml`
+
+```yaml
+name: xforge
+title: XForge 开发流程
+version: 0.2.0
+flows: [quick, solid, major]          # 选路的顺序：短的在前（§7.2）
+start:
+  route: [quick, solid, major]        # 缺省就是 flows 的顺序
+  triage: triage                       # skill：选路要判断时，主会话照它判
+pace: auto                             # auto | step（§7.4），启动时可改
+commands:
+  xspec:   {read_only: [list, get, delta, check, pending, help]}
+  xledger: {read_only: [list, help]}
+  xpkg:    {read_only: [list, help]}
+```
+
+| 字段 | 意思 |
+|---|---|
+| `flows` | 包里的流程，也是缺省的选路顺序 |
+| `start.route` | 选路的顺序；不写就是 `flows`。选用的 `script` 形式让脚本回一个流程名 |
+| `start.triage` | 分诊 skill（§7.2） |
+| `pace` | `auto`（缺省）或 `step`（§7.4） |
+| `commands` | 包的命令（§7.6）。写成列表（`[xspec, xledger]`）时每个命令的全部子命令都算会写；写成映射时 `read_only` 列出只读的子命令 |
+
+- **`read_only`** 按命令名后的第一个词匹配，照 Agix `[[command]]` 的约定。声明它是为了让运行之外也能放心地查
+  （`/flow:xforge:xspec list`）：会写的命令运行之外只有人能调（§7.6）。
+- **包里的名字一个空间**：流程名、命令名、包里任一流程的站 id 不能撞。站 id 在几条流程之间可以重复，它们是同一个站的不同长度。
+  保留名：`help`、`status`。读包时校验。为什么：地址 `/<包>:<名字>` 只有一个名字位（interaction §4.5），三种名字不能靠位置区分，
+  只能靠不重名。
+- 包目录：`flows/*.yaml`（或平铺的 `<流程>.yaml`）、`skills/`、`gates/`、`scripts/`、`commands/`、`lib/`、`templates/`、`policies/`。
+- 不在包里的流程，包名就是流程名；选路、换路、步进照样能用。
+
+### 7.2 启动与选路
+
+| 怎么起 | 结果 |
+|---|---|
+| 点名流程：`/flow:xforge:solid <主题> [--risk medium]`、`flow_start {flow: "xforge/solid"}` | 就是它；输入不合它的 schema 就拒。schema 就是这条流程的准入条件：solid 的 `risk` 只收 low、medium |
+| 只给包：`/flow:xforge <主题> --risk low`、`flow_start {flow: "xforge", inputs}` | 按 `start.route` 的顺序取**第一个接受这份输入的流程**。确定，不用模型 |
+| 只给包、输入定不了路（没给 `risk`） | **分诊**：Conix 往主会话发一轮（`start.triage` skill 加主题），模型读代码、判复杂度，再 `flow_start {flow: "xforge", inputs: {risk}, reason}`；选的理由记进运行 |
+
+分诊放在主会话里：它要读项目代码，而主会话本来就是用户在对话的那个。模型在对话里自己决定开流程时，`flow_start` 的说明里列着包的
+流程与各自接受的输入，可以点名，也可以只给包。
+
+### 7.3 换路
+
+做到一半发现选短了：
+
+- `flow_switch {to, reason}`（模型）或流程上下文里的 `/xforge:solid <理由>`（人）。
+- **只在第一站还没过时允许**：同一个运行、同一个运行目录，换钉新流程；当前站 id 必须在新流程里，已写的制品与输出保留；记
+  `switched {from, to, by, reason}`。
+- 过了第一站要换路，就取消再开，理由记进取消。为什么不允许中途换：后面的站已经按旧流程的出口过了，换钉会让已过的证据对不上新流程的定义。
+
+### 7.4 步进
+
+`pace: step`（`bundle.yaml` 定缺省，启动时 `--step` 改）：每一站进站都 hold，人用 `/xforge:<站>` 一站站推。放行只认人；
+步进里模型照旧能打回。`/xforge:<站>` 按运行此刻与这一站的关系做事，见 interaction §4.5 的站操作表。
+
+### 7.5 回退点与模型建议
+
+回退点由流程定义，不由模型或人临时指定：
+
+| 写在哪 | 意思 |
+|---|---|
+| 站的 `rework_to` | 这一站能退到的点 |
+| `on_unmet.rework_to` | 出口没达标时自动打回的缺省点 |
+| 门禁出口的 `rework_to` | `{kind: gate, gate: spec-delta, rework_to: propose}`：这道门不过时自动打回到这里，而不是缺省点 |
+
+- 门禁级的回退点必须是这一站的 `rework_to`、`on_unmet.rework_to` 或这一站自己，读定义时校验。
+- 几道门都不过时，取最靠前的回退点；打回次数仍算在 `on_unmet.max` 里，所以换了目标站也不会无限循环。
+- **模型可以建议回退**：站里的会话 `flow_propose {kind: rework, to, reason}`；`to` 必须是这一站定义的回退点之一，否则报错并列出能退到哪。
+  建议**记进运行记录**（`RunRecord.proposals`：id、站、任务、kind、to、reason、by、at、状态 `open` / `accepted` / `dismissed`），并发事件。
+- 人用 `/xforge:<to> [理由]` 接受：就是打回，同时把建议标成 `accepted`。站往前走或被打回时没接受的建议标成 `dismissed`。
+  Conix 在流程上下文的对话里与流程标签上把等着的建议列出来。
+- 为什么站里的模型只能建议：它在做这一站，判断不好这一站的结果，由人决定退不退；主会话的模型仍可以直接 `flow_rework`，受同样的回退点约束。
+
+### 7.6 包 JS：件与签名
+
+| 件 | 位置 | 由谁调 | 能写 | 返回 |
+|---|---|---|---|---|
+| 门禁脚本 | `scripts/<名>.js` | 门禁 `kind: script` | 否 | 门禁结果（§3） |
+| 选值脚本 | `scripts/<名>.js` | `foreach: {script: …}`、`start.route` 的 `script` | 否 | 一个值（工作项列表、流程名） |
+| 命令 | `commands/<名>.js` | `flow_command`、`/…:<命令>`、站 `executor: {kind: command}` | 运行目录（`_run/` 除外）、`${data_dir}` | 文本或值 |
+| 库 | `lib/<名>.js` | 上面三种 `import` | 无 | 无 |
+
+- **入口**：`export default function (input, flow)`。
+- **`import`**：只认包内的相对路径（`import { readSpecs } from "../lib/specs.js"`），不出包、没有 npm，随运行一起钉住。
+  门禁与命令共用一份判法：spec-delta 门禁与 `xspec check` 调同一个函数，不会各判各的。
+- **命令步骤**：站写 `executor: {kind: command, command: xspec, args: [archive]}`，不用模型，返回值就是这一站的输出（不是对象时包成
+  `{result}`），抛错就是任务失败。不另立"步骤"这种件：一个命令同时给人、模型、站用。
+- **命令的 `input`**：`{args, by: {kind: person|model|station, id}, run?, output_dir?, data_dir, inputs?, outputs?, item?}`。
+  `by` 让命令区分"人答的"和"模型写的"（澄清问题要人答：命令要求 `by.kind == person`）。运行之外 `run`、`output_dir` 是空的，
+  只有 `${data_dir}`，用到运行目录的子命令报"要在运行里"。
+- **谁能调会写的命令**：运行里的模型可以；运行之外只有人（`/flow:<包>:<命令>`）。`read_only` 里的子命令运行之外模型也能调。
+
+### 7.7 `flow.*`
+
+| 组 | 函数 | 谁能用 |
+|---|---|---|
+| 读 | `read.text/json/yaml/jsonl/frontmatter`、`glob`、`stat` | 全部 |
+| 写 | `write.text/yaml/json`、`append`、`remove`、`print` | 命令 |
+| 算 | `validate(value, schema)`、`yaml` / `json` 编解码、`sha256`、`path.*` | 全部 |
+| git | `git.base()`（运行的基线提交）、`git.changed({since?})`（基线以来的改动加没提交的，排除制品目录与 `.conix/`）、`git.head()` | 全部，只读 |
+| 运行 | `runs.list({bundle?, active?})`、`runs.get(id)`：状态、输入、输出、运行目录 | 全部，只读 |
+| 日志 | `log` | 全部 |
+
+读写都限在工作目录与各件允许的范围里，出界报错。git 由 Rust 跑，不给 JS 起进程：JS 里有了进程就绕过了"只读、确定"。
+§2.3 的门禁脚本只用只读的那几组；`import`、`git`、`runs` 对它同样可用。
+
+### 7.8 工作项
+
+- **从脚本来**：`foreach: {script: pending-packages}`，脚本读工作包、只回没做完的；旧的引用写法照旧。
+- **先后**：工作项可以带 `after: [<id>]`，派工器按它排，`max_parallel` 里也守着；有环就拒绝，任务失败。
+- **任务级出口**：`task_exit: [{kind: gate, gate: package-verify}]`，在任务 `flow_submit` 时跑，引用里有 `${item}`；不过就把 findings
+  交回这个任务去改（同输出不合 schema），不算站没达标；重试次数受 `retry` 管。"每包一道验证门、交付对 git 账"写在这里。
+
+### 7.9 写入范围与基线
+
+- 运行开始记 `base_commit`（在 worktree 里跑的记 worktree 的 HEAD），`${run.base}` 可引用，`flow.git.*` 用它。
+- 站与任务可以写 `writes: [glob]`（白名单，`${item.paths}` 展开成列表）：项目内的写入不在白名单里就拒，理由给模型看。
+  运行目录永远可写（`_run/` 除外）；策略里的 `deny` 照旧优先（`by-commands` 仍挡结构化文件）。
+- **项目外照 `guard`**：`writes` 只收紧项目内的写入，不放宽，也不管项目外。
+- 不写 `writes` 的站与以前一样。
+
+### 7.10 跨运行与其他
+
+| 机制 | 内容 | 状态 |
+|---|---|---|
+| 数据目录的锁 | 同一个包的 `${data_dir}` 写入跨运行串行（命令、归档）；`flow.runs` 让命令算"别的在途运行占了哪些编号" | 做 |
+| 自描述与测试 | 每个命令的 `help` 来自文件头的用法；`flow test`：`tests/*.yaml` 给一份样例目录与期望（门禁结论、命令输出），不用模型跑完 | 做 |
+| 证据链 | 运行历史与门禁证据成哈希链，`inspect` 能验 | 后做 |
+| 子运行看父运行 | 子运行能读 `${parent.output_dir}`（只读）：双路开发时两个子运行（各在 worktree）共用父运行的规格侧 | 需要双路时再做 |
+
+### 7.11 兼容
+
+- 流程定义只加字段，旧定义照读；`bundle.yaml` 的 `commands` 列表写法照读。
+- 插件带的流程包、受管流程不变；插件包里的流程包同样有 `/flow:<包>` 地址。
+- 每一项在 `3rds/INDEX.md` 的分叉记录里记一行；只在 Conix 里有的（地址、分诊、授权）标"in Conix"。
+
 ## 8. 落点
 
 | 内容 | 位置 |
@@ -292,6 +488,14 @@ Conix 内置一个按这些写的开发流程包 `xforge`（能力与 xforge 插
 | 写流程的会话：试门禁、指南分章 | `crates/flow/src/author.rs`（`flow_gate_try`、`flow_guide {topic}`）、`runner/gate.rs`（`try_gate`）、`docs/guide/` |
 | 演示项目 | `examples/demo/`（流程、门禁、脚本、作业）；`crates/flow/tests/demo.rs` 不调模型地查它，`crates/conix/tests/live_demo.rs` 用真实模型跑它 |
 | 流程包、制品目录、归档、制品声明、包的命令 | `crates/flow/src/bundle.rs`、`packs.rs`、`kernel/layout.rs`（`with_artifacts_dir`）、`runner/archive.rs`、`runner/project.rs`（骨架）、`runner/script.rs`（`Writer`、`command`）、`runner/tools.rs`（`flow_command`） |
+| 包的字段（`flows`、`start`、`pace`、`commands.read_only`）、名字空间与保留名校验 | `crates/flow/src/bundle.rs`、`kernel/validate.rs` |
+| 选路、分诊、换路、步进（hold）、站操作 | `crates/flow/src/kernel/route.rs`（新）、`kernel/engine.rs`、`kernel/txn.rs`；分诊那一轮由 `crates/host/src/flows/`（新：`triage.rs`）发给主会话 |
+| 回退点（门禁级 `rework_to`）、模型的回退建议（`RunRecord.proposals`） | `kernel/def.rs`、`kernel/validate.rs`、`kernel/run.rs`、`kernel/txn.rs`、`runner/tools.rs`（`flow_propose`） |
+| 多人确认、绑定与过期核对 | `kernel/def.rs`（`ExitCond::Confirm`）、`kernel/run.rs`（`ConfirmRec`）、`kernel/txn.rs` |
+| 包 JS：`import`、`lib/`、`flow.*`、命令步骤、命令的 `by` | `runner/script.rs`、`runner/tools.rs`（`flow_command`）、`runner/dispatch.rs` |
+| `flow.git`、基线、`writes` 执法 | `runner/git.rs`、`runner/script.rs`、`kernel/run.rs`（`base_commit`）、`crates/host/src/flows/policy.rs`（写入执法） |
+| 工作项（`foreach` 脚本、`after`、`task_exit`） | `kernel/work.rs`、`kernel/def.rs`、`kernel/txn.rs`、`runner/dispatch.rs` |
+| 流程地址与本地路由、补全 | `crates/model/src/flows.rs`、`crates/model/src/composer.rs`（interaction §4.5） |
 | 内置的 xforge | `examples/xforge/`（项目与流程包）、`crates/host/build.rs`、`crates/host/src/flows/builtin.rs`；`crates/flow/tests/xforge.rs`、`crates/conix/tests/live_xforge.rs` |
 
 ## 9. 往回迁
