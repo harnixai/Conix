@@ -1,0 +1,10 @@
+name: interfaces-archived
+title: 接口增量都并进了基线
+description: >-
+  ${data_dir}/interfaces/ 里：新模块在、added 的元素在且签名与状态就是增量里的、modified 的换成了增量里的、promoted 是 stable、
+  deprecated 是 deprecated、removed 的不在了。xarch archive 做的就是这个。没有增量或项目没开接口基线时直接过。
+kind: script
+script: interfaces-archived
+params:
+  delta: "${output_dir}/interface-delta.yaml"
+  interfaces: "${data_dir}/interfaces/*.yaml"
