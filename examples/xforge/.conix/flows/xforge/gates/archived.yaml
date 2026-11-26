@@ -1,6 +1,6 @@
 name: archived
 title: 增量都并进了规格
-description: ${data_dir}/specs/ 里：added 的每条都在、正文就是增量里的；modified 的正文换成了增量里的；removed 的不在了。xspec archive 做的就是这个。
+description: ${data_dir}/specs/ 里：added 的每条都在、正文就是增量里的；modified 的正文换成了增量里的；removed 的不在了。xspec archive 做的就是这个。接口增量由 xarch archive 并，不在这里；关着规格基线的项目不欠。
 kind: script
 script: archived
 params:
