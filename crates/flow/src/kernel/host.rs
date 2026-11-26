@@ -822,6 +822,26 @@ pub enum WorkItem {
         round: u32,
         script: String,
     },
+    /// A subflow task whose child works in a worktree of its own (`workspace: worktree`), claimed
+    /// under `token`: the fork commit made in the run's worktree (once a round,
+    /// `StationRec::fork`), the child's worktree made from it, and the child started through
+    /// `subflow_forked`.
+    Fork {
+        run: String,
+        station: String,
+        round: u32,
+        task: String,
+        token: String,
+    },
+    /// The child run `child` of a task of `run`, in a worktree of its own, is over: its branch
+    /// merged into the run's (when it delivered and the task still waits for it), its worktree
+    /// removed; reported through `subflow_joined`, which hands the task its result.
+    Join {
+        run: String,
+        station: String,
+        task: String,
+        child: String,
+    },
 }
 
 /// A session task's placement, as the station gave it with `params` resolved for the run.

@@ -286,6 +286,7 @@ async fn with_session(rn: &Arc<Runner>, job: &SessionJob) {
             };
             spec.recording = job.recording.clone();
             spec.tools = rn.tools().specs().to_vec();
+            spec.deny_read = super::fork::deny_read(rn.engine(), &rec).await;
             match host.open(spec).await {
                 Ok(o) => o.id,
                 Err(e) => {

@@ -84,6 +84,7 @@ pub(crate) async fn open_or_make(rn: &Arc<Runner>, run: &str) -> Result<SessionI
     spec.shown_in = rec.shown_in.clone();
     spec.recording = rn.cfg.main_recording.as_ref().and_then(|f| f(&rec));
     spec.tools = rn.tools().specs().to_vec();
+    spec.deny_read = super::fork::deny_read(engine, &rec).await;
     let opened = host.open(spec).await.map_err(|e| format!("no main session: {e}"))?;
     let attached = engine.attach_main(run, &opened.id, wanted).await;
     settle_quiet(rn, run, attached).await;

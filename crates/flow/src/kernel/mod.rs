@@ -3,6 +3,7 @@
 //! reads and commits through the host traits in [`host`].
 
 pub(crate) mod confirm;
+pub mod fork;
 pub mod def;
 pub mod engine;
 pub mod parts;

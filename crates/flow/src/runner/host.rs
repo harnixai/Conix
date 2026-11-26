@@ -80,6 +80,11 @@ pub struct OpenSpec {
     /// for the host to register; it answers each call through `FlowTools::call`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tools: Vec<ToolSpec>,
+    /// Directories the session must not read, absolute: a child run in a worktree of its own is
+    /// kept from its parent's worktree and its siblings' (`fork.rs`) — what it shares with them is
+    /// its fork commit. The host denies reading each, in its sandbox too, not only its file tools.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub deny_read: Vec<PathBuf>,
 }
 
 impl OpenSpec {
@@ -99,6 +104,7 @@ impl OpenSpec {
             shown_in: None,
             recording: None,
             tools: vec![],
+            deny_read: vec![],
         }
     }
 }

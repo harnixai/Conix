@@ -429,6 +429,12 @@ Conix 在 Harnix 0.4.7 分叉了这个库，先把站的治理（门禁、确认
   事件 `task.checked`。`Gates::run_for_task`（缺省同 `Gates::run`）是对一个任务跑的宿主门禁。`Work::Foreach::items`
   改成了 `Foreach`（原来是 `String`）；试运行里 `Mocks::items` 给脚本的工作项。
 
+- **子运行在自己的 worktree 里**：`Executor::Subflow` 加 `workspace`（只认 `worktree`）。父运行自己在 worktree 里时，派这种
+  任务交出 **`WorkItem::Fork`**：派工器在父运行的 worktree 里提交分叉提交（一轮一次，记在 `StationRec::fork`，`ForkPoint`），
+  从它建 `<worktrees_root>/<子运行>`，经 **`Engine::subflow_forked`** 报回，子运行在那里起；`WorktreeRec::fork`（`ForkRec`）
+  记父运行的 worktree、分支、映射过来的输出目录（`${parent.output_dir}`）。子运行结束交出 **`WorkItem::Join`**（代替直接交回
+  父任务）：合回父运行的分支、删掉 worktree，经 **`Engine::subflow_joined`** 报回，冲突时父任务失败、列出冲突的文件。
+  **`OpenSpec::deny_read`**：子运行的会话不能读的目录（父运行与兄弟子运行的 worktree），宿主要连沙箱一起拒读。
 - **试运行用会话所在的流程包**：`Sandbox::start_in(input, by, packs)`；`flow_dry_run` 用会话读的那份（项目的流程、件），
   不再只看应用自己的包——项目里的流程以前试运行时找不到。
 

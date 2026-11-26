@@ -583,6 +583,14 @@ is so as not to collide with Harnix's own next one; what changes for a host is l
   **`Engine::task_gate_result`**; `TaskRec::task_exit` (`TaskExitRec`) keeps the hand-in and its checks, event
   `task.checked`. `Gates::run_for_task` (default: `Gates::run`) is a host gate on one task. `Work::Foreach::items`
   is now a `Foreach` (was a `String`); `Mocks::items` mocks a script's items in a dry run.
+- **Children in worktrees of their own**: `Executor::Subflow` gains `workspace` (only `worktree`). With the parent in a
+  worktree, dispatching such a task hands out **`WorkItem::Fork`**: the runner makes the fork commit in the parent's
+  worktree (once a round, `StationRec::fork`, `ForkPoint`), makes `<worktrees_root>/<child>` from it and reports through
+  **`Engine::subflow_forked`**, which starts the child there; `WorktreeRec::fork` (`ForkRec`) keeps the parent's worktree,
+  branch and mapped output directory (`${parent.output_dir}`). The child's end hands out **`WorkItem::Join`** instead of
+  handing the parent's task its result: merged back into the parent's branch, its worktree removed, reported through
+  **`Engine::subflow_joined`**; a conflict fails the parent's task with the files. **`OpenSpec::deny_read`**: directories
+  a child's session must not read (its parent's and its siblings' worktrees); the host denies them, its sandbox too.
 
 ### `FLOW_API_VERSION = 1`
 

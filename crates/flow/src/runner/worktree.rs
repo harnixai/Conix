@@ -40,7 +40,7 @@ static GIT: std::sync::Mutex<()> = std::sync::Mutex::new(());
 const TRIES: usize = 8;
 
 /// `f` off the async threads, holding [`GIT`].
-async fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> Result<T, String> {
+pub(super) async fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> Result<T, String> {
     tokio::task::spawn_blocking(move || {
         let _one = GIT.lock().unwrap_or_else(|e| e.into_inner());
         f()
@@ -64,17 +64,21 @@ fn needs_git(no: &NoRepo) -> FlowError {
     FlowError::Invalid(format!("workspace worktree needs a git repository with a commit: {no}"))
 }
 
-/// Make the worktree a run of `flow` in `root` will work in, from the project's `HEAD`, under an id
-/// allocated for it now: `<worktrees_root>/<id>` on `<branch_prefix>/<id>`. The project's
-/// `<dir>/.gitignore` is written first, so the run's process directory is not something the
-/// project's tree shows. Returns the id and the worktree.
-pub(crate) async fn make(engine: &Engine, root: &str, flow: &str) -> crate::Result<(String, WorktreeRec)> {
+/// Make the worktree a run of `flow` in `root` will work in, from `base` (the project's `HEAD`
+/// when none; a child's: its parent's fork commit, `fork.rs`), under an id allocated for it now:
+/// `<worktrees_root>/<id>` on `<branch_prefix>/<id>` — a child's beside its parent's, never in it.
+/// The project's `<dir>/.gitignore` is written first, so the run's process directory is not
+/// something the project's tree shows. Returns the id and the worktree.
+pub(crate) async fn make(engine: &Engine, root: &str, flow: &str, base: Option<&str>) -> crate::Result<(String, WorktreeRec)> {
     let project = PathBuf::from(root);
     let probed = {
         let project = project.clone();
         blocking(move || git::probe(&project)).await.map_err(FlowError::Invalid)?
     };
-    let repo = probed.map_err(|no| needs_git(&no))?;
+    let mut repo = probed.map_err(|no| needs_git(&no))?;
+    if let Some(base) = base {
+        repo.head = base.to_string();
+    }
     let layout = engine
         .layout()
         .ok_or_else(|| FlowError::Invalid("this host makes no worktrees".into()))?;
@@ -108,6 +112,7 @@ pub(crate) async fn make(engine: &Engine, root: &str, flow: &str) -> crate::Resu
                 branch,
                 base: repo.head.clone(),
                 outcome: None,
+                fork: None,
             };
             // A project in a directory of its repository that git does not track yet: made, so
             // the run has its place in the worktree.
@@ -140,7 +145,7 @@ pub(crate) async fn unmake(engine: &Engine, root: &str, w: &WorktreeRec) {
 }
 
 /// The commit message for what a task left in its worktree.
-fn work_message(rec: &RunRecord) -> String {
+pub(super) fn work_message(rec: &RunRecord) -> String {
     let what = if rec.title.is_empty() { &rec.subject } else { &rec.title };
     let line = what.lines().next().unwrap_or_default().trim();
     format!("Harnix task {} ({}): {line}", rec.id, rec.flow)
@@ -227,7 +232,7 @@ pub(crate) async fn end(engine: &Engine, run: &str, how: WorktreeEnd, by: Actor)
 type Done = (Option<String>, Option<String>, Option<&'static str>);
 
 /// The worktrees root's place in the project's repository (`.wkts`), when it is inside it.
-fn root_in_repo(project: &Path, prefix: &str, root: &Path) -> Option<String> {
+pub(super) fn root_in_repo(project: &Path, prefix: &str, root: &Path) -> Option<String> {
     let mut top = project.canonicalize().ok()?;
     for _ in Path::new(prefix).components() {
         top.pop();

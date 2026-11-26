@@ -463,6 +463,12 @@ pub enum Executor {
         #[serde(default, skip_serializing_if = "Value::is_null")]
         #[cfg_attr(feature = "ts", ts(type = "unknown"))]
         inputs: Value,
+        /// Where the child works: absent, where its parent does (its worktree too); `worktree`, a
+        /// worktree of its own, branched from its parent's at a fork commit and merged back into
+        /// it when the child delivers (`runner/fork.rs`). Only for a parent that works in a
+        /// worktree: the fork commit is made on its branch, never on the project's own.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        workspace: Option<super::run::Workspace>,
     },
 }
 

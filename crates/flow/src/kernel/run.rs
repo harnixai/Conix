@@ -578,6 +578,21 @@ pub struct StationRec {
     /// The outside approvals asked for (`via: mcp` confirmations).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub approvals: Vec<ApprovalRec>,
+    /// Where its subflow tasks in worktrees of their own branched from (`runner/fork.rs`): the
+    /// fork commit of the round, made once for every child of that round.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fork: Option<ForkPoint>,
+}
+
+/// The commit a station's children in worktrees of their own branch from: everything the
+/// parent's worktree held when the first of them was dispatched in `round`, committed on the
+/// parent's branch.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct ForkPoint {
+    pub round: u32,
+    pub commit: String,
+    pub at: u64,
 }
 
 /// A round started by a rework: by whom, why, and — sent back by a station left unmet — what
@@ -613,6 +628,7 @@ impl StationRec {
             spent: Usage::default(),
             reworked: None,
             approvals: vec![],
+            fork: None,
         }
     }
 
@@ -882,6 +898,26 @@ pub struct WorktreeRec {
     /// What became of it, once someone decided; absent while nobody has.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub outcome: Option<WorktreeOutcome>,
+    /// A child run's worktree of its own: what it forked from and merges back into. Absent for a
+    /// run's own worktree, and for a child holding its parent's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fork: Option<ForkRec>,
+}
+
+/// Where a child run's worktree came from (`executor: {kind: subflow, workspace: worktree}`):
+/// made from its parent's fork commit (its `base`), merged back into its parent's branch in its
+/// parent's worktree when it delivers — by the runner, with no person to decide.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct ForkRec {
+    /// The parent's worktree, absolute: what the child's sessions are kept from reading.
+    pub parent_path: String,
+    /// The parent's branch: what the child merges into.
+    pub parent_branch: String,
+    /// The parent's output directory as this worktree holds it, as of the fork:
+    /// `${parent.output_dir}`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_output_dir: Option<String>,
 }
 
 impl WorktreeRec {

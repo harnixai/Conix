@@ -702,6 +702,30 @@ impl Sandbox {
                 },
                 vec![],
             ),
+            // A worktree of its own is git work on a real project: a dry run makes none, and the
+            // child is not started.
+            WorkItem::Fork { run, station, task, .. } => (
+                Stepped {
+                    kind: "fork".into(),
+                    run,
+                    station: Some(station),
+                    task: Some(task),
+                    gate: None,
+                    result: "waits: a child in a worktree of its own is not forked in a dry run".into(),
+                },
+                vec![],
+            ),
+            WorkItem::Join { run, station, task, .. } => (
+                Stepped {
+                    kind: "join".into(),
+                    run,
+                    station: Some(station),
+                    task: Some(task),
+                    gate: None,
+                    result: "ignored: nothing to merge back in a dry run".into(),
+                },
+                vec![],
+            ),
             WorkItem::CloseSession { session } => (
                 Stepped {
                     kind: "close_session".into(),

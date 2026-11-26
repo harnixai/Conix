@@ -16,7 +16,7 @@ use super::def::{Assert, FlowDef, Work};
 use super::run::{RunRecord, TaskStatus};
 
 /// The roots a reference may start with.
-pub const ROOTS: &[&str] = &["run", "subject", "inputs", "stations", "item", "task", "workspace", "output_dir", "data_dir", "base_commit"];
+pub const ROOTS: &[&str] = &["run", "subject", "inputs", "stations", "item", "task", "workspace", "output_dir", "data_dir", "base_commit", "parent"];
 
 /// The directory a run works in under the application's workspaces (`<root>/<run>`, the run's id
 /// made safe as a name): `${workspace}`.
@@ -81,7 +81,20 @@ pub fn context_in(run: &RunRecord, item: Option<&Value>, task: Option<&str>, wor
         "output_dir": run.output_dir.as_deref().map_or(Value::Null, |d| Value::String(d.into())),
         "data_dir": run.data_dir.as_deref().map_or(Value::Null, |d| Value::String(d.into())),
         "base_commit": run.base_commit.as_deref().map_or(Value::Null, |d| Value::String(d.into())),
+        "parent": parent_of(run),
     })
+}
+
+/// A child run's parent, as its references see it: `{run, output_dir}` — the parent's output
+/// directory where the child reads it: in a worktree of its own, the copy its worktree holds as of
+/// the fork; otherwise the one it shares. `null` for a run of no parent.
+fn parent_of(run: &RunRecord) -> Value {
+    let Some(p) = &run.parent else { return Value::Null };
+    let out = match run.worktree.as_ref().and_then(|w| w.fork.as_ref()) {
+        Some(f) => f.parent_output_dir.clone(),
+        None => run.output_dir.clone(),
+    };
+    json!({"run": p.run, "output_dir": out})
 }
 
 /// Select a path from a value; `None` if nothing is there.

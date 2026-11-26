@@ -13,6 +13,7 @@ use super::parts::{
     permissions_of, GateDef, GateKind, HookDef, PartKind, Permission, PolicyDef, MAX_GATE_SECONDS,
 };
 use super::refs::{refs_in, refs_in_value, ROOTS};
+use super::run::Workspace;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
@@ -818,7 +819,16 @@ fn executor_problems(c: &mut Ctx, id: &str, t: &TaskSpec) {
                 }
             }
         },
-        Executor::Subflow { flow, .. } => {
+        Executor::Subflow { flow, workspace, .. } => {
+            match workspace {
+                Some(Workspace::Worktree) | None => {}
+                Some(w) => c.at(id, format!("subflow task {}: workspace {} — a child works where its parent does, or in a worktree of its own (worktree)", t.id, w.as_str())),
+            }
+            // A start may still say otherwise of a flow that says nothing: that is judged when the
+            // task is dispatched.
+            if let (Some(Workspace::Worktree), Some(w)) = (workspace, c.def.workspace.filter(|w| *w != Workspace::Worktree)) {
+                c.at(id, format!("subflow task {}: a child in a worktree of its own forks its parent's worktree, and this flow works in {}", t.id, w.as_str()));
+            }
             if c.packs.flow(flow).is_none() {
                 c.at(id, format!("subflow {flow} is not a flow in the packs"));
             } else if let Some(path) = subflow_cycle(c.packs, &c.def.name, flow) {
