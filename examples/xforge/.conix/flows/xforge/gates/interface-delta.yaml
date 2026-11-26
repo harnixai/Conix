@@ -1,0 +1,11 @@
+name: interface-delta
+title: 接口增量对得上基线
+description: >-
+  对照 ${data_dir}/interfaces/ 的现状判 interface-delta.yaml（xarch check 是同一套）：编号形如 <种类>:<模块>.<名字>；模块在基线里或这次新建；
+  modified / promoted / deprecated / removed 的元素在基线里；promoted 的是 experimental，removed 的已经 deprecated；
+  修改 stable 的元素都带 breaking；与同一个包别的在途运行不冲突。项目没开接口基线（governance.interface）或没有增量时直接过。
+kind: script
+script: interface-delta
+params:
+  delta: "${output_dir}/interface-delta.yaml"
+  interfaces: "${data_dir}/interfaces/*.yaml"
