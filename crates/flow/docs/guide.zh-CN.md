@@ -235,6 +235,11 @@ stations:
 
 `deny` 总是赢：流程级拒绝了的，站级放不开。所以通用的拒绝放在用得上的站上，放开的权限写在需要它的站上。
 
+**写入白名单 `writes`**：站（或 `foreach` 的任务）写了 `writes: [glob]`，它的 Write/Edit/NotebookEdit 在项目里只能写这些路径，
+其余的被拒，理由给模型看；运行目录（`_run/` 除外）永远可写。它不是 allow/deny 规则（`deny` 赢过 `allow`，白名单表达不了），所以单列；
+`deny` 照旧优先，项目外照 `guard`。`foreach` 里整条恰为数组引用（`writes: ["${item.paths}"]`）的按任务展开，每个工作包只能写自己的路径。
+**Bash 无法按路径检查，不受它约束**——要挡 shell 写文件，用 `deny` 加 `commands` 或不放行 Bash。
+
 包里配套的几样：
 
 ```yaml

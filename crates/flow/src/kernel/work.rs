@@ -61,6 +61,12 @@ pub(crate) fn task_work(
         }
         _ => vec![],
     };
+    let writes = match (&spec.executor, st) {
+        (Executor::Session { .. } | Executor::Agent { .. }, Some(st)) if !st.writes.is_empty() => {
+            Some(super::parts::resolve_writes(&st.writes, &ctx, rec.output_dir.as_deref()))
+        }
+        _ => None,
+    };
     let (placement, delivery, scene) = match &spec.executor {
         e if e.in_main() => {
             let (placement, scene) = main_placement(rec, main_scene, &ctx);
@@ -107,6 +113,7 @@ pub(crate) fn task_work(
             item: item.as_ref(),
             guarded,
             permissions: &permissions,
+            writes: writes.as_ref(),
             gates: &rec.parts.gates,
             delivery: delivery.unwrap_or(Delivery::StructuredOutput),
             executor: Some(&spec.executor),
@@ -141,6 +148,7 @@ pub(crate) fn task_work(
         skill_digest: digest,
         rules,
         permissions,
+        writes,
         item,
         output_schema: st.and_then(|s| s.output.clone()),
         protocol,

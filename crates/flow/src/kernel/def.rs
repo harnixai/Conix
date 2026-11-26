@@ -319,6 +319,13 @@ pub struct Station {
     /// Permissions this station works under besides the flow's.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub permissions: Vec<Permission>,
+    /// Where its tasks may write inside the project: globs (references allowed; a relative one
+    /// is taken under the workspace). An entry that is exactly a reference to an array
+    /// (`${item.paths}`) expands to its elements, per task. A Write/Edit/NotebookEdit to a project
+    /// path matching none is refused; the run's own directory is always writable. Bash is not
+    /// path-checked. Absent: no narrowing.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub writes: Vec<String>,
     /// The files it hands in (in Conix): told to its sessions, and checked on exit — each there, not
     /// empty, its template's mark gone.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

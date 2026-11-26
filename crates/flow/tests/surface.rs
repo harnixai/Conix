@@ -80,7 +80,7 @@ const TYPES: &[(&str, &str)] = &[
         "WorkItem::Task",
         "{run:String,station:String,round:u32,task:String,token:String,attempt:u32,executor:Executor,\
          skill:Option<String>,skill_digest:Option<String>,rules:Vec<(String,Option<String>)>,\
-         permissions:Vec<Granted>,item:Option<Value>,output_schema:Option<Value>,protocol:Option<String>,\
+         permissions:Vec<Granted>,writes:Option<super::parts::WriteScope>,item:Option<Value>,output_schema:Option<Value>,protocol:Option<String>,\
          session_key:Option<String>,session:Option<String>,placement:Option<Placement>,\
          delivery:Option<Delivery>,scene:Option<String>}",
     ),
@@ -227,6 +227,10 @@ const EXPORTS: &[(&str, &str)] = &[
     ("Pinned", "kernel::parts"),
     ("PolicyDef", "kernel::parts"),
     ("Verdict", "kernel::parts"),
+    ("narrow_writes", "kernel::parts"),
+    ("resolve_writes", "kernel::parts"),
+    ("WriteScope", "kernel::parts"),
+    ("WRITE_TOOLS", "kernel::parts"),
     ("agent_tag", "kernel::protocol"),
     ("ask_rules", "kernel::protocol"),
     ("skill_body", "kernel::protocol"),

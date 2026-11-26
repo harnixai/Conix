@@ -337,6 +337,12 @@ Conix 在 Harnix 0.4.7 分叉了这个库，先把站的治理（门禁、确认
   （新，在根上）。`CheckRec` 带上 `findings`、`evidence`、`metrics`，`CheckRec::explain` 把不对的地方说成一段；
   `CheckStatus::Error` 是门禁没得出结论：站未达标，但不自动打回。**`Engine::rerun_gates`**（`Op::RerunGates`）把一站没过的门禁
   重跑；`flow_retry` 不带 `task` 时调它。
+- **站的写入白名单**（`Station::writes`，glob 列表；`WorkItem::Task::writes: Option<WriteScope>` 新字段）：站写了
+  `writes`，它的任务用 Write/Edit/MultiEdit/NotebookEdit 写项目里不在其中的路径就被拒（理由给模型看）；运行目录
+  （`_run/` 除外）永远可写，`deny` 照旧优先，项目外照 `guard`。整条恰为数组引用（`${item.paths}`）的按任务展开。
+  Bash 无法按路径检查，不在此列。宿主自己判断调用时，在 `judge_under` 之后调 `narrow_writes(&scope, verdict, &call, station)`；
+  引用展开不了（不是数组或字符串）时 `WriteScope::error` 有值，派工器让任务失败。新导出：`WriteScope`、`resolve_writes`、
+  `narrow_writes`、`WRITE_TOOLS`。
 - **命令门禁**：`env` 列出透传的变量（缺省一个不传），`RunnerConfig::env_deny` 是永远不传的；`result: json` 按命令打印的结果判。
   起不来、超时算 `error`。
 - **`StationRec::reworked`**（`ReworkRec`，新，在根上）：这一轮为什么重来；`on_unmet` 打回的还带当时没过的检查，任务的协议讲给会话。

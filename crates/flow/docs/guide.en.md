@@ -243,6 +243,14 @@ stations:
 
 `deny` always wins: what the flow refuses, no station opens. So a general refusal goes on the stations it is for, and what is opened is written where it is needed.
 
+**Write allow-list `writes`**: a station (or a `foreach` task) with `writes: [glob]` may Write/Edit/NotebookEdit only
+those paths inside the project; the rest are refused with a reason the model reads. The run's own directory (but for
+`_run/`) is always writable. It is not an allow/deny rule (a `deny` beats an `allow`, so an allow-list cannot be said
+with them), hence its own field; `deny` still wins and paths outside the project are `guard`'s. In a `foreach`, an
+entry that is exactly an array reference (`writes: ["${item.paths}"]`) expands per task, so each work package writes
+only its own paths. **Bash cannot be path-checked and is not covered**: to keep a shell from writing, deny it with
+`commands` or do not allow it.
+
 The parts beside it:
 
 ```yaml

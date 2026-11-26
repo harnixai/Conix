@@ -374,7 +374,7 @@ mod tests {
         let rn = Runner::for_tests(engine.clone(), host.clone());
         let o = engine.create(CreateIn { flow: "f".into(), subject: "s".into(), ..Default::default() }, Actor::device("d")).await.unwrap();
         let WorkItem::Task { run, station, round, task, token, permissions, .. } = &o.work[0] else { panic!() };
-        let b = Binding { run: run.clone(), station: station.clone(), round: *round, task: task.clone(), token: token.clone(), permissions: permissions.clone() };
+        let b = Binding { run: run.clone(), station: station.clone(), round: *round, task: task.clone(), token: token.clone(), permissions: permissions.clone(), writes: None };
         let id = host.open(crate::runner::OpenSpec::new("flow:r/a/a@t", run, "flow-harnix", crate::Delivery::FlowSubmit)).await.unwrap().id;
         rn.state.bind(&id, b.clone());
         (rn, host, id, b)

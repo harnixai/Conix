@@ -458,6 +458,15 @@ is so as not to collide with Harnix's own next one; what changes for a host is l
   `CheckStatus::Error` is a gate that did not conclude: the station is unmet but not reworked
   automatically. **`Engine::rerun_gates`** (`Op::RerunGates`) runs a station's gates that did not pass
   again; `flow_retry` without `task` calls it.
+- **Write allow-lists** (`Station::writes`, a list of globs; new field `WorkItem::Task::writes:
+  Option<WriteScope>`): with `writes` set, a Write/Edit/MultiEdit/NotebookEdit to a project path
+  matching none is refused with a reason the model reads. The run's own directory is always writable
+  (but for `_run/`), `deny` still wins, paths outside the project are judged by `guard` as before; an
+  entry that is exactly an array reference (`${item.paths}`) expands per task. Bash cannot be
+  path-checked and is not covered. A host that judges calls itself calls
+  `narrow_writes(&scope, verdict, &call, station)` after `judge_under`; a reference that cannot be
+  expanded sets `WriteScope::error` and the runner fails the task. New exports: `WriteScope`,
+  `resolve_writes`, `narrow_writes`, `WRITE_TOOLS`.
 - **Command gates**: `env` names the variables passed (none by default), `RunnerConfig::env_deny`
   the ones never passed; `result: json` reads the result the command prints. A command that could
   not start or ran out of time is an `error`.

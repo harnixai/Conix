@@ -77,7 +77,7 @@ pub use kernel::host::{
 pub use kernel::layout::ProjectLayout;
 pub use kernel::parts::{
     glob, judge, judge_under, part_schema, permissions_of, rules_of, Call, Effect, GateDef, GateKind, Granted,
-    HookDef, HookKind, PartKind, Permission, Pinned, PolicyDef, Verdict,
+    HookDef, HookKind, PartKind, Permission, Pinned, PolicyDef, Verdict, narrow_writes, resolve_writes, WriteScope, WRITE_TOOLS,
 };
 pub use kernel::protocol::{agent_tag, ask_rules, skill_body, STRUCTURED_OUTPUT_TOOL};
 pub use kernel::run::{
