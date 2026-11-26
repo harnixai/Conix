@@ -27,7 +27,7 @@ description: 把想法收敛成有边界的目标：写提案，把对规格与�
   `remove` 只删已经 deprecated 的；升成 stable `xarch promote <编号>`；记错了 `xarch revert <编号>`。记完 `xarch check`。
 - 改了 stable 的元素，启动时的 impact 必须有 interface；没有就照上面换路时带上，或停下告诉用户。
 
-**快速变更没有设计站**：这一站顺手划工作包，`xpkg plan <编号> "<标题>" --paths a,b --criteria "判据一;判据二" [--after p1] [--verify "<怎么验证>"]`。
+**快速变更没有设计站**：这一站顺手划工作包，`xpkg plan <编号> "<标题>" --paths a,b --criteria "判据一;判据二" [--after p1] [--verify <名字>[:参数=值]]`，验证名字从 `xpkg verify-menu` 里选（没有合适的就不写）。
 路径盖住它会改的每个文件，测试也算；判据是能验证的完成条件。交出的 `packages` 就是划的这些：`{id, title, paths, after}`，与 plan 一致。
 
 被打回时先读打回的理由与 findings，照它改提案与增量，两边保持一致。

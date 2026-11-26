@@ -650,6 +650,12 @@ pub(crate) async fn command(source: String, input: Value, reader: Arc<Reader>, w
 /// script's, the value whatever JSON it gives. A throw, a time-out or a read out of bounds is an
 /// `Err`.
 pub(crate) async fn value(source: String, input: Value, reader: Arc<Reader>, env: Env, timeout: Duration) -> Result<Value, String> {
+    value_logged(source, input, reader, env, timeout).await.0
+}
+
+/// [`value`], and what the script logged (`flow.log`): a command gate's plan keeps it in the
+/// gate's log.
+pub(crate) async fn value_logged(source: String, input: Value, reader: Arc<Reader>, env: Env, timeout: Duration) -> (Result<Value, String>, String) {
     let trace = Arc::new(Mutex::new(Trace::default()));
     let t = trace.clone();
     let deadline = Instant::now() + timeout;
@@ -691,10 +697,11 @@ pub(crate) async fn value(source: String, input: Value, reader: Arc<Reader>, env
         Ok(Err(e)) => Err(format!("the script did not finish: {e}")),
         Err(_) => Err(format!("the script ran longer than {}s and did not stop", timeout.as_secs())),
     };
-    if let Some(p) = &trace.lock().unwrap().out_of_bounds {
-        return Err(format!("the script read out of bounds: {p}"));
+    let trace = std::mem::take(&mut *trace.lock().unwrap());
+    if let Some(p) = &trace.out_of_bounds {
+        return (Err(format!("the script read out of bounds: {p}")), trace.log);
     }
-    out
+    (out, trace.log)
 }
 
 #[allow(clippy::too_many_arguments)]

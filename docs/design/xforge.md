@@ -18,6 +18,24 @@ governance:
 没有这个文件按缺省。关着的那条基线，它的命令仍能读，**写增量的子命令报"这个项目没开接口基线"**，它的门禁回
 `pass`、`summary` 写"不欠（governance.interface=false）"。`lib/governance.js` 的 `governance(flow)` 读它，所有脚本与命令都用这一个。
 
+同一个文件可以带 **`verify` 菜单**：工作包做完时能跑的验证，人声明、进 git。
+
+```yaml
+verify:
+  unit:
+    argv: [python3, -m, unittest, discover, -s, tests, -q]   # 程序与参数，一项一个，不经 shell
+  test:
+    argv: [python3, -m, unittest, discover, -s, tests, -q, -p, "{file}.py"]
+    params: {file: "test_[a-z0-9_]+"}    # {file} 的值要整串匹配这个正则
+    cwd: .                               # 可选：项目内的相对目录
+    description: 一个测试文件
+```
+
+工作包只按名字选、给参数（`xpkg plan --verify test:file=test_trunc`），命令行从不由模型写：值只能落进 `{参数}` 的位置，
+整串匹配人写的正则，起进程时是 argv 的一项（流程库按 argv 直接起，`flows.md` §2.2 的 `plan`）。`argv` 用了没声明的参数、
+声明了没用的参数、正则写错，菜单就有问题，`--verify` 与门禁都拒绝，要人改。`lib/governance.js` 的 `verifyMenu(flow)` 读它，
+核对与展开在 `lib/verify.js`（命令与门禁共用）。没有菜单，工作包就不带 `--verify`。
+
 项目的其他治理文件照旧：`.conix/governance/constitution.yaml`（原则）、`.conix/governance/verify.sh`（项目的验证，人写）。
 
 ## 2. 数据
@@ -48,7 +66,7 @@ elements:
 | `spec-delta.yaml` | `xspec` | `{added: [{id, title, text}], modified: [{id, title?, text}], removed: [id]}` |
 | `interface-delta.yaml` | `xarch` | `{modules: [{module, title, paths}], added: [{id, signature, description, stability}], modified: [{id, signature?, description?, breaking}], promoted: [id], deprecated: [id], removed: [id]}` |
 | `ledgers/<种类>.yaml` | `xledger` | `{entries: [{id, text, conclusion, refs: [..], note?, by: {kind, id}, history: [{conclusion, by, at, note?}]}]}` |
-| `work-packages.yaml` | `xpkg` | `{packages: [{id, title, paths: [glob], after: [id], criteria: [{id: C1, text}], verify?, status, summary?, files?: [path], evidence?: {C1: text}}]}` |
+| `work-packages.yaml` | `xpkg` | `{packages: [{id, title, paths: [glob], after: [id], criteria: [{id: C1, text}], verify?: [{name, params}], status, summary?, files?: [path], evidence?: {C1: text}}]}`（以前的包 `verify` 是一句说明，照读，不跑） |
 
 `by` 是命令输入里的 `by`（flows.md §7.6）：`person` / `model` / `station`（站 id）。
 
@@ -76,7 +94,7 @@ elements:
 | `xspec` | **list** [能力]、**get** <编号>、**delta**、**check**、**pending**、init <能力> <前缀> "<标题>"、add <能力> "<标题>" "<正文>"、modify <编号> "<正文>" [--title T]、remove <编号>、revert <编号>、archive |
 | `xarch` | **modules**、**list** [模块]、**get** <编号>、**delta**、**check**、**pending**、module <模块> "<标题>" --paths a,b、add <模块> <种类> <名字> "<签名>" "<说明>" [--stable]、modify <编号> [--signature S] [--description D] [--breaking]、promote <编号>、deprecate <编号>、remove <编号>、revert <编号>、archive |
 | `xledger` | **list** [种类]、add <种类> "<内容>" --ref a,b、set <种类> <编号> <结论> ["<说明>"]、reply <原则> complies\|violates\|n-a "<说明>" |
-| `xpkg` | **list**、plan <编号> "<标题>" --paths a,b --criteria "一;二" [--after p1,p2] [--verify "<怎么验证>"]、done <编号> "<做了什么>" --files a,b --evidence "C1=…;C2=…"、blocked <编号> "<卡在哪>" |
+| `xpkg` | **list**、**verify-menu**、plan <编号> "<标题>" --paths a,b --criteria "一;二" [--after p1,p2] [--verify <名字>[:参数=值,…]]…、done <编号> "<做了什么>" --files a,b --evidence "C1=…;C2=…"、blocked <编号> "<卡在哪>" |
 
 - `xspec add/modify` 当场判正文有没有 WHEN / THEN（或"当…时 / 应"），没有就报错不写。
 - `xspec pending` / `xarch pending`：同一个包**别的在途运行**（`flow.runs`）的增量动到了哪些编号。`add` 排编号时把它们占的也算上；
@@ -84,6 +102,8 @@ elements:
 - `xarch modify` 一个 `stable` 元素必须带 `--breaking`（不带就报错，告诉它要么改成兼容的、要么声明破坏）；`remove` 只能删基线里已经
   `deprecated` 的元素；新元素缺省 `experimental`，`--stable` 是补登记已经在用的接口。
 - `xledger set/reply` 按 §2.3 的规矩查 `by`，不合就报错说谁能给。
+- `xpkg plan --verify` 可以写几次，每次一项，当场按 §1 的菜单核对：名字在菜单里、参数一个不多一个不少、值整串匹配；
+  不合就报错（说菜单里有什么、该怎么写），什么都不写。`xpkg verify-menu` 列出菜单（只读，运行之外也能调）。
 
 ## 4. 门禁
 
@@ -103,6 +123,7 @@ elements:
 | `ledgers-settled` | script | §2.3 的规矩：没有 open / disputed；findings 有 ref；`rejected`/`deferred` 的 findings 是检查站或人给的；questions 是人答的 |
 | `constitution-reply` | script | 检查站的 `constitution` 台账覆盖每条原则；`violates` 有说明 |
 | `package-check` | script（**任务级出口**） | 这一包：`status: done`（blocked 就不过，说卡在哪）；每条判据有证据；`files` 都在包的路径里；`flow.git.changed()` 里落在这个包路径下的改动都登记在 `files` 里 |
+| `package-tests` | command，`plan`（**任务级出口**） | 这一包 `verify` 登记的每一项按菜单重新核对、展开成 argv，流程库直接起进程，都退出 0 才过；没登记就不欠；登记的对不上菜单（有人改过其中一个文件）是 `error`，要人看 |
 | `packages-done` | check: schema | 工作包都 done |
 | `unclaimed` | script | `flow.git.changed()`（基线提交以来，含没提交的）里的每个改动都在某个包的路径里 |
 | `unit-tests` | command | 跑 `.conix/governance/verify.sh` |
@@ -122,7 +143,7 @@ data-migration / infra，缺省空）；各自的 `risk` schema 就是 eligibili
 | clarify 澄清 | | | ✓ | 会话 | 运行目录 | output、ledgers-settled（questions 由人答）、confirm owner |
 | design 设计 | | ✓ | ✓ | 会话 | 运行目录 | output、design-sections、constitution、spec-delta、interface-delta、interface-compat、packages-planned、ledgers-settled |
 | check 独立检查 | | ✓ | ✓ | 子 Agent，只看不改 | 不能写 | output、ledgers-settled、constitution-reply、confirm reviewer |
-| apply 实施 | ✓ | ✓ | ✓ | 每包一个任务（quick 会话，solid/major 子 Agent），按 `after` 排 | `${item.paths}` | 任务级 package-check；站 packages-done、unclaimed、unit-tests |
+| apply 实施 | ✓ | ✓ | ✓ | 每包一个任务（quick 会话，solid/major 子 Agent），按 `after` 排 | `${item.paths}` | 任务级 package-check、package-tests；站 packages-done、unclaimed、unit-tests |
 | verify 验证 | ✓ | ✓ | ✓ | 会话 | 运行目录 | output、verification、unit-tests、confirm owner |
 | archive 归档 | ✓ | ✓ | ✓ | 两个命令步骤：`xspec archive`、`xarch archive` | — | output、archived、interfaces-archived |
 
@@ -136,5 +157,5 @@ skill：`triage`（判风险与影响面、选路）、`propose`、`clarify`、`
 ## 6. 演示项目
 
 `examples/xforge/`：Python 小库 `textkit`；`xforge/specs/textkit.md` 是规格基线，`xforge/interfaces/textkit.yaml` 是接口基线（已有的
-`slugify`、`word_count` 登记为 stable），`.conix/governance/xforge.yaml` 两条基线都开。`crates/flow/tests/xforge*.rs` 不调模型地
+`slugify`、`word_count` 登记为 stable），`.conix/governance/xforge.yaml` 两条基线都开，verify 菜单有 `unit`、`test:file=…`、`compile`。`crates/flow/tests/xforge*.rs` 不调模型地
 查这个包，`crates/conix/tests/live_xforge.rs` 用真实模型走 solid。

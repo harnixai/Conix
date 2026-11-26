@@ -325,6 +325,9 @@ pub fn render(t: &TaskContext) -> String {
                 g.tool.as_deref().unwrap_or_default(),
                 g.args
             )),
+            GateKind::Command if g.plan.is_some() => s.push_str(&format!(
+                "- Gate `{gate}`: {what} It runs the commands the project declared for this work once your output is in.\n"
+            )),
             GateKind::Command => s.push_str(&format!(
                 "- Gate `{gate}`: {what} It runs `{}` once your output is in.\n",
                 g.command.as_deref().unwrap_or_default()

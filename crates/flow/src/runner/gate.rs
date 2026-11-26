@@ -48,6 +48,13 @@ pub(crate) async fn judge_gate(rn: &Arc<Runner>, rec: &RunRecord, station: &str,
         Some(g) if g.kind == GateKind::Command && rec.project_root.as_deref().is_some_and(|r| !rn.cfg.trust.trusted(r)) => {
             GateResult::errored(format!("the project is not trusted: its command gate {} does not run", g.name))
         }
+        // A plan picks what to run from what people declared; the runs are commands all the same.
+        #[cfg(feature = "script")]
+        Some(g) if g.kind == GateKind::Command && g.plan.is_some() => {
+            super::plan::plan_gate(rn.cfg.command_gates, &rn.cfg.env_deny, engine, rec, station, round, g, task).await
+        }
+        #[cfg(not(feature = "script"))]
+        Some(g) if g.kind == GateKind::Command && g.plan.is_some() => GateResult::errored(format!("gate {}: this build runs no scripts", g.name)),
         Some(g) if g.kind == GateKind::Command => {
             command_gate(rn.cfg.command_gates, &rn.cfg.env_deny, engine, rec, station, g, task).await
         }
@@ -64,7 +71,7 @@ pub(crate) async fn judge_gate(rn: &Arc<Runner>, rec: &RunRecord, station: &str,
 }
 
 /// The reference context a gate is judged against: the run's, with the task's when it judges one.
-fn gate_context(rec: &RunRecord, task: Option<&ForTask<'_>>, ws: Option<&str>) -> Value {
+pub(crate) fn gate_context(rec: &RunRecord, task: Option<&ForTask<'_>>, ws: Option<&str>) -> Value {
     crate::kernel::refs::context_in(rec, task.and_then(|t| t.item), task.map(|t| t.task), ws)
 }
 
@@ -155,12 +162,11 @@ pub(crate) struct GateSite<'a> {
 
 /// [`command_gate`] at a site, command gates allowed.
 pub(crate) async fn command_at(env_deny: &[String], g: &crate::GateDef, site: &GateSite<'_>) -> GateResult {
-    use tokio::io::AsyncReadExt;
     let fail = GateResult::errored;
     let Some(command) = g.command.clone().filter(|c| !c.trim().is_empty()) else {
         return fail(format!("gate {} has no command", g.name));
     };
-    let (ws, station_dir, ctx, station) = (site.ws.to_path_buf(), site.station_dir, site.ctx, site.station);
+    let (ws, station_dir, ctx) = (site.ws.to_path_buf(), site.station_dir, site.ctx);
     let cwd = match &g.cwd {
         Some(c) => match crate::kernel::refs::resolve_str(c, ctx) {
             Value::String(s) if !s.is_empty() => {
@@ -184,73 +190,16 @@ pub(crate) async fn command_at(env_deny: &[String], g: &crate::GateDef, site: &G
         return fail(format!("gate {}: {}: {e}", g.name, cwd.display()));
     }
     let mut cmd = tokio::process::Command::new("sh");
-    cmd.arg("-c")
-        .arg(&command)
-        .current_dir(&cwd)
-        .env_clear()
-        .env("FLOW_RUN", site.run)
-        .env("FLOW_STATION", station)
-        .env("FLOW_WORKSPACE", &ws)
-        .env("FLOW_CONTEXT_FILE", &context_file)
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .kill_on_drop(true);
-    for k in GATE_ENV {
-        if let Some(v) = std::env::var_os(k) {
-            cmd.env(k, v);
-        }
-    }
-    for (k, v) in passed_env(&g.env, env_deny, std::env::vars_os()) {
-        cmd.env(k, v);
-    }
-    if context.len() <= GATE_CONTEXT_INLINE {
-        cmd.env("FLOW_CONTEXT", &context);
-    }
-    #[cfg(unix)]
-    cmd.process_group(0);
-    let mut child = match cmd.spawn() {
+    cmd.arg("-c").arg(&command).current_dir(&cwd);
+    gate_env(&mut cmd, env_deny, g, site, &context_file, &context);
+    let child = match cmd.spawn() {
         Ok(c) => c,
         Err(e) => return fail(format!("`{command}` did not start: {e}")),
     };
-    let pid = child.id();
-    let tail = |r: Option<Box<dyn tokio::io::AsyncRead + Unpin + Send>>| async move {
-        let mut kept: Vec<u8> = vec![];
-        let Some(mut r) = r else { return kept };
-        let mut buf = [0u8; 8192];
-        while let Ok(n) = r.read(&mut buf).await {
-            if n == 0 {
-                break;
-            }
-            kept.extend_from_slice(&buf[..n]);
-            if kept.len() > 2 * GATE_OUTPUT_READ {
-                kept.drain(..kept.len() - GATE_OUTPUT_READ);
-            }
-        }
-        kept
-    };
-    let out = tail(child.stdout.take().map(|o| Box::new(o) as _));
-    let err = tail(child.stderr.take().map(|o| Box::new(o) as _));
-    let waited = tokio::time::timeout(Duration::from_secs(g.timeout_seconds()), async {
-        let (o, e, status) = tokio::join!(out, err, child.wait());
-        (o, e, status)
-    })
-    .await;
-    let (o, e, status) = match waited {
-        Ok(v) => v,
-        Err(_) => {
-            // The whole group: a test runner's children too.
-            #[cfg(unix)]
-            if let Some(pid) = pid {
-                let _ = std::process::Command::new("kill").arg("-KILL").arg(format!("-{pid}")).status();
-            }
-            let _ = child.kill().await;
-            return fail(format!("`{command}` ran longer than {}s", g.timeout_seconds()));
-        }
-    };
-    let status = match status {
-        Ok(s) => s,
-        Err(e) => return fail(format!("`{command}` was lost: {e}")),
+    let (o, e, status) = match wait_for(child, g.timeout_seconds()).await {
+        Ended::Exited { out, err, status } => (out, err, status),
+        Ended::TimedOut => return fail(format!("`{command}` ran longer than {}s", g.timeout_seconds())),
+        Ended::Lost(e) => return fail(format!("`{command}` was lost: {e}")),
     };
     let mut text = String::from_utf8_lossy(&o).into_owned();
     text.push_str(&String::from_utf8_lossy(&e));
@@ -258,10 +207,7 @@ pub(crate) async fn command_at(env_deny: &[String], g: &crate::GateDef, site: &G
     if let Err(e) = std::fs::write(&log, &text) {
         tracing::warn!(run = site.run, gate = g.name, error = %e, "a gate's log not written");
     }
-    let tail: String = {
-        let chars: Vec<char> = text.trim().chars().collect();
-        chars[chars.len().saturating_sub(GATE_OUTPUT_KEPT)..].iter().collect()
-    };
+    let tail = output_tail(&text);
     if g.result == Some(crate::kernel::parts::CommandResult::Json) {
         let stdout = String::from_utf8_lossy(&o);
         return match printed_result(&stdout) {
@@ -284,6 +230,99 @@ pub(crate) async fn command_at(env_deny: &[String], g: &crate::GateDef, site: &G
             if tail.is_empty() { String::new() } else { format!(": {tail}") }
         )),
     }
+}
+
+/// Give a command gate's process (or a run of its plan) its environment and its pipes: none of
+/// this process's environment but the basics, the run's own variables, the ones the gate names
+/// less the ones the application denies; a process group of its own, so that running out of
+/// time kills it whole.
+pub(crate) fn gate_env(
+    cmd: &mut tokio::process::Command,
+    env_deny: &[String],
+    g: &crate::GateDef,
+    site: &GateSite<'_>,
+    context_file: &std::path::Path,
+    context: &str,
+) {
+    cmd.env_clear()
+        .env("FLOW_RUN", site.run)
+        .env("FLOW_STATION", site.station)
+        .env("FLOW_WORKSPACE", site.ws)
+        .env("FLOW_CONTEXT_FILE", context_file)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true);
+    for k in GATE_ENV {
+        if let Some(v) = std::env::var_os(k) {
+            cmd.env(k, v);
+        }
+    }
+    for (k, v) in passed_env(&g.env, env_deny, std::env::vars_os()) {
+        cmd.env(k, v);
+    }
+    if context.len() <= GATE_CONTEXT_INLINE {
+        cmd.env("FLOW_CONTEXT", context);
+    }
+    #[cfg(unix)]
+    cmd.process_group(0);
+}
+
+/// How a gate's process ended.
+pub(crate) enum Ended {
+    /// It exited: the end of what it printed on each stream, and how.
+    Exited { out: Vec<u8>, err: Vec<u8>, status: std::process::ExitStatus },
+    /// It ran out of time and was killed, with its process group.
+    TimedOut,
+    /// Waiting for it failed.
+    Lost(std::io::Error),
+}
+
+/// Wait for a process [`gate_env`] set up, reading the end of its output, for `seconds` at most.
+pub(crate) async fn wait_for(mut child: tokio::process::Child, seconds: u64) -> Ended {
+    use tokio::io::AsyncReadExt;
+    let pid = child.id();
+    let tail = |r: Option<Box<dyn tokio::io::AsyncRead + Unpin + Send>>| async move {
+        let mut kept: Vec<u8> = vec![];
+        let Some(mut r) = r else { return kept };
+        let mut buf = [0u8; 8192];
+        while let Ok(n) = r.read(&mut buf).await {
+            if n == 0 {
+                break;
+            }
+            kept.extend_from_slice(&buf[..n]);
+            if kept.len() > 2 * GATE_OUTPUT_READ {
+                kept.drain(..kept.len() - GATE_OUTPUT_READ);
+            }
+        }
+        kept
+    };
+    let out = tail(child.stdout.take().map(|o| Box::new(o) as _));
+    let err = tail(child.stderr.take().map(|o| Box::new(o) as _));
+    let waited = tokio::time::timeout(Duration::from_secs(seconds), async {
+        let (o, e, status) = tokio::join!(out, err, child.wait());
+        (o, e, status)
+    })
+    .await;
+    match waited {
+        Ok((out, err, Ok(status))) => Ended::Exited { out, err, status },
+        Ok((_, _, Err(e))) => Ended::Lost(e),
+        Err(_) => {
+            // The whole group: a test runner's children too.
+            #[cfg(unix)]
+            if let Some(pid) = pid {
+                let _ = std::process::Command::new("kill").arg("-KILL").arg(format!("-{pid}")).status();
+            }
+            let _ = child.kill().await;
+            Ended::TimedOut
+        }
+    }
+}
+
+/// The end of a gate's output that its result keeps.
+pub(crate) fn output_tail(text: &str) -> String {
+    let chars: Vec<char> = text.trim().chars().collect();
+    chars[chars.len().saturating_sub(GATE_OUTPUT_KEPT)..].iter().collect()
 }
 
 /// A gate result printed by a command: all of what it printed, or else its last line that is
@@ -345,28 +384,7 @@ async fn script_gate(
     let Some(source) = rec.parts.scripts.get(&name).cloned() else {
         return GateResult::errored(format!("script {name} was not in the packs when the run started"));
     };
-    let outputs: serde_json::Map<String, Value> = rec
-        .def
-        .stations
-        .iter()
-        .map(|s| (s.id.clone(), crate::kernel::refs::station_output(&rec.def, rec, &s.id)))
-        .collect();
-    let input = serde_json::json!({
-        "gate": g.name,
-        "run": rec.id,
-        "flow": rec.flow,
-        "station": station,
-        "round": round,
-        "inputs": rec.inputs,
-        "outputs": outputs,
-        "output_dir": rec.output_dir,
-        "data_dir": rec.data_dir,
-        "workspace": ctx.get("workspace"),
-        "params": crate::kernel::refs::resolve(&g.params, ctx),
-        // A `task_exit` gate's task and item; null for a station's own gate.
-        "task": ctx.get("task"),
-        "item": ctx.get("item"),
-    });
+    let input = script_input(rec, station, round, g, ctx);
     let env = match engine.workspace_for(rec) {
         Some(ws) => super::scriptenv::Env::for_run(engine, rec, ws, super::scriptenv::Modules::script_path(&name), &source).await,
         None => super::scriptenv::Env::bare(),
@@ -381,6 +399,33 @@ async fn script_gate(
         }
     }
     result
+}
+
+/// What a gate's script is given as `input` (docs/design/flows.md §2.3, in Conix): a `script`
+/// gate's script, a `command` gate's plan.
+pub(crate) fn script_input(rec: &RunRecord, station: &str, round: u32, g: &crate::GateDef, ctx: &Value) -> Value {
+    let outputs: serde_json::Map<String, Value> = rec
+        .def
+        .stations
+        .iter()
+        .map(|s| (s.id.clone(), crate::kernel::refs::station_output(&rec.def, rec, &s.id)))
+        .collect();
+    serde_json::json!({
+        "gate": g.name,
+        "run": rec.id,
+        "flow": rec.flow,
+        "station": station,
+        "round": round,
+        "inputs": rec.inputs,
+        "outputs": outputs,
+        "output_dir": rec.output_dir,
+        "data_dir": rec.data_dir,
+        "workspace": ctx.get("workspace"),
+        "params": crate::kernel::refs::resolve(&g.params, ctx),
+        // A `task_exit` gate's task and item; null for a station's own gate.
+        "task": ctx.get("task"),
+        "item": ctx.get("item"),
+    })
 }
 
 #[cfg(not(feature = "script"))]
@@ -442,6 +487,11 @@ async fn try_gate(rn: &Runner, t: Trial) -> Tried {
         "item": null, "task": null, "workspace": t.ws.to_string_lossy(), "output_dir": t.output_dir,
         "data_dir": t.data_dir,
     });
+    let input = serde_json::json!({
+        "gate": g.name, "run": "trial", "flow": "trial", "station": t.station, "round": 1,
+        "inputs": t.inputs, "outputs": t.outputs, "output_dir": t.output_dir, "data_dir": t.data_dir,
+        "workspace": t.ws.to_string_lossy(), "params": crate::kernel::refs::resolve(&g.params, &ctx),
+    });
     match g.kind {
         GateKind::Check if g.check == Some(crate::kernel::parts::CheckKind::Sealed) => tried(GateResult::errored(
             "a `sealed` check compares the files the run's earlier gates read: it is judged only in a run".to_string(),
@@ -458,11 +508,6 @@ async fn try_gate(rn: &Runner, t: Trial) -> Tried {
             let Some(source) = t.script.clone() else {
                 return tried(GateResult::errored(format!("script {} is not in the packs", g.script.as_deref().unwrap_or("?"))));
             };
-            let input = serde_json::json!({
-                "gate": g.name, "run": "trial", "flow": "trial", "station": t.station, "round": 1,
-                "inputs": t.inputs, "outputs": t.outputs, "output_dir": t.output_dir, "data_dir": t.data_dir,
-                "workspace": t.ws.to_string_lossy(), "params": crate::kernel::refs::resolve(&g.params, &ctx),
-            });
             #[cfg(feature = "script")]
             return trial_script(source, input, reader, t.env.clone(), g.script_seconds()).await;
             #[cfg(not(feature = "script"))]
@@ -477,6 +522,16 @@ async fn try_gate(rn: &Runner, t: Trial) -> Tried {
             }
             let dir = std::env::temp_dir().join(format!("flow-gate-try-{}-{}", std::process::id(), crate::kernel::host::digest(&ctx.to_string())));
             let site = GateSite { run: "trial", station: &t.station, ws: &t.ws, station_dir: &dir, ctx: &ctx };
+            #[cfg(feature = "script")]
+            let result = match (&g.plan, t.script.clone(), super::files::Reader::new(&t.ws)) {
+                (None, _, _) => command_at(&rn.cfg.env_deny, g, &site).await,
+                (Some(p), None, _) => GateResult::errored(format!("script {p} is not in the packs")),
+                (Some(_), _, Err(e)) => GateResult::errored(format!("gate {}: {e}", g.name)),
+                (Some(_), Some(source), Ok(reader)) => {
+                    super::plan::run_plan(&rn.cfg.env_deny, g, &site, source, input, Arc::new(reader), t.env.clone()).await
+                }
+            };
+            #[cfg(not(feature = "script"))]
             let result = command_at(&rn.cfg.env_deny, g, &site).await;
             let log = std::fs::read_to_string(dir.join(format!("gate-{}.log", g.name))).unwrap_or_default();
             let _ = std::fs::remove_dir_all(&dir);
@@ -780,6 +835,193 @@ mod tests {
         assert_eq!(c.evidence[0].path, "notes.md");
         let dir = g._ws.path().join(&g.run).join(".harnix/runs").join(&g.run).join("stations/a");
         assert_eq!(std::fs::read_to_string(dir.join("gate-ledgers.log")).unwrap(), "read all done\n");
+    }
+
+    /// A command gate whose plan (`scripts/plan.js`) returns `plan`, a JS expression over `input`.
+    #[cfg(feature = "script")]
+    async fn planned(plan: &str, timeout: u64, configure: impl FnOnce(&mut RunnerConfig), files: &[(&str, &str)]) -> Gated {
+        let gate = format!("{{name: tests, kind: command, plan: plan, params: {{p: '${{run}}'}}, timeout_seconds: {timeout}}}");
+        let src = format!("export default function (input, flow) {{ flow.log('planning', input.params.p); return {plan}; }}");
+        // The run's workspace is there, as it is for a real run.
+        let files: Vec<(&str, &str)> = [(".keep", "")].into_iter().chain(files.iter().copied()).collect();
+        Gated::with(&gate, Arc::new(MemStore::new()), configure, |p| p.part(crate::PartKind::Script, "plan", &src), &files).await
+    }
+
+    #[cfg(feature = "script")]
+    fn gate_check(rec: &RunRecord) -> crate::kernel::run::CheckRec {
+        rec.stations["a"].checks.iter().find(|c| c.kind == "gate").unwrap().clone()
+    }
+
+    /// Every run exits 0: passes, the runs in order where the run works, their output in the log.
+    #[cfg(feature = "script")]
+    #[tokio::test]
+    async fn a_plan_passes_when_every_run_exits_0() {
+        let plan = r#"{summary: "two", runs: [
+            {name: "first", argv: ["sh", "-c", "echo one >> order"]},
+            {name: "second", argv: ["sh", "-c", "test \"$FLOW_STATION\" = a && echo two >> order && pwd -P"], cwd: "sub"}]}"#;
+        let g = planned(plan, 10, command, &[("sub/.keep", "")]).await;
+        g.run_it().await;
+        let rec = g.engine.record(&g.run).await.unwrap();
+        let c = gate_check(&rec);
+        assert_eq!((rec.stations["a"].status, c.status), (StationStatus::Passed, CheckStatus::Pass), "{c:?}");
+        assert_eq!(c.detail, "two: 2 passed: first, second");
+        let ws = g._ws.path().join(&g.run);
+        assert_eq!(std::fs::read_to_string(ws.join("order")).unwrap(), "one\n");
+        assert_eq!(std::fs::read_to_string(ws.join("sub/order")).unwrap(), "two\n");
+        let dir = ws.join(".harnix/runs").join(&g.run).join("stations/a");
+        let log = std::fs::read_to_string(dir.join("gate-tests.log")).unwrap();
+        assert!(log.starts_with(&format!("planning {}\n", g.run)) && log.contains("== second") && log.contains("/sub\n"), "{log}");
+    }
+
+    /// What a run is given is never a command line: `;`, `$(…)`, `|` and backquotes stay characters.
+    #[cfg(feature = "script")]
+    #[tokio::test]
+    async fn a_plans_arguments_reach_the_program_as_they_are_with_no_shell() {
+        let plan = r#"{runs: [{name: "args", argv: ["printf", "[%s]\n", "a; touch semi", "$(touch subst)", "x | touch pipe", "`touch tick`", "&& touch and"]}]}"#;
+        let g = planned(plan, 10, command, &[]).await;
+        g.run_it().await;
+        let rec = g.engine.record(&g.run).await.unwrap();
+        assert_eq!(gate_check(&rec).status, CheckStatus::Pass, "{:?}", gate_check(&rec));
+        let ws = g._ws.path().join(&g.run);
+        for f in ["semi", "subst", "pipe", "tick", "and"] {
+            assert!(!ws.join(f).exists(), "{f} was made: a shell ran");
+        }
+        let log = std::fs::read_to_string(ws.join(".harnix/runs").join(&g.run).join("stations/a/gate-tests.log")).unwrap();
+        assert!(log.contains("[a; touch semi]\n[$(touch subst)]\n[x | touch pipe]\n[`touch tick`]\n[&& touch and]\n"), "{log}");
+    }
+
+    /// A run that exits otherwise is a finding with its name and the end of its output; the rest still run.
+    #[cfg(feature = "script")]
+    #[tokio::test]
+    async fn a_plan_fails_with_a_finding_for_each_run_that_does_not_exit_0() {
+        let plan = r#"{runs: [
+            {name: "lint", argv: ["sh", "-c", "echo bad style >&2; exit 3"]},
+            {name: "unit", argv: ["sh", "-c", "touch ran"]},
+            {name: "doc", argv: ["false"]}]}"#;
+        let g = planned(plan, 10, command, &[]).await;
+        g.run_it().await;
+        let rec = g.engine.record(&g.run).await.unwrap();
+        let c = gate_check(&rec);
+        assert_eq!(c.status, CheckStatus::Fail);
+        assert_eq!(c.detail, "2 of 3 did not pass: lint, doc");
+        assert_eq!(c.findings.iter().map(|f| f.line_text()).collect::<Vec<_>>(), ["lint exited with 3: bad style", "doc exited with 1"]);
+        assert!(g._ws.path().join(&g.run).join("ran").exists(), "a failure does not stop the runs after it");
+    }
+
+    /// Out of time is an `error`, as for a command gate: killed, and the runs after it not started.
+    #[cfg(feature = "script")]
+    #[tokio::test]
+    async fn a_plans_run_that_runs_too_long_is_killed_and_the_gate_errs() {
+        let plan = r#"{runs: [{name: "slow", argv: ["sleep", "30"], timeout_seconds: 1}, {name: "after", argv: ["touch", "after"]}]}"#;
+        let g = planned(plan, 20, command, &[]).await;
+        let started = std::time::Instant::now();
+        g.run_it().await;
+        assert!(started.elapsed() < Duration::from_secs(10));
+        let c = gate_check(&g.engine.record(&g.run).await.unwrap());
+        assert_eq!(c.status, CheckStatus::Error, "{c:?}");
+        assert!(c.detail.contains("slow ran longer than 1s"), "{}", c.detail);
+        assert_eq!(c.findings[0].rule, "slow");
+        assert!(!g._ws.path().join(&g.run).join("after").exists());
+        // A program that is not there does not start: also an error.
+        let g = planned(r#"{runs: [{name: "ghost", argv: ["no-such-program-for-a-plan"]}]}"#, 5, command, &[]).await;
+        g.run_it().await;
+        let c = gate_check(&g.engine.record(&g.run).await.unwrap());
+        assert_eq!(c.status, CheckStatus::Error);
+        assert!(c.detail.contains("ghost did not start"), "{}", c.detail);
+    }
+
+    /// Where a run works stays in the run's workspace; a plan wrong anywhere runs nothing.
+    #[cfg(feature = "script")]
+    #[tokio::test]
+    async fn a_plans_cwd_outside_the_workspace_is_refused_and_nothing_runs() {
+        let outside = tempfile::tempdir().unwrap();
+        let link = outside.path().to_string_lossy().into_owned();
+        for (cwd, why) in [("..", "leaves the run's workspace"), ("sub/../..", "leaves the run's workspace"), ("/tmp", "is absolute"), ("out", "by a symbolic link"), ("none", "No such file")] {
+            let plan = format!(r#"{{runs: [{{name: "first", argv: ["touch", "first"]}}, {{name: "bad", argv: ["true"], cwd: "{cwd}"}}]}}"#);
+            let g = planned(&plan, 5, command, &[("sub/.keep", "")]).await;
+            let ws = g._ws.path().join(&g.run);
+            std::os::unix::fs::symlink(&link, ws.join("out")).unwrap();
+            g.run_it().await;
+            let c = gate_check(&g.engine.record(&g.run).await.unwrap());
+            assert_eq!(c.status, CheckStatus::Error, "{cwd}: {c:?}");
+            assert!(c.detail.contains(why), "{cwd}: {}", c.detail);
+            assert!(!ws.join("first").exists(), "{cwd}: nothing runs");
+        }
+        // Nor an empty program or a NUL.
+        for argv in [r#"[]"#, r#"[""]"#, r#"["echo", "a\u0000b"]"#] {
+            let g = planned(&format!(r#"{{runs: [{{name: "x", argv: {argv}}}]}}"#), 5, command, &[]).await;
+            g.run_it().await;
+            assert_eq!(gate_check(&g.engine.record(&g.run).await.unwrap()).status, CheckStatus::Error, "{argv}");
+        }
+    }
+
+    /// A plan may decide by itself; with nothing to run it passes. Either way the evidence is
+    /// what it read.
+    #[cfg(feature = "script")]
+    #[tokio::test]
+    async fn a_plan_may_return_its_result_or_nothing_to_run() {
+        let plan = r#"{verdict: "fail", summary: flow.read.text("why.txt"), findings: [{rule: "menu", message: "no such check"}]}"#;
+        let g = planned(plan, 5, command, &[("why.txt", "unknown check")]).await;
+        g.run_it().await;
+        let c = gate_check(&g.engine.record(&g.run).await.unwrap());
+        assert_eq!((c.status, c.detail.as_str()), (CheckStatus::Fail, "unknown check"));
+        assert_eq!(c.findings[0].line_text(), "no such check");
+        assert_eq!(c.evidence.iter().map(|e| e.path.as_str()).collect::<Vec<_>>(), ["why.txt"]);
+        for (plan, said) in [(r#"{runs: []}"#, "nothing to run"), (r#"{runs: [], summary: "没有要跑的"}"#, "没有要跑的")] {
+            let g = planned(plan, 5, command, &[]).await;
+            g.run_it().await;
+            let c = gate_check(&g.engine.record(&g.run).await.unwrap());
+            assert_eq!((c.status, c.detail.as_str()), (CheckStatus::Pass, said));
+        }
+        // Neither: an error.
+        let g = planned(r#"{run: "make test"}"#, 5, command, &[]).await;
+        g.run_it().await;
+        assert_eq!(gate_check(&g.engine.record(&g.run).await.unwrap()).status, CheckStatus::Error);
+    }
+
+    /// A plan's runs are commands: only where command gates are on, and in a project only while it is trusted.
+    #[cfg(feature = "script")]
+    #[tokio::test]
+    async fn a_plan_runs_only_where_a_command_gate_would() {
+        let plan = r#"{runs: [{name: "mark", argv: ["touch", "marked"]}]}"#;
+        let g = planned(plan, 5, |_| {}, &[]).await;
+        g.run_it().await;
+        let c = gate_check(&g.engine.record(&g.run).await.unwrap());
+        assert_eq!(c.status, CheckStatus::Error);
+        assert!(c.detail.contains("command gates are not turned on here"), "{}", c.detail);
+        assert!(!g._ws.path().join(&g.run).join("marked").exists());
+
+        let g = planned(plan, 5, command, &[]).await;
+        let project = tempfile::tempdir().unwrap();
+        let root = project.path().to_string_lossy().into_owned();
+        let in_project = async || {
+            let o = g.engine.create(CreateIn { flow: "g".into(), subject: "s".into(), project_root: Some(root.clone()), ..Default::default() }, Actor::device("d")).await.unwrap();
+            let run = o.value["run"].as_str().unwrap().to_string();
+            let round = g.engine.record(&run).await.unwrap().stations["a"].round;
+            run_gate(&g.rn, run.clone(), "a".into(), round, "tests".into()).await;
+            gate_check(&g.engine.record(&run).await.unwrap())
+        };
+        let c = in_project().await;
+        assert_eq!(c.status, CheckStatus::Error);
+        assert!(c.detail.contains("the project is not trusted: its command gate tests does not run"), "{}", c.detail);
+        assert!(!project.path().join("marked").exists());
+        g.rn.set_trust(project.path(), true);
+        assert_eq!(in_project().await.status, CheckStatus::Pass);
+        assert!(project.path().join("marked").exists());
+    }
+
+    /// A gate runs its command or its plan, and the plan's script is there.
+    #[test]
+    fn a_command_gate_has_a_command_or_a_plan() {
+        let packs = MemPacks::new().command_gates().part(crate::PartKind::Script, "plan", "export default function () { return {runs: []}; }");
+        let problems = |g: &str| crate::part_problems(crate::PartKind::Gate, "g", g, &packs);
+        assert_eq!(problems("{name: g, kind: command, plan: plan, params: {item: '${item}'}}"), Vec::<String>::new());
+        assert!(problems("{name: g, kind: command, plan: plan, command: 'true'}").iter().any(|m| m.contains("not both")));
+        assert!(problems("{name: g, kind: command}").iter().any(|m| m.contains("needs its command (or a plan)")));
+        assert!(problems("{name: g, kind: command, plan: ghost}").iter().any(|m| m.contains("no script ghost")));
+        assert!(problems("{name: g, kind: command, plan: plan, cwd: x}").iter().any(|m| m.contains("own cwd")));
+        assert!(problems("{name: g, kind: command, command: 'true', params: {a: 1}}").iter().any(|m| m.contains("go with a script gate")));
+        assert!(problems("{name: g, kind: script, script: plan, plan: plan}").iter().any(|m| m.contains("go with a command gate")));
     }
 
     /// A gate that did not conclude leaves the station unmet without the automatic rework.
