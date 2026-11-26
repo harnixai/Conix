@@ -220,6 +220,10 @@ pub(crate) fn dispatched_work_with(rec: &RunRecord, eng: &Engine, now: u64) -> V
         };
         if matches!(st.status, StationStatus::Working | StationStatus::Unmet) {
             for c in &st.checks {
+                if let Some(w) = super::confirm::pending(rec, sid, st, c) {
+                    out.push(w);
+                    continue;
+                }
                 let gate = c.cond.and_then(|i| sdef.exit.get(i));
                 if let (Some(ExitCond::Gate { gate, .. }), CheckStatus::Wait, true) =
                     (gate, c.status, c.round == st.round)

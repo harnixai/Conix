@@ -25,6 +25,28 @@ tool call does them.
 - No decision by `timeout` does not pass either, saying "no decision within 3d".
 - Every decision records who, when, which round, pass or not, and why.
 
+## Several people, and what they approved
+
+```yaml
+      - kind: confirm
+        who: reviewer
+        min: 2                  # approvals needed (default 1)
+        distinct: true          # one vote per person, a later one replacing theirs (default)
+        reject: any             # any (default): one rejection is enough; majority: as many as min
+        not: [author]           # optional: whoever delivered in this run, or started it, may not vote
+        binds: [deliverables, "${data_dir}/specs/*.md"]   # default: deliverables
+```
+
+- Each decision is one vote of the round; the exit passes once `min` approvals are in ("1 of 2 approvals" shows
+  meanwhile). An outside approval (`via: mcp`) counts as one vote. A rework to the station starts the count again.
+- Authors may confirm their own work unless the exit says `not: [author]`; then their vote is refused, saying why.
+- **What was approved stays approved.** When the exit passes, the files it binds are recorded with their digests:
+  `deliverables` are those of this station and of the stations before it (in the run's directory); paths and globs may
+  start at `${output_dir}`, `${data_dir}` or `${workspace}` and stay in the workspace; `binds: []` binds nothing.
+  Before every later station passes they are checked again: a changed or removed file leaves that station unmet
+  (`confirm-stale`, naming the file and the station that approved it). Put the file back, or rework to that station
+  so it is approved again.
+
 ## An outside approval system (`via: mcp`)
 
 When someone else must approve (a manager, legal, another team) and they are not in this application, a request is

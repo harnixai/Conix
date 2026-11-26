@@ -455,6 +455,14 @@ pub struct ConfirmRec {
     /// The outside request it was decided in: its link, else its id.
     #[serde(default, rename = "ref", skip_serializing_if = "Option::is_none")]
     pub reference: Option<String>,
+    /// The `confirm` exit it is a vote for, when it is one exit's alone (an outside approval's);
+    /// `None` counts for every `confirm` exit of the station.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cond: Option<usize>,
+    /// On the vote that passed the exit: what was approved, path (relative to the workspace) →
+    /// sha256, as it was then. `None` until recorded; empty when the exit binds no file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub binds: Option<BTreeMap<String, String>>,
 }
 
 /// A confirmation asked of an outside approval system (`via: mcp`): what the request gave back,
@@ -1215,6 +1223,21 @@ pub struct RunView {
     /// What the run is doing (`RunRecord::phase`, xops-03 §3).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub phase: Option<Phase>,
+    /// Station id → how each of its `confirm` exits stands this round ("1 of 2 approvals").
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub votes: BTreeMap<String, Vec<Votes>>,
+}
+
+/// How one `confirm` exit's votes stand in the station's current round.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct Votes {
+    /// Index into the station's `exit`.
+    pub cond: usize,
+    pub approvals: u32,
+    pub rejections: u32,
+    /// Approvals needed.
+    pub min: u32,
 }
 
 impl RunView {

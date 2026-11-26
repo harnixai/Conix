@@ -191,6 +191,60 @@ fn sealed(rec: &RunRecord, reader: &Reader, found: &mut Findings) -> Result<usiz
     Ok(latest.len())
 }
 
+/// A confirmation's reserved work item (`kernel::confirm`): record what exit `n` of the station
+/// approved — its files' digests, as evidence — or check that what earlier stations approved is
+/// unchanged. Paths resolve and stay in the workspace as a `files` check's do.
+pub(crate) fn implicit(engine: &crate::Engine, rec: &RunRecord, station: &str, gate: &str) -> GateResult {
+    use crate::kernel::confirm::{approvals, bind_patterns, implicit, Implicit, STALE_KIND};
+    let Some(ws) = engine.workspace_for(rec) else {
+        return GateResult::errored("the run has no workspace to read what was approved in");
+    };
+    let reader = match Reader::new(&ws) {
+        Ok(r) => r,
+        Err(e) => return GateResult::errored(e.0),
+    };
+    let ctx = crate::kernel::refs::context_in(rec, None, None, ws.to_str());
+    match implicit(gate) {
+        Some(Implicit::Binds(i)) => {
+            let Some(e) = rec.def.station(station).and_then(|s| s.exit.get(i)) else {
+                return GateResult::errored(format!("station {station} has no exit {i}"));
+            };
+            let mut n = 0;
+            for raw in bind_patterns(rec, station, e) {
+                let files = match pattern(&raw, &ctx).and_then(|p| reader.glob(&p)) {
+                    Ok(f) => f,
+                    Err(e) => return GateResult::errored(e.0),
+                };
+                for f in files {
+                    if let Err(e) = reader.stat(&f) {
+                        return GateResult::errored(e.0);
+                    }
+                    n += 1;
+                }
+            }
+            let mut out = GateResult::passed(format!("{n} file{} approved", if n == 1 { "" } else { "s" }));
+            out.evidence = reader.evidence();
+            out
+        }
+        Some(Implicit::Stale) => {
+            let mut found = Findings::default();
+            let list = approvals(rec, station);
+            for a in &list {
+                let why = match reader.stat(&a.path) {
+                    Ok(None) => "is gone",
+                    Ok(Some(now)) if now.sha256 != a.sha256 => "changed",
+                    Ok(Some(_)) => continue,
+                    Err(e) => return GateResult::errored(e.0),
+                };
+                let msg = format!("{why} since station {} approved it; rework to {} to have it approved again", a.station, a.station);
+                found.push(Finding::new(STALE_KIND, msg).at(&a.path));
+            }
+            found.into_result(list.len(), vec![])
+        }
+        None => GateResult::errored(format!("{gate} is not one of the library's own checks")),
+    }
+}
+
 fn compile(schema: Option<&Value>) -> Result<jsonschema::Validator, OutOfBounds> {
     let s = schema.ok_or_else(|| OutOfBounds("the check has no schema".into()))?;
     jsonschema::validator_for(s).map_err(|e| OutOfBounds(format!("the schema does not compile: {e}")))
@@ -316,5 +370,172 @@ mod tests {
         let r = run(&g, &json!({}), &rec, &reader);
         assert_eq!(r.verdict, GateVerdict::Fail);
         assert_eq!(r.findings[0].line_text(), "a.md: changed since gate g at a read it");
+    }
+
+    /// Confirmations that bind what they approve, end to end: the runner records the digests and
+    /// checks them again before each later station passes.
+    mod confirmations {
+        use std::sync::Arc;
+
+        use crate::kernel::host::{Outcome, WorkItem};
+        use crate::kernel::run::{CheckStatus, StationStatus};
+        use crate::runner::{Runner, RunnerConfig, ScriptedHost};
+        use crate::{Actor, CreateIn, Engine, FlowError, ManualClock, MemPacks, MemStore, ProjectLayout};
+
+        const FLOW: &str = r#"
+name: g
+stations:
+  - {id: design, deliverables: [{path: design.md}], exit: [{kind: confirm, min: 2}]}
+  - {id: build, exit: [{kind: confirm, binds: []}]}
+  - {id: ship, exit: [{kind: confirm, binds: []}], rework_to: [design]}
+"#;
+
+        struct R {
+            rn: Arc<Runner>,
+            engine: Arc<Engine>,
+            run: String,
+            dir: std::path::PathBuf,
+            _ws: tempfile::TempDir,
+        }
+
+        fn person(id: &str) -> Actor {
+            Actor::new("person", id)
+        }
+
+        impl R {
+            async fn new(flow: &str) -> Self {
+                let ws = tempfile::tempdir().unwrap();
+                let engine = Arc::new(
+                    Engine::new(Arc::new(MemStore::new()), Arc::new(MemPacks::new().flow(flow)))
+                        .with_clock(Arc::new(ManualClock::new(1_000_000)))
+                        .with_workspaces(ws.path())
+                        .with_layout(ProjectLayout::new(".harnix", ws.path().join("worktrees"), "harnix/flow")),
+                );
+                let cfg = RunnerConfig { lease_ms: 60_000, guarded: vec![], ..Default::default() };
+                let rn = Runner::for_tests_with(engine.clone(), ScriptedHost::new(), cfg);
+                let o = engine.create(CreateIn { flow: "g".into(), subject: "s".into(), ..Default::default() }, person("owner")).await.unwrap();
+                let run = o.value["run"].as_str().unwrap().to_string();
+                let rec = engine.record(&run).await.unwrap();
+                let dir = engine.workspace_for(&rec).unwrap().join(rec.output_dir.clone().unwrap_or_default());
+                std::fs::create_dir_all(&dir).unwrap();
+                std::fs::write(dir.join("design.md"), "# Design v1\n").unwrap();
+                R { rn, engine, run, dir, _ws: ws }
+            }
+
+            /// Run the reserved gate work an operation handed out, as the dispatcher would.
+            async fn work(&self, o: Outcome) -> Vec<String> {
+                let mut ran = vec![];
+                let mut todo = o.work;
+                while let Some(w) = todo.pop() {
+                    if let WorkItem::Gate { run, station, round, gate } = w {
+                        ran.push(gate.clone());
+                        super::super::super::gate::run_gate(&self.rn, run.clone(), station, round, gate).await;
+                    }
+                }
+                ran
+            }
+
+            async fn confirm(&self, station: &str, pass: bool, by: &str) -> crate::Result<Vec<String>> {
+                let o = self.engine.confirm(&self.run, station, pass, Some("because"), person(by)).await?;
+                Ok(self.work(o).await)
+            }
+
+            async fn status(&self, station: &str) -> StationStatus {
+                self.engine.record(&self.run).await.unwrap().stations[station].status
+            }
+        }
+
+        #[tokio::test]
+        async fn two_approvals_bind_the_design_and_a_later_edit_is_caught() {
+            let r = R::new(FLOW).await;
+            // one vote per person: alice twice is still one of two
+            assert!(r.confirm("design", true, "alice").await.unwrap().is_empty());
+            r.confirm("design", true, "alice").await.unwrap();
+            let v = r.engine.get(&r.run).await.unwrap();
+            assert_eq!((v.votes["design"][0].approvals, v.votes["design"][0].min), (1, 2));
+            assert_eq!(v.unmet["design"][0].detail, "awaiting confirmation (1 of 2 approvals)");
+            assert_eq!(r.status("design").await, StationStatus::Working);
+            // the second person passes it, once what they approved is recorded
+            assert_eq!(r.confirm("design", true, "bob").await.unwrap(), ["confirm-binds@0"]);
+            let rec = r.engine.record(&r.run).await.unwrap();
+            let st = &rec.stations["design"];
+            assert_eq!(st.status, StationStatus::Passed, "{:?}", st.checks);
+            let binds = st.confirms.last().unwrap().binds.clone().unwrap();
+            assert_eq!(binds.len(), 1);
+            assert!(binds.keys().next().unwrap().ends_with("design.md"), "{binds:?}");
+            assert_eq!(st.checks.iter().find(|c| c.kind == "confirm").unwrap().evidence.len(), 1);
+
+            // unchanged: the next station passes after checking it
+            assert_eq!(r.confirm("build", true, "alice").await.unwrap(), ["confirm-stale@"]);
+            assert_eq!(r.status("build").await, StationStatus::Passed);
+            let rec = r.engine.record(&r.run).await.unwrap();
+            assert_eq!(rec.stations["build"].checks.iter().find(|c| c.kind == "confirm-stale").unwrap().status, CheckStatus::Pass);
+
+            // edited after it was approved: the station after is not met, saying which and where to go back
+            std::fs::write(r.dir.join("design.md"), "# Design v2\n").unwrap();
+            assert_eq!(r.confirm("ship", true, "alice").await.unwrap(), ["confirm-stale@"]);
+            assert_eq!(r.status("ship").await, StationStatus::Unmet);
+            let v = r.engine.get(&r.run).await.unwrap();
+            let stale = v.unmet["ship"].iter().find(|c| c.kind == "confirm-stale").unwrap();
+            assert_eq!(stale.status, CheckStatus::Fail);
+            assert_eq!(stale.findings[0].rule, "confirm-stale");
+            let line = stale.findings[0].line_text();
+            assert!(line.contains("design.md: changed since station design approved it; rework to design"), "{line}");
+
+            // put back as it was and run the checks again: passes
+            std::fs::write(r.dir.join("design.md"), "# Design v1\n").unwrap();
+            let o = r.engine.rerun_gates(&r.run, "ship", person("alice")).await.unwrap();
+            assert_eq!(r.work(o).await, ["confirm-stale@"]);
+            assert_eq!(r.status("ship").await, StationStatus::Passed);
+        }
+
+        #[tokio::test]
+        async fn a_rework_to_the_confirming_station_counts_afresh() {
+            let r = R::new(FLOW).await;
+            r.confirm("design", true, "alice").await.unwrap();
+            r.confirm("design", true, "bob").await.unwrap();
+            r.confirm("build", true, "alice").await.unwrap();
+            std::fs::write(r.dir.join("design.md"), "# Design v2\n").unwrap();
+            r.confirm("ship", true, "alice").await.unwrap();
+            assert_eq!(r.status("ship").await, StationStatus::Unmet);
+            let o = r.engine.rework(&r.run, "design", None, "approve the new design", person("alice")).await.unwrap();
+            r.work(o).await;
+            let v = r.engine.get(&r.run).await.unwrap();
+            assert_eq!(v.record.stations["design"].status, StationStatus::Working);
+            assert_eq!((v.votes["design"][0].approvals, v.votes["design"][0].rejections), (0, 0));
+            // the old votes stay on record, in their round
+            assert_eq!(v.record.stations["design"].confirms.len(), 2);
+            // a new round: two votes again, binding v2; the rest follows without a stale finding
+            r.confirm("design", true, "alice").await.unwrap();
+            assert_eq!(r.status("design").await, StationStatus::Working);
+            r.confirm("design", true, "bob").await.unwrap();
+            r.confirm("build", true, "alice").await.unwrap();
+            r.confirm("ship", true, "alice").await.unwrap();
+            let rec = r.engine.record(&r.run).await.unwrap();
+            assert_eq!(rec.status, crate::RunStatus::Finished);
+        }
+
+        #[tokio::test]
+        async fn an_author_may_vote_unless_the_exit_says_not() {
+            let r = R::new(FLOW).await;
+            // self-review is allowed by default: the one who started the run votes
+            r.confirm("design", true, "owner").await.unwrap();
+            let r = R::new("{name: g, stations: [{id: a, exit: [{kind: confirm, not: [author]}]}]}").await;
+            let e = r.confirm("a", true, "owner").await.unwrap_err();
+            let FlowError::Denied(why) = e else { panic!("{e:?}") };
+            assert!(why.contains("started the run") && why.contains("not: [author]"), "{why}");
+            r.confirm("a", true, "alice").await.unwrap();
+            assert_eq!(r.status("a").await, StationStatus::Passed);
+        }
+
+        #[tokio::test]
+        async fn a_binds_glob_out_of_the_workspace_is_an_error() {
+            let r = R::new("{name: g, stations: [{id: a, exit: [{kind: confirm, binds: ['${data_dir}/specs/*.md']}]}]}").await;
+            r.confirm("a", true, "alice").await.unwrap();
+            let rec = r.engine.record(&r.run).await.unwrap();
+            let c = rec.stations["a"].checks.iter().find(|c| c.kind == "confirm").unwrap();
+            assert_eq!(c.status, CheckStatus::Error, "{c:?}");
+            assert!(c.detail.starts_with("what was approved could not be recorded"), "{}", c.detail);
+        }
     }
 }

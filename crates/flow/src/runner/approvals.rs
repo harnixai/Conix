@@ -123,7 +123,7 @@ fn still_waiting(rec: &RunRecord, station: &str, round: u32, cond: usize) -> boo
     rec.is_active()
         && st.round == round
         && st.status == crate::kernel::run::StationStatus::Working
-        && !st.confirms.iter().any(|c| c.round == round)
+        && !crate::kernel::confirm::mcp_voted(st, round, cond)
         && st.checks.iter().any(|c| c.cond == Some(cond) && c.round == round && c.status == crate::kernel::run::CheckStatus::Wait)
 }
 
@@ -191,11 +191,15 @@ mod tests {
     const FLOW: &str = "{name: a, stations: [{id: ok, exit: [{kind: confirm, via: mcp, mcp: {server: desk, request: {tool: open, arguments: {title: '${run} ${station}'}}, status: {tool: get, arguments: {id: '${request.id}'}}, decision: {path: state, approved: [APPROVED], rejected: [REJECTED]}, by: approver.name, link: url, poll: 30s}}]}]}";
 
     async fn setup(desk: Desk) -> (Arc<Runner>, Arc<Engine>, String, WorkItem, Arc<Desk>) {
-        let engine = Arc::new(Engine::new(Arc::new(MemStore::new()), Arc::new(MemPacks::new().flow(FLOW))).with_clock(Arc::new(ManualClock::new(1_000_000))));
+        setup_with(FLOW, desk, Actor::device("d")).await
+    }
+
+    async fn setup_with(flow: &str, desk: Desk, by: Actor) -> (Arc<Runner>, Arc<Engine>, String, WorkItem, Arc<Desk>) {
+        let engine = Arc::new(Engine::new(Arc::new(MemStore::new()), Arc::new(MemPacks::new().flow(flow))).with_clock(Arc::new(ManualClock::new(1_000_000))));
         let desk = Arc::new(desk);
         let cfg = RunnerConfig { approvals: Some(desk.clone()), ..Default::default() };
         let rn = Runner::for_tests_with(engine.clone(), ScriptedHost::new(), cfg);
-        let o = engine.create(CreateIn { flow: "a".into(), subject: "s".into(), ..Default::default() }, Actor::device("d")).await.unwrap();
+        let o = engine.create(CreateIn { flow: "a".into(), subject: "s".into(), ..Default::default() }, by).await.unwrap();
         let run = o.value["run"].as_str().unwrap().to_string();
         let work = o.work.into_iter().find(|w| matches!(w, WorkItem::Approval { .. })).expect("an approval is asked for");
         (rn, engine, run, work, desk)
@@ -244,6 +248,37 @@ mod tests {
         // Asked again: handed out afresh.
         let o = engine.rerun_gates(&run, &station, Actor::device("d")).await.unwrap();
         assert!(o.work.iter().any(|w| matches!(w, WorkItem::Approval { .. })), "{:?}", o.work);
+    }
+
+    /// An outside decision is one vote; a person's adds to it.
+    #[tokio::test(start_paused = true)]
+    async fn an_outside_approval_is_one_vote_of_several() {
+        let desk = Desk { calls: Mutex::new(vec![]), pending: Mutex::new(0), decide: "APPROVED", fail_request: false };
+        let flow = FLOW.replace("kind: confirm, via: mcp", "kind: confirm, min: 2, via: mcp");
+        let (rn, engine, run, work, _) = setup_with(&flow, desk, Actor::device("d")).await;
+        let WorkItem::Approval { station, round, cond, .. } = work else { unreachable!() };
+        run_approval(&rn, run.clone(), station, round, cond).await;
+        let v = engine.get(&run).await.unwrap();
+        assert_eq!(v.record.stations["ok"].status, StationStatus::Working);
+        assert_eq!((v.votes["ok"][0].approvals, v.votes["ok"][0].min), (1, 2));
+        assert_eq!(v.unmet["ok"][0].detail, "awaiting confirmation (1 of 2 approvals)");
+        engine.confirm(&run, "ok", true, None, Actor::new("person", "bob")).await.unwrap();
+        assert_eq!(engine.record(&run).await.unwrap().stations["ok"].status, StationStatus::Passed);
+    }
+
+    /// Decided outside by whoever started the run, where authors may not decide: an error, no vote.
+    #[tokio::test(start_paused = true)]
+    async fn an_outside_approval_by_an_author_is_refused() {
+        let desk = Desk { calls: Mutex::new(vec![]), pending: Mutex::new(0), decide: "APPROVED", fail_request: false };
+        let flow = FLOW.replace("kind: confirm, via: mcp", "kind: confirm, not: [author], via: mcp");
+        let (rn, engine, run, work, _) = setup_with(&flow, desk, Actor::new("person", "alice")).await;
+        let WorkItem::Approval { station, round, cond, .. } = work else { unreachable!() };
+        run_approval(&rn, run.clone(), station, round, cond).await;
+        let rec = engine.record(&run).await.unwrap();
+        let st = &rec.stations["ok"];
+        assert!(st.confirms.is_empty());
+        assert_eq!((st.status, st.checks[0].status), (StationStatus::Unmet, CheckStatus::Error));
+        assert!(st.checks[0].detail.contains("not: [author]"), "{:?}", st.checks);
     }
 
     #[tokio::test]
