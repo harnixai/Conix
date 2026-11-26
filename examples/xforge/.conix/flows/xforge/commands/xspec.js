@@ -11,12 +11,16 @@
 //   xspec delta                               看增量
 //   xspec check                               增量对得上基线没有（与门禁 spec-delta 同一套规矩）
 //   xspec archive                             把增量并进规格（归档站用）
+import { need, parseFlags } from "../lib/cli.js";
+import { readSpecs } from "../lib/specs.js";
+import { checkDelta } from "../lib/delta.js";
+
 export default function (input, flow) {
   const [sub, ...rest] = input.args;
-  const { pos, opt } = parse(rest);
+  const { pos, opt } = parseFlags(rest);
   const specsDir = `${input.data_dir}/specs`;
   const deltaFile = `${input.output_dir}/spec-delta.yaml`;
-  const specs = readSpecs(flow, specsDir);
+  const specs = readSpecs(flow, `${specsDir}/*.md`);
   const delta = flow.read.yaml(deltaFile) || {};
   const save = () => {
     const d = {};
@@ -76,11 +80,11 @@ export default function (input, flow) {
     case "delta":
       return flow.read.text(deltaFile) || "增量是空的";
     case "check": {
-      const problems = check(specs, delta);
+      const problems = checkDelta(specs, delta, { nonEmpty: true });
       return problems.length ? `对不上基线：\n- ${problems.join("\n- ")}` : "增量对得上基线";
     }
     case "archive": {
-      const problems = check(specs, delta);
+      const problems = checkDelta(specs, delta, { nonEmpty: true });
       need(!problems.length, `增量对不上基线，不能并：\n- ${problems.join("\n- ")}`);
       const touched = new Set();
       for (const r of delta.added || []) {
@@ -108,56 +112,7 @@ export default function (input, flow) {
   }
 }
 
-function readSpecs(flow, dir) {
-  const files = new Map();
-  const byId = new Map();
-  for (const path of flow.glob(`${dir}/*.md`)) {
-    const text = flow.read.text(path) || "";
-    const cap = path.split("/").pop().replace(/\.md$/, "");
-    const heads = [...text.matchAll(/^###\s+([A-Z]+-R\d+)\s+(.*)$/gm)];
-    const marked = /<!--\s*xspec:\s*prefix\s+([A-Z]+)\s*-->/.exec(text);
-    const f = { cap, path, text, title: ((/^#\s+(.*)$/m.exec(text) || [])[1] || cap).trim(), reqs: [], prefix: marked ? marked[1] : heads.length ? heads[0][1].split("-R")[0] : cap.toUpperCase() };
-    heads.forEach((m, i) => {
-      const end = i + 1 < heads.length ? heads[i + 1].index : text.length;
-      const r = { id: m[1], title: m[2].trim(), text: text.slice(m.index + m[0].length, end).trim(), file: f };
-      f.reqs.push(r);
-      byId.set(r.id, r);
-    });
-    files.set(cap, f);
-  }
-  return { files, byId };
-}
-
 function replaceReq(text, id, by) {
   const re = new RegExp(`^###\\s+${id}\\s.*$[\\s\\S]*?(?=^###\\s|(?![\\s\\S]))`, "m");
   return text.replace(re, by);
-}
-
-function check(specs, delta) {
-  const out = [];
-  const seen = new Map();
-  const mark = (id, where) => { if (seen.has(id)) out.push(`${id} 同时在 ${seen.get(id)} 和 ${where}`); seen.set(id, where); };
-  if (!(delta.added || []).length && !(delta.modified || []).length && !(delta.removed || []).length) out.push("增量是空的");
-  for (const r of delta.added || []) {
-    mark(r.id, "added");
-    if (specs.byId.has(r.id)) out.push(`added 的 ${r.id} 已经有了`);
-    if (![...specs.files.values()].some((f) => r.id.startsWith(f.prefix + "-R"))) out.push(`added 的 ${r.id}：没有哪份规格用这个前缀`);
-  }
-  for (const r of delta.modified || []) { mark(r.id, "modified"); if (!specs.byId.has(r.id)) out.push(`modified 的 ${r.id} 不存在`); }
-  for (const id of delta.removed || []) { mark(id, "removed"); if (!specs.byId.has(id)) out.push(`removed 的 ${id} 不存在`); }
-  return out;
-}
-
-function parse(args) {
-  const pos = [], opt = {};
-  for (let i = 0; i < args.length; i++) {
-    if (args[i].startsWith("--")) opt[args[i].slice(2)] = args[++i];
-    else pos.push(args[i]);
-  }
-  return { pos, opt };
-}
-
-function need(v, why) {
-  if (!v) throw new Error(why);
-  return v;
 }
