@@ -66,6 +66,10 @@ impl State {
             return vec![];
         }
         let prefix = &c.text[1..];
+        // 流程地址：`/flow:`、`/flow:<包>:`，流程上下文里的 `/<包>:`。
+        if let Some(v) = crate::flow_addr::candidates(self, prefix) {
+            return v;
+        }
         let mut out: Vec<SlashCommand> = LOCAL
             .iter()
             .map(|n| SlashCommand {
@@ -77,6 +81,12 @@ impl State {
         if let Some(conv) = self.conv() {
             out.extend(conv.commands.iter().cloned());
         }
+        // 全局的流程入口 `/flow:<包>` 也在命令表里露个面：`/fl` 就能补到。
+        out.extend(self.domain.bundles.iter().map(|b| SlashCommand {
+            name: format!("flow:{}", b.name),
+            description: b.title.clone(),
+            source: crate::flow_addr::SRC_BUNDLE.into(),
+        }));
         out.retain(|x| x.name.starts_with(prefix));
         out.dedup_by(|a, b| a.name == b.name);
         out.truncate(8);
@@ -592,6 +602,9 @@ fn submit(s: &mut State) -> Vec<Effect> {
     if !bash && let Some(rest) = text.strip_prefix('/') {
         let (name, arg) = rest.split_once(' ').unwrap_or((rest, ""));
         let arg = arg.trim().to_string();
+        if let Some(e) = crate::flow_addr::route(s, name, &arg) {
+            return e;
+        }
         if let Some(e) = local_command(s, name, arg) {
             return e;
         }

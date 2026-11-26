@@ -304,7 +304,14 @@ fn chat_pane(s: &State, r: &tui::layout::ChatRegions) -> ChatPane {
                         truncate_to_width(&c.description, width.saturating_sub(30)),
                         Tone::Normal,
                     )
-                    .push(format!("  {}", c.source), Tone::Dim)
+                    .push(
+                        format!(
+                            "  {}",
+                            crate::flow_addr::kind_label(&c.source)
+                                .unwrap_or_else(|| c.source.clone())
+                        ),
+                        Tone::Dim,
+                    )
             })
             .collect(),
         picker_selected: (!picker.is_empty()).then(|| s.ui.composer.picker.min(picker.len() - 1)),
