@@ -45,7 +45,8 @@ use crate::kernel::def::{definition_schema, ExitCond, FlowDef, Work};
 use crate::kernel::engine::{view, CreateIn, Engine};
 use crate::kernel::host::{digest, Catalog, Op, Packs};
 use crate::kernel::parts::{part_schema, rules_of, PartKind};
-use crate::kernel::run::{Actor, RunQuery, RunRecord, RunSummary};
+use crate::kernel::route::{Route, RouteCandidate};
+use crate::kernel::run::{Actor, RoutedBy, RoutedRec, RunQuery, RunRecord, RunSummary};
 use crate::kernel::validate::{part_problems, validate, validate_yaml};
 use crate::runner::{redact_url, Runner, SessionId, ToolReply, ToolSpec};
 use crate::wire::defs_list;
@@ -73,11 +74,12 @@ pub const TOOL_FORCE: &str = "flow_force";
 pub const TOOL_REWORK: &str = "flow_rework";
 pub const TOOL_RETRY: &str = "flow_retry";
 pub const TOOL_RELEASE: &str = "flow_release";
+pub const TOOL_SWITCH: &str = "flow_switch";
 
 /// The tools that act on a run: what a host records under a conversation's own name, if it tells
 /// them apart.
-pub const RUN_TOOLS: [&str; 8] =
-    [TOOL_PAUSE, TOOL_RESUME, TOOL_CANCEL, TOOL_CONFIRM, TOOL_FORCE, TOOL_REWORK, TOOL_RETRY, TOOL_RELEASE];
+pub const RUN_TOOLS: [&str; 9] =
+    [TOOL_PAUSE, TOOL_RESUME, TOOL_CANCEL, TOOL_CONFIRM, TOOL_FORCE, TOOL_REWORK, TOOL_RETRY, TOOL_RELEASE, TOOL_SWITCH];
 
 /// The kind of an [`Actor`] that is a conversation acting for the person in it.
 pub const CONVERSATION_KIND: &str = "conversation";
@@ -186,6 +188,7 @@ enum Act {
     Rework,
     Retry,
     Release,
+    Switch,
 }
 
 /// One tool, everything about it but its code: the one place a tool is listed.
@@ -318,10 +321,12 @@ const TOOLS: &[Row] = &[
     },
     Row {
         name: TOOL_START,
-        description: "Start a real run of a flow, named in `flow` (absent: the current one), for a subject. Only when the user asks for it.",
+        description: "Start a real run of a flow, named in `flow` (absent: the current one), for a subject. Only when the user asks for it. `flow` may name a bundle (`xforge`) rather than one of its flows (`xforge/solid`): the bundle takes the first of its flows whose inputs accept `inputs`, and the answer says which and why. When the inputs given cannot decide, nothing starts: the answer gives the bundle's triage skill and its flows with the inputs each takes — judge them as the skill says, then call flow_start again with the inputs you judged and your `reason`. `pace: step` holds every station for the user to release one by one.",
         schema: || json!({"type": "object", "required": ["subject"], "properties": {
             "flow": flow_named(),
-            "subject": {"type": "string"}, "inputs": {"type": "object"}, "title": {"type": "string"}}}),
+            "subject": {"type": "string"}, "inputs": {"type": "object"}, "title": {"type": "string"},
+            "reason": {"type": "string", "description": "why this flow, or these inputs: what you judged them by"},
+            "pace": {"enum": ["auto", "step"]}}}),
         read_only: false,
         does: Does::Start,
     },
@@ -401,6 +406,13 @@ const TOOLS: &[Row] = &[
         schema: || run_input(&["station"], json!({"station": {"type": "string"}})),
         read_only: false,
         does: Does::Act(Act::Release),
+    },
+    Row {
+        name: TOOL_SWITCH,
+        description: "Switch a run to another flow of its bundle (`to`: `xforge/solid`, or `solid`), with a reason — when the flow chosen turns out too short or too long. Only while its first station has not passed; the station starts over under the new flow, and what the run wrote stays. `inputs` changes some of the run's inputs for the new flow. Past the first station, cancel the run and start the other flow instead.",
+        schema: || run_input(&["to", "reason"], json!({"to": {"type": "string"}, "reason": {"type": "string"}, "inputs": {"type": "object"}})),
+        read_only: false,
+        does: Does::Act(Act::Switch),
     },
 ];
 
@@ -615,19 +627,47 @@ impl Cx<'_> {
             Does::Start => {
                 let name = self.target(input, current.as_deref())?;
                 let subject = str_of(input, "subject").ok_or("give the run's `subject`")?;
+                let inputs = input.get("inputs").cloned().unwrap_or(Value::Null);
+                let pace = match str_of(input, "pace") {
+                    None => None,
+                    Some(p) => Some(serde_json::from_value(json!(p)).map_err(|_| format!("`pace` is auto or step, not {p}"))?),
+                };
+                // A bundle's name: which of its flows, or the triage the model does here, in the
+                // conversation, before anything starts.
+                let routed = match engine.route(&name, &inputs, project.as_deref()).map_err(|e| format!("not started: {e}"))? {
+                    Route::Triage { bundle, skill, candidates } => return Ok(triage_answer(packs, &bundle, &skill, &candidates)),
+                    Route::Flow { by, .. } => by,
+                };
+                // The reason a model gives with a bundle's name is the judgement it made by triage.
+                let said = str_of(input, "reason").map(|r| RoutedRec {
+                    by: if routed == RoutedBy::Named { RoutedBy::Named } else { RoutedBy::Triage },
+                    reason: Some(r.to_string()),
+                });
                 let start = CreateIn {
                     flow: name,
                     subject: subject.to_string(),
-                    inputs: input.get("inputs").cloned().unwrap_or(Value::Null),
+                    inputs,
                     title: str_of(input, "title").map(String::from),
                     parent: None,
                     project_root: project.clone(),
+                    pace,
+                    routed: said,
                     ..Default::default()
                 };
                 // Authorized as `create` before anything is made for the run.
                 let o = self.rn.start_run(start, self.by.clone()).await.map_err(|e| format!("not started: {e}"))?;
-                let value = o.value.clone();
+                let mut value = o.value.clone();
                 self.rn.apply(o).await;
+                let run = value.get("run").and_then(Value::as_str).map(String::from);
+                if let Some(Ok(rec)) = match run {
+                    Some(r) => Some(engine.record(&r).await),
+                    None => None,
+                } {
+                    // Which flow it is, and why: a bundle's name says neither by itself.
+                    value["flow"] = json!(rec.flow);
+                    value["routed"] = json!(rec.routed);
+                    value["pace"] = json!(rec.pace);
+                }
                 Ok(value)
             }
             // Answered before a runner is needed.
@@ -903,6 +943,11 @@ impl Cx<'_> {
                 None => engine.rerun_gates(&run, &station, who).await,
             },
             Act::Release => engine.release(&run, &station, who).await,
+            Act::Switch => {
+                let to = str_of(input, "to").unwrap_or_default();
+                let reason = reason.as_deref().unwrap_or_default();
+                engine.switch(&run, to, reason, input.get("inputs").cloned(), who).await
+            }
         };
         let o = r.map_err(|e| format!("not done: {e}"))?;
         let value = o.value.clone();
@@ -910,6 +955,22 @@ impl Cx<'_> {
         let after = engine.record(&run).await.ok();
         Ok(json!({"done": value, "phase": after.map(|r| r.phase())}))
     }
+}
+
+/// What `flow_start` answers when a bundle's route needs the inputs judged: the skill to judge
+/// them by, the flows and what each takes, and what to do next. Nothing has started.
+fn triage_answer(packs: &dyn Packs, bundle: &str, skill: &str, candidates: &[RouteCandidate]) -> Value {
+    let text = packs.skill(skill).map(|(t, _)| crate::kernel::protocol::skill_body(&t)).unwrap_or_default();
+    json!({
+        "started": false,
+        "triage": {"bundle": bundle, "skill": skill, "text": text},
+        "candidates": candidates,
+        "next": format!(
+            "Nothing started: the inputs given do not decide which flow of {bundle} fits. Judge them as the skill says \
+             (read what you need of the project), then call {TOOL_START} again with flow `{bundle}`, the inputs you \
+             judged, and your `reason` — or name one of the candidates."
+        ),
+    })
 }
 
 fn pretty(v: &Value) -> String {
@@ -1195,10 +1256,10 @@ mod tests {
         );
         let acts: Vec<&str> = TOOLS.iter().filter(|t| matches!(t.does, Does::Act(_))).map(|t| t.name).collect();
         assert_eq!(acts, RUN_TOOLS, "the run tools are the ones that act on a run");
-        assert_eq!(names.len(), 23);
+        assert_eq!(names.len(), 24);
         names.sort();
         names.dedup();
-        assert_eq!(names.len(), 23, "no name twice");
+        assert_eq!(names.len(), 24, "no name twice");
         for t in &specs {
             assert!(t.name.starts_with("flow_") && !t.description.is_empty(), "{}", t.name);
             assert_eq!(t.input_schema["type"], "object", "{}", t.name);

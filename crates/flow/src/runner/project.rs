@@ -75,6 +75,12 @@ pub(crate) async fn start(rn: &Arc<Runner>, mut input: CreateIn, by: Actor) -> c
         // In a project a name means the project's own flow: not run until it is trusted.
         super::trust::withheld(engine.packs_for(Some(root)).as_ref(), &input.flow)?;
     }
+    // A bundle's name is the flow it routes to, before anything is made for that flow.
+    let named = input.flow.clone();
+    input = engine.resolve_start(input)?;
+    if let Some(root) = root.as_ref().filter(|_| input.flow != named) {
+        super::trust::withheld(engine.packs_for(Some(root)).as_ref(), &input.flow)?;
+    }
     let mut prepared = Prepared::default();
     if let Some(root) = &root {
         let def = engine.packs_for(Some(root)).flow(&input.flow).map(|(d, _)| d);

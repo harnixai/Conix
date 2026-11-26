@@ -5,7 +5,7 @@
 //! |---|---|
 //! | `flow_state` | the run as far as this task is concerned: the station, what is still unmet |
 //! | `flow_submit {output}` | hands the output in under the session's claim; problems come back to fix |
-//! | `flow_propose {kind, to?, reason}` | writes a `proposal` note; a person accepts it or not |
+//! | `flow_propose {kind, to?, reason}` | records a proposal on the run (and sends a `proposal` note); a person accepts it or not |
 //! | `flow_command {command, args, run?}` | runs a command of a bundle (in Conix): in a run's session the run's own; for the main conversation `bundle:command`. It writes only the run's directory and the bundle's data; outside a run a model only runs the read-only subcommands |
 //!
 //! `flow_command` is the one tool here a session with no task may call ([`FlowTools::call_in`]);
@@ -20,7 +20,7 @@ use super::host::{AgentTaskStatus, Note, SessionId, ToolSpec};
 use super::state::Binding;
 use super::Runner;
 use crate::kernel::def::Executor;
-use crate::kernel::run::{Actor, AgentDelivery};
+use crate::kernel::run::{Actor, AgentDelivery, ProposalKind};
 use crate::kernel::FlowError;
 
 pub const TOOL_STATE: &str = "flow_state";
@@ -123,9 +123,10 @@ pub fn tool_specs() -> Vec<ToolSpec> {
         },
         ToolSpec {
             name: TOOL_PROPOSE.into(),
-            description: "Propose that a person rework an upstream station (kind `rework`, `to` the station) or \
-                 cancel the run (kind `cancel`), with your reason. It is shown to people as a card; \
-                 nothing happens unless one of them accepts it."
+            description: "Propose that a person send the run back to a station (kind `rework`, `to` one of the \
+                 stations this one may go back to, as the flow protocol lists them — a problem born in an \
+                 earlier station goes back there) or cancel the run (kind `cancel`), with your reason. It is \
+                 recorded on the run and shown to people; nothing happens unless one of them accepts it."
                 .into(),
             input_schema: json!({
                 "type": "object",
@@ -336,7 +337,7 @@ async fn sub_agent(rn: &Runner, b: &Binding, session: &SessionId) -> Result<Opti
 const SUB_AGENT_SETTLE_TRIES: u32 = 6;
 const SUB_AGENT_SETTLE_STEP: std::time::Duration = std::time::Duration::from_millis(500);
 
-async fn propose(rn: &Runner, b: &Binding, session: &SessionId, input: Value) -> ToolReply {
+async fn propose(rn: &std::sync::Arc<Runner>, b: &Binding, session: &SessionId, input: Value) -> ToolReply {
     let kind = input.get("kind").and_then(Value::as_str).unwrap_or("");
     let reason = input.get("reason").and_then(Value::as_str).unwrap_or("").trim().to_string();
     let to = input.get("to").and_then(Value::as_str).filter(|s| !s.is_empty()).map(String::from);
@@ -349,17 +350,30 @@ async fn propose(rn: &Runner, b: &Binding, session: &SessionId, input: Value) ->
     if reason.is_empty() {
         return ToolReply::error("a proposal needs a reason");
     }
+    let pk = if kind == "rework" { ProposalKind::Rework } else { ProposalKind::Cancel };
+    // Recorded on the run first: a proposal the run does not hold is one nobody can accept.
+    let o = match rn
+        .engine()
+        .propose(&b.run, &b.station, &b.task, &b.token, pk, to.as_deref(), &reason, Actor::agent(session.clone()))
+        .await
+    {
+        Ok(o) => o,
+        Err(e) => return ToolReply::error(format!("The proposal was not recorded: {e}")),
+    };
+    let id = o.value.pointer("/proposal/id").and_then(Value::as_str).unwrap_or_default().to_string();
+    rn.apply_for(&b.run, o).await;
     let payload = json!({
-        "run": b.run, "station": b.station, "task": b.task,
+        "run": b.run, "station": b.station, "task": b.task, "id": id,
         "kind": kind, "to": to, "reason": reason,
     });
-    match rn.host().note(session, Note { event: "proposal".into(), payload }).await {
-        Ok(()) => ToolReply::text(
-            "Proposed. A person will accept or dismiss it; carry on with your task meanwhile, or stop \
-             if you cannot do it without the change.",
-        ),
-        Err(e) => ToolReply::error(format!("The proposal was not recorded: {e}")),
+    // The host's note is how a person hears of it now; the run keeps it whether or not they do.
+    if let Err(e) = rn.host().note(session, Note { event: "proposal".into(), payload }).await {
+        tracing::warn!(run = %b.run, error = %e, "proposal note not delivered");
     }
+    ToolReply::text(format!(
+        "Proposed ({id}). A person will accept or dismiss it; carry on with your task meanwhile, or stop \
+         if you cannot do it without the change."
+    ))
 }
 
 #[cfg(test)]
@@ -428,9 +442,18 @@ mod tests {
         assert_eq!(notes[0].1.event, "proposal");
         assert_eq!(notes[0].1.payload["reason"], "no point");
         assert_eq!(notes[0].1.payload["run"], b.run);
+        assert_eq!(notes[0].1.payload["id"], "p1");
+        // Recorded on the run, open; a rework to a point the station has not is refused, naming none.
+        let rec = rn.engine().record(&b.run).await.unwrap();
+        assert_eq!((rec.proposals.len(), rec.proposals[0].status), (1, crate::kernel::run::ProposalStatus::Open));
+        let nowhere = rn.tools().call(&id, TOOL_PROPOSE, json!({"kind": "rework", "to": "b", "reason": "x"})).await;
+        assert!(nowhere.is_error && nowhere.text.contains("names no station to go back to"), "{}", nowhere.text);
         let taken = rn.tools().call(&id, TOOL_SUBMIT, json!({"output": {"n": 1}})).await;
         assert!(!taken.is_error && taken.text.starts_with("Accepted. Station `a` is now passed"), "{}", taken.text);
-        assert_eq!(rn.engine().record(&b.run).await.unwrap().stations["a"].status, StationStatus::Passed);
+        let rec = rn.engine().record(&b.run).await.unwrap();
+        assert_eq!(rec.stations["a"].status, StationStatus::Passed);
+        // The station moved on without it: not taken.
+        assert_eq!(rec.proposals[0].status, crate::kernel::run::ProposalStatus::Dismissed);
         // The station passed: the session serves no task any more.
         let over = rn.tools().call(&id, TOOL_STATE, json!({})).await;
         assert!(over.is_error && over.text.contains("not working on a flow task"), "{}", over.text);

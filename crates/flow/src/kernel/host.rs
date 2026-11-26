@@ -411,6 +411,22 @@ pub enum Op {
     DryRun {
         flow: String,
     },
+    /// Switching a run to another flow of its bundle (`Engine::switch`): `from`, `to` full names.
+    Switch {
+        from: String,
+        to: String,
+    },
+    /// A station's session proposing a rework (`to`) or a cancel for a person to decide
+    /// (`Engine::propose`): `kind` is `rework` or `cancel`.
+    Propose {
+        station: String,
+        kind: String,
+        to: Option<String>,
+    },
+    /// Dismissing an open proposal (`Engine::dismiss_proposal`).
+    DismissProposal {
+        id: String,
+    },
 }
 
 impl Op {
@@ -439,6 +455,9 @@ impl Op {
             Self::ListRuns { .. } => "list_runs",
             Self::ReadRun => "read_run",
             Self::DryRun { .. } => "dry_run",
+            Self::Switch { .. } => "switch",
+            Self::Propose { .. } => "propose",
+            Self::DismissProposal { .. } => "dismiss_proposal",
         }
     }
 }
@@ -694,6 +713,10 @@ pub const EVENT_KINDS: &[&str] = &[
     "task.cancelled",
     "task.expired",
     "task.asking",
+    "run.switched",
+    "proposal.opened",
+    "proposal.accepted",
+    "proposal.dismissed",
 ];
 
 /// Work for the module to carry out after the commit.

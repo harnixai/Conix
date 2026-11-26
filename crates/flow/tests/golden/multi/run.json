@@ -85,6 +85,9 @@
   "id": "multi-1",
   "inputs": {},
   "rev": 9,
+  "routed": {
+    "by": "named"
+  },
   "seq": 20,
   "stations": {
     "analyze": {

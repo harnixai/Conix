@@ -114,6 +114,12 @@ impl<'e> Txn<'e> {
         &self.slots[id].rec
     }
 
+    /// A loaded run's record itself: for a change the state machine cannot make, since it reads
+    /// the definition once (a switch to another flow).
+    pub fn get_mut(&mut self, id: &str) -> &mut RunRecord {
+        &mut self.slots.get_mut(id).expect("run loaded").rec
+    }
+
     pub fn insert_new(&mut self, rec: RunRecord) {
         self.slots.insert(rec.id.clone(), Slot { rec, orig: None });
     }
@@ -263,6 +269,7 @@ impl<'e> Txn<'e> {
                             child.data_dir = up.data_dir.clone();
                             child.worktree = up.worktree.clone();
                             child.base_commit = up.base_commit.clone();
+                            child.pace = super::route::pace_of(&child.def, packs.as_ref(), None);
                             Ok(child)
                         }
                     }
@@ -367,6 +374,10 @@ pub(crate) fn new_record(
         worktree: None,
         base_commit: None,
         governed: false,
+        pace: Default::default(),
+        routed: None,
+        switched: vec![],
+        proposals: vec![],
         def,
     }
 }
@@ -734,8 +745,10 @@ impl<'a> M<'a> {
             }
         };
 
+        // A run stepped through holds every station as `hold` holds one.
+        let hold = st.hold || self.rec.pace == super::def::Pace::Step;
         let r = self.st(sid);
-        r.status = if st.hold {
+        r.status = if hold {
             StationStatus::Held
         } else {
             StationStatus::Working
@@ -744,7 +757,7 @@ impl<'a> M<'a> {
         let data = json!({"round": round, "tasks": fresh});
         self.emit("station.entered", Some(sid), None, data.clone());
         self.log("enter", Some(sid), None, data);
-        if st.hold {
+        if hold {
             self.emit("station.held", Some(sid), None, json!({"round": round}));
         }
         for t in &fresh {
@@ -752,7 +765,7 @@ impl<'a> M<'a> {
         }
         // Paused (a rework while paused): nothing is judged or dispatched here until the run
         // resumes — a station with no tasks would run its gates now (review).
-        if !st.hold && self.rec.paused.is_none() {
+        if !hold && self.rec.paused.is_none() {
             if empty {
                 self.judge_later(sid);
             }
@@ -1264,22 +1277,28 @@ impl<'a> M<'a> {
         let data = json!({"round": r.round, "forced": r.forced.is_some()});
         self.emit("station.passed", Some(sid), None, data.clone());
         self.log("pass", Some(sid), None, data);
+        self.proposals_dismissed(sid);
     }
 
     /// `on_unmet`: rework automatically while under `max` and the rework limit.
     fn on_unmet(&mut self, sid: &str, unmet: Vec<CheckRec>) -> bool {
-        let Some(u) = self.def.station(sid).and_then(|s| s.on_unmet.clone()) else {
+        let Some(st) = self.def.station(sid).cloned() else {
             return false;
         };
-        if self.st(sid).auto_reworks >= u.max || self.can_rework(&u.rework_to).is_err() {
+        let Some(u) = st.on_unmet.clone() else {
+            return false;
+        };
+        // A failed gate may name its own point to go back to.
+        let to = super::route::unmet_target(&self.def, &st, &unmet, &u.rework_to);
+        if self.st(sid).auto_reworks >= u.max || self.can_rework(&to).is_err() {
             return false;
         }
         self.st(sid).auto_reworks += 1;
         let by = std::mem::replace(&mut self.by, Actor::flow("auto"));
-        self.rework(&u.rework_to, None, &format!("on_unmet of {sid}"));
+        self.rework(&to, None, &format!("on_unmet of {sid}"));
         self.by = by;
         // The round that starts over is told what was not met, findings and all.
-        if let Some(r) = self.st(&u.rework_to).reworked.as_mut() {
+        if let Some(r) = self.st(&to).reworked.as_mut() {
             r.from = Some(sid.to_string());
             r.unmet = unmet;
         }
@@ -1337,6 +1356,7 @@ impl<'a> M<'a> {
         let data = json!({"reason": reason, "tasks": partial, "stale": swept});
         self.emit("station.reworked", Some(to), None, data.clone());
         self.log("rework", Some(to), None, data);
+        self.proposals_on_rework(to);
         self.enter(to, partial);
         let rec = super::run::ReworkRec { by: self.by.clone(), at: now, reason: reason.to_string(), from: None, unmet: vec![] };
         self.st(to).reworked = Some(rec);
@@ -1348,6 +1368,7 @@ impl<'a> M<'a> {
         let now = self.now();
         self.rec.status = RunStatus::Finished;
         self.rec.finished_at = Some(now);
+        self.proposals_closed(false);
         self.close_keyed_sessions();
         self.emit("run.finished", None, None, Value::Null);
         self.log("finish", None, None, Value::Null);
@@ -1387,6 +1408,7 @@ impl<'a> M<'a> {
         }
         self.rec.status = RunStatus::Cancelled;
         self.rec.finished_at = Some(now);
+        self.proposals_closed(true);
         self.close_keyed_sessions();
         let data = json!({"reason": reason});
         self.emit("run.cancelled", None, None, data.clone());

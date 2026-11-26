@@ -24,7 +24,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::kernel::def::{Executor, ExitCond, FlowDef};
+use crate::kernel::def::{Executor, ExitCond, FlowDef, Pace};
 use crate::kernel::parts::PartKind;
 
 /// The file that makes a directory a bundle.
@@ -54,6 +54,17 @@ pub struct BundleMeta {
     /// The bundle's commands, each `commands/<name>.js`: what sessions, people and stations may run.
     #[serde(default, skip_serializing_if = "Commands::is_empty")]
     pub commands: Commands,
+    /// Its flows by file stem, in the order people are offered them (and a start is routed by,
+    /// unless `start.route` says otherwise). Absent: every flow file, by name.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub flows: Vec<String>,
+    /// How a start that names the bundle alone is routed to one of its flows
+    /// ([`crate::kernel::route`]).
+    #[serde(default, skip_serializing_if = "StartDef::is_empty")]
+    pub start: StartDef,
+    /// How its runs go from station to station when a flow says nothing ([`Pace`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pace: Option<Pace>,
 }
 
 /// What `bundle.yaml` says of one command.
@@ -197,6 +208,97 @@ pub fn namespace_problems(commands: &[&str], flows: &[(String, Vec<String>)]) ->
     out
 }
 
+/// A bundle's `start`: the order its flows are tried in, and the skill the main session judges by
+/// when the inputs given cannot decide.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StartDef {
+    /// Flow stems, tried in order: the first whose inputs accept the start's is the one. Absent:
+    /// the bundle's `flows`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub route: Vec<String>,
+    /// A skill of the bundle (`skills/<name>/SKILL.md`) a model follows to judge the inputs the
+    /// route needs, when the start did not give them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub triage: Option<String>,
+}
+
+impl StartDef {
+    pub fn is_empty(&self) -> bool {
+        self.route.is_empty() && self.triage.is_none()
+    }
+}
+
+impl BundleMeta {
+    /// Read from a `bundle.yaml`'s text (its name is not checked against a directory here).
+    pub fn parse(text: &str) -> Result<Self, String> {
+        serde_yaml::from_str(text).map_err(|e| format!("{BUNDLE_FILE}: {e}"))
+    }
+
+    /// The bundle's flows by stem, in order: `flows` as written, else `stems` by name.
+    pub fn flow_order(&self, stems: &BTreeSet<String>) -> Vec<String> {
+        if self.flows.is_empty() {
+            stems.iter().filter(|s| *s != MAIN_FLOW).cloned().collect()
+        } else {
+            self.flows.clone()
+        }
+    }
+
+    /// The stems a start naming the bundle is routed through, in order.
+    pub fn route_order(&self, stems: &BTreeSet<String>) -> Vec<String> {
+        if self.start.route.is_empty() {
+            self.flow_order(stems)
+        } else {
+            self.start.route.clone()
+        }
+    }
+
+    /// What is wrong with its `flows`, `start` and `pace`, given the stems of the flows it has
+    /// and whether it has a skill of a name.
+    pub fn start_problems(&self, stems: &BTreeSet<String>, has_skill: &dyn Fn(&str) -> bool) -> Vec<String> {
+        let mut out = vec![];
+        let mut seen = BTreeSet::new();
+        for f in &self.flows {
+            if !stems.contains(f) {
+                out.push(format!("{BUNDLE_FILE}: flows names {f}, which is not a flow of the bundle"));
+            }
+            if !seen.insert(f) {
+                out.push(format!("{BUNDLE_FILE}: flows names {f} twice"));
+            }
+        }
+        let order = self.flow_order(stems);
+        for f in &self.start.route {
+            if !order.contains(f) {
+                out.push(format!("{BUNDLE_FILE}: start.route names {f}, which is not one of its flows ({})", order.join(", ")));
+            }
+        }
+        if let Some(t) = &self.start.triage {
+            if !has_skill(t) {
+                out.push(format!("{BUNDLE_FILE}: start.triage names the skill {t}, which the bundle does not have (skills/{t}/SKILL.md)"));
+            }
+        }
+        out
+    }
+}
+
+/// A bundle's `bundle.yaml` as packs offer it, if they offer the bundle and it reads.
+pub fn meta_of(packs: &dyn crate::Packs, bundle: &str) -> Option<BundleMeta> {
+    BundleMeta::parse(&packs.bundle_file(bundle, BUNDLE_FILE)?).ok()
+}
+
+/// The stems of a bundle's flows as packs offer them (`flow` for the bundle's own).
+pub fn offered_stems(packs: &dyn crate::Packs, bundle: &str) -> BTreeSet<String> {
+    packs
+        .flows()
+        .iter()
+        .filter_map(|f| match split(f) {
+            Some((b, s)) if b == bundle => Some(s.to_string()),
+            None if f == bundle => Some(MAIN_FLOW.to_string()),
+            _ => None,
+        })
+        .collect()
+}
+
 /// A bundle's name and the local name in a full name: `xforge/solid` → `("xforge", "solid")`.
 pub fn split(name: &str) -> Option<(&str, &str)> {
     let (b, l) = name.split_once('/')?;
@@ -333,7 +435,7 @@ pub fn read_flow(bundle: &str, dir: &Path, stem: &str) -> Option<(FlowDef, Strin
     qualify(&mut def, bundle, &|s: &str| stems.contains(s));
     for st in def.stations.iter_mut().filter(|s| !s.deliverables.is_empty()) {
         let gate = qualified(bundle, &format!("{DELIVERABLES_GATE}{stem}.{}", st.id));
-        st.exit.insert(0, ExitCond::Gate { gate, label: Some("deliverables".into()) });
+        st.exit.insert(0, ExitCond::Gate { gate, label: Some("deliverables".into()), rework_to: None });
     }
     Some((def, text))
 }

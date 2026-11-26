@@ -141,6 +141,14 @@ skill 写这一站怎么做好：读什么、按什么思路做，交付物的�
 - 结构化的数据（增量、台账、清单）交给包的命令：`commands/<名>.js` 是 `export default function (input, flow)`，`input.args` 是参数，
   `flow` 比脚本门禁的多 `write`、`append`、`remove`、`print`，只写得了运行的目录和 `${data_dir}`。站里的会话用
   `flow_command {command, args}` 调；策略可以拒模型直接写这些文件，命令照样能写。
+- 一个包里的几条流程是同一件事的几条路径。`flows: [quick, solid, major]` 定顺序；只给包名启动时，取 `start.route`（缺省就是
+  `flows`）里第一条 `inputs` 的 schema 接受这份输入的流程——所以 schema 就写清每条路径收什么（`risk: {schema: {enum: [low]}}`）。
+  输入定不了路时，`start.triage: <skill>` 指定模型照哪个 skill 判。第一站还开着、另一条流程也从这一站开始时，运行可以换路
+  （`flow_switch`）。
+- `pace: step`（写在 `bundle.yaml`、流程或启动时）让每一站进站都搁置，人一站一站放行。
+- 门禁可以写自己的回退点：`{kind: gate, gate: spec-delta, rework_to: propose}`，这道门不过时打回到这里而不是 `on_unmet.rework_to`，
+  次数仍算在 `on_unmet.max` 里；它只能是这一站、它的 `rework_to` 或 `on_unmet.rework_to`。站里的会话用 `flow_propose` 建议回退也只能
+  回到这些点，建议记在运行里，直到人接受或它不再相干。
 
 
 ### 串行：起草 → 人确认
