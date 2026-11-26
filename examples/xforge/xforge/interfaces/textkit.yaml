@@ -1,0 +1,14 @@
+# textkit 的接口基线：xforge 的变更流程用 xarch 记增量，归档站用 xarch archive 并进来。
+# 这里登记的是 src/textkit/__init__.py 的 __all__：已经有人在用，所以直接是 stable。
+module: textkit
+title: 文本工具
+paths: ["src/textkit/**"]
+elements:
+  - id: fn:textkit.slugify
+    signature: "slugify(text: str) -> str"
+    description: 把文本转成 URL 片段：小写，非字母数字的连续字符换成一个连字符，去掉首尾的连字符
+    stability: stable
+  - id: fn:textkit.word_count
+    signature: "word_count(text: str) -> int"
+    description: 数英文单词：以空白分隔的非空片段个数
+    stability: stable
