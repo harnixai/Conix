@@ -382,6 +382,22 @@ Conix 在 Harnix 0.4.7 分叉了这个库，先把站的治理（门禁、确认
 - **包的命令**（`TOOL_COMMAND`，`flow_command {command, args}`）：`bundle.yaml` 的 `commands` 列出的 `commands/<名>.js`，
   随运行钉进 `Pinned::commands`；在库自己的 QuickJS 里跑，`flow` 比脚本门禁的多 `write`、`append`、`remove`、`print`，
   只写得了运行目录（`_run/` 除外）与 `${data_dir}`。它不是只读的工具。
+- **按包启动、分诊、换路**（模块 `kernel::route`）：`bundle.yaml` 加 `flows`（顺序）、`start: {route, triage}`（`bundle::StartDef`）、
+  `pace`，名字不对随包里每条流程一起报。启动写的是一个没有同名流程的包时选路：取 `start.route` 里第一条接受这份输入的流程。
+  `Engine::create` 自己选；`Engine::resolve_start` 给先要为流程做事的宿主（runner 的 `start_run` 用它）；`Engine::route(name, inputs,
+  project_root)` 回 `Route::Flow{flow, by, reason}` 或 `Route::Triage{bundle, skill, candidates}`（`RouteCandidate`）。
+  `CreateIn::routed` 是启动方说的选法（`RoutedRec`、`RoutedBy`：`named`、`route`、`triage`），记进 `RunRecord::routed`。
+  `flow_start` 遇到分诊时回 skill 的正文与候选，什么也不起。**`Engine::switch(run, to, reason, inputs, by)`**（`Op::Switch`、
+  `flow_switch`、`TOOL_SWITCH`）：第一站还开着时换到同一个包的另一条流程，重新钉住，这一站重进；`RunRecord::switched`
+  （`SwitchRec`），事件 `run.switched`。`RUN_TOOLS` 变成九个。
+- **步进**（`Pace`：`auto`、`step`）：`FlowDef::pace`、包的 `pace`、`CreateIn::pace`；`RunRecord::pace`。`step` 让每一站进站都像
+  `hold: true` 一样搁置。
+- **回退点**：`ExitCond::Gate` 加 `rework_to`：这道门不过时 `on_unmet` 打回到这里（几道不过取最靠前的）；
+  `Station::rework_points` 列出一站能退到的点（`rework_to`、`on_unmet.rework_to`、各门禁的）。
+- **建议记进运行**：`Engine::propose(run, station, task, token, kind, to, reason, by)`（`Op::Propose`；`flow_propose` 调它，照旧也发
+  note）按站的回退点核对 `to`，记一条 `ProposalRec`（`ProposalKind`、`ProposalStatus`）进 `RunRecord::proposals`；打回到那里就是
+  接受，站往前走就作废，`Engine::dismiss_proposal`（`Op::DismissProposal`）也能作废。`RunView::proposals` 是还开着的；事件
+  `proposal.opened`、`proposal.accepted`、`proposal.dismissed`。
 
 - **试运行用会话所在的流程包**：`Sandbox::start_in(input, by, packs)`；`flow_dry_run` 用会话读的那份（项目的流程、件），
   不再只看应用自己的包——项目里的流程以前试运行时找不到。
