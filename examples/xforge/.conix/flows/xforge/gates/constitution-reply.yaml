@@ -1,0 +1,10 @@
+name: constitution-reply
+title: 检查站答了每条原则
+description: >-
+  读项目的 .conix/governance/constitution.yaml：检查站用 xledger reply 把每条原则都答了（complies / violates / n-a），
+  violates 有说明。项目没有原则时只提醒、不挡。
+kind: script
+script: constitution-reply
+params:
+  constitution: .conix/governance/constitution.yaml
+  ledger: "${output_dir}/ledgers/constitution.yaml"
