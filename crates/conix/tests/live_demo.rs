@@ -117,6 +117,8 @@ async fn start(c: &Client, flow: &str, subject: &str, inputs: Value) -> RunId {
             flow: flow.into(),
             subject: subject.into(),
             inputs,
+            step: false,
+            session: None,
         })
         .await
     {

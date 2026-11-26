@@ -532,6 +532,8 @@ async fn xforge_installs_offers_both_flows_and_carries_a_change_from_open_to_arc
             flow: "xforge-quick".into(),
             subject: "second".into(),
             inputs: json!({"title": "Second change", "risk": "low"}),
+            step: false,
+            session: None,
         })
         .await
         .unwrap()

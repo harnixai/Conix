@@ -114,6 +114,8 @@ async fn start(c: &live::Client, flow: &str, subject: &str) -> port::RunSummary 
             flow: flow.into(),
             subject: subject.into(),
             inputs: serde_json::Value::Null,
+            step: false,
+            session: None,
         })
         .await
     {

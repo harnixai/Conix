@@ -632,7 +632,9 @@ impl FlowPort for Flows {
                 ..
             } if step => {
                 let _ = (flow, subject, inputs);
-                Err(PortError::Unsupported("step pace is not supported yet".into()))
+                Err(PortError::Unsupported(
+                    "step pace is not supported yet".into(),
+                ))
             }
             Command::StartRun {
                 flow,
