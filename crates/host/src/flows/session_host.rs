@@ -175,7 +175,16 @@ pub(crate) fn options_of(spec: &OpenSpec, policy: Option<&RunPolicy>) -> Value {
         network: policy
             .and_then(|p| p.network.sandbox_mode())
             .map(Into::into),
-        deny: policy.map_or_else(Vec::new, |_| vec!["CronCreate".into()]),
+        deny: policy
+            .map_or_else(Vec::new, |_| vec!["CronCreate".into()])
+            .into_iter()
+            .chain(spec.deny_read.iter().flat_map(|p| {
+                // 双路的子运行读不到父运行与兄弟的 worktree（flows.md §6.5）。Agix 的沙箱只认确切的路径
+                // 与 `目录/**`，所以一个目录两条：只写 `/**` 挡不住列目录本身。
+                let p = p.display();
+                [format!("Read({p})"), format!("Read({p}/**)")]
+            }))
+            .collect(),
         ..SessionSettings::default()
     };
     let mut o = json!({
@@ -409,6 +418,22 @@ mod tests {
             ("review".into(), false)
         );
         assert_eq!(station_of("flow:r1#shared"), ("#shared".into(), false));
+    }
+
+    #[test]
+    fn a_forked_child_is_kept_from_its_parents_and_siblings_worktrees() {
+        let mut spec = OpenSpec::new("flow:c1@main", "c1", "code", Delivery::FlowSubmit);
+        spec.deny_read = vec!["/p/.wkts/parent".into(), "/p/.wkts/c2".into()];
+        let o = options_of(&spec, None);
+        assert_eq!(
+            o["settings"]["permissions"]["deny"],
+            json!([
+                "Read(/p/.wkts/parent)",
+                "Read(/p/.wkts/parent/**)",
+                "Read(/p/.wkts/c2)",
+                "Read(/p/.wkts/c2/**)"
+            ])
+        );
     }
 
     #[test]
