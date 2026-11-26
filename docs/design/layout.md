@@ -77,6 +77,9 @@
     交付出处、用量与耗时。租约、token、日志、上下文不进。
   - 取消的运行不归档，留在 `runs/` 里；`archive.when: always` 时也归档，`record.json` 的状态是 `cancelled`。
   - `workspace: worktree` 的运行在它的 worktree 里归档，跟代码一起合回去。
+- **在自己 worktree 里的子运行**（flows.md §6.5）：worktree 是 `.wkts/<子运行>`，与父运行的并排；它的工作目录是父运行工作目录
+  映射进它 worktree 的 `children/<站>/<任务>/`，父运行的那份（`${parent.output_dir}`）是分叉时拷过去的。合回去时这个目录拷回
+  父运行的 `conix/runs/<父运行>/children/<站>/<任务>/`，跟着父运行归档。
 - 权威的运行账本仍是 `.conix/state/conix/flow-runs/`（带租约与 token，模型写不了）；`_run/` 与 `record.json` 都是它的投影。
 - 模型能写 `conix/runs/<运行>/`，不能写 `_run/`；`conix/<包>/` 只经包的命令与归档写。
 
