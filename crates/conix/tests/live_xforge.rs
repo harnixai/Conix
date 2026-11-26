@@ -14,7 +14,10 @@ use std::path::Path;
 use std::time::Duration;
 
 use live::{Answering, Client, Endpoint, Live};
-use port::{Command, Event, ProposalStatus, Reply, RunId, RunOp, RunStatus, RunView, StationId, StationStatus};
+use port::{
+    Command, Event, ProposalStatus, Reply, RunId, RunOp, RunStatus, RunView, StationId,
+    StationStatus,
+};
 use serde_json::Value;
 
 const RUN: Duration = Duration::from_secs(3000);
@@ -225,7 +228,13 @@ async fn the_builtin_xforge_runs_a_change_from_proposal_to_archive_with_its_own_
             .map(|p| p.to.0.clone())
             .filter(|t| t == "propose" || t == "design")
             .unwrap_or_else(|| "design".into());
-        eprintln!("==== 打回到 {to}（建议：{:?}）", v.proposals.iter().map(|p| (&p.to.0, &p.reason)).collect::<Vec<_>>());
+        eprintln!(
+            "==== 打回到 {to}（建议：{:?}）",
+            v.proposals
+                .iter()
+                .map(|p| (&p.to.0, &p.reason))
+                .collect::<Vec<_>>()
+        );
         if to == "propose" {
             proposed_back = true;
         }
