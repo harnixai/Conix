@@ -82,13 +82,23 @@ pub(crate) async fn start(rn: &Arc<Runner>, mut input: CreateIn, by: Actor) -> c
         super::trust::withheld(engine.packs_for(Some(root)).as_ref(), &input.flow)?;
     }
     let mut prepared = Prepared::default();
+    // The bundle's settings, read once here and pinned: before anything is made, so a file that
+    // does not read refuses the start with nothing to take back. The project's root, not a
+    // worktree's copy: what the project says now, committed or not, is what this run goes by.
+    {
+        let packs = engine.packs_for(root.as_deref());
+        if let Some(bundle) = packs.flow(&input.flow).and_then(|(d, _)| d.bundle) {
+            prepared.settings = crate::bundle::read_settings(packs.as_ref(), &bundle, root.as_deref().map(Path::new))
+                .map_err(crate::kernel::FlowError::Invalid)?;
+        }
+    }
     if let Some(root) = &root {
         let def = engine.packs_for(Some(root)).flow(&input.flow).map(|(d, _)| d);
         let workspace = Workspace::chosen(input.workspace, def.as_ref().and_then(|d| d.workspace), Some(root));
         input.workspace = Some(workspace);
         if workspace == Workspace::Worktree && def.is_some() {
             let (id, w) = super::worktree::make(engine, root, &input.flow).await?;
-            prepared = Prepared { base_commit: Some(w.base.clone()), id: Some(id), worktree: Some(w) };
+            prepared = Prepared { base_commit: Some(w.base.clone()), id: Some(id), worktree: Some(w), ..prepared };
         } else if workspace.in_project() {
             // Where the run works is the project itself: what its `HEAD` is now.
             let dir = std::path::PathBuf::from(root);

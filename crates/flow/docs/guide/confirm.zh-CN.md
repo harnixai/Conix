@@ -34,7 +34,10 @@
 ```
 
 - 每个决定是这一轮的一票，批准够 `min` 才过，期间显示"1 of 2 approvals"。外部审批（`via: mcp`）算一票。打回到这一站重新计票。
-- 作者可以确认自己的工作；写了 `not: [author]` 时作者的票被拒，并说明为什么。
+- 作者可以确认自己的工作；写了 `not: [author]` 时作者的票被拒，并说明为什么。`separate: true` 是同一件事的开关写法。
+- **从项目的设置来**：`bundle.yaml` 声明了 `settings` 的包里，`min`、`reject`、`separate` 和 `not` 的项可以写成
+  `"${settings.<路径>}"`（`separate: "${settings.review.separate}"`）。按运行启动时钉住的设置取值；设置里没有这个路径、
+  或值的类型不对，就拒绝启动。
 - **批过的就是批过的。** 出口通过时记下 `binds` 每个文件的摘要：`deliverables` 是本站及之前各站声明的制品（在运行的目录里）；
   路径与 glob 可以从 `${output_dir}`、`${data_dir}`、`${workspace}` 起，不出工作区；`binds: []` 什么都不绑。之后每一站通过前
   都会再核对：文件被改或被删，那一站就不过（`confirm-stale`，写明文件和批它的站）。把文件改回去，或打回那一站重批。

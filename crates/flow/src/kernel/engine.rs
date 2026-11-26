@@ -89,6 +89,9 @@ pub struct Prepared {
     /// The commit the workspace stands at (`RunRecord::base_commit`), when the host looked: git is
     /// the runner's, so the kernel cannot say it. A worktree's own base is taken when this is none.
     pub base_commit: Option<String>,
+    /// The bundle's settings as the host read them from the project (`bundle.yaml`'s `settings`,
+    /// its file merged over its defaults): files are the host's to read. None: the defaults.
+    pub settings: Option<Value>,
 }
 
 /// Where a new run works and how it came to be, checked.
@@ -573,6 +576,7 @@ impl Engine {
             .flow(&input.flow)
             .ok_or_else(|| FlowError::NotFound(format!("flow {}", input.flow)))?;
         check_def(&def, packs.as_ref())?;
+        let settings = pinned_settings(&def, packs.as_ref(), prepared.settings.clone())?;
         let inputs = apply_inputs(&def, &input.inputs).map_err(FlowError::Invalid)?;
         let place = placement(&input, &by, &def, prepared.worktree.clone(), prepared.base_commit.clone())?;
         transact!(self, by.clone(), |t| {
@@ -580,10 +584,12 @@ impl Engine {
                 Some(id) => id.clone(),
                 None => self.store.alloc_id(&id_base(&def.name)).await?,
             };
+            let mut parts = super::parts::pin(&def, packs.as_ref());
+            parts.settings = settings.clone();
             let mut rec = new_record(
                 id.clone(),
                 def.clone(),
-                super::parts::pin(&def, packs.as_ref()),
+                parts,
                 digest.clone(),
                 input.title.clone().unwrap_or_default(),
                 input.subject.clone(),
@@ -1797,6 +1803,8 @@ impl Engine {
             }
             let new_inputs = super::route::switch_inputs(&def, &rec.inputs, inputs.as_ref())
                 .map_err(|e| FlowError::Invalid(format!("the inputs for {to}: {e}")))?;
+            // The same bundle, the same run: the settings it started under, not the file as it is now.
+            let settings = pinned_settings(&def, packs.as_ref(), rec.parts.settings.clone())?;
             let from = rec.flow.clone();
             self.authorize(&Op::Switch { from: from.clone(), to: to.clone() }, &by, Some(rec))?;
             // The open station's work is cancelled under the definition it was dispatched by.
@@ -1809,7 +1817,8 @@ impl Engine {
             }
             let now = t.fx.now;
             {
-                let parts = super::parts::pin(&def, packs.as_ref());
+                let mut parts = super::parts::pin(&def, packs.as_ref());
+                parts.settings = settings;
                 let rec = t.get_mut(run);
                 let kept = rec.stations.remove(&first).unwrap_or_default();
                 rec.stations = def.stations.iter().map(|s| (s.id.clone(), super::run::StationRec::new())).collect();
@@ -1968,6 +1977,20 @@ fn check_def(def: &FlowDef, packs: &dyn Packs) -> Result<()> {
             .collect::<Vec<_>>()
             .join("; ")
     ))
+}
+
+/// The settings a run of `def` pins: those `given` (read by the host from the project), else the
+/// bundle's defaults; none when its bundle declares none. Checked against what its `confirm` exits
+/// read of them here, when the run starts: a rule that does not read is a definition problem then,
+/// not a default it quietly falls to later.
+pub(crate) fn pinned_settings(def: &FlowDef, packs: &dyn Packs, given: Option<Value>) -> Result<Option<Value>> {
+    let defaults = def.bundle.as_deref().and_then(|b| crate::bundle::default_settings(packs, b));
+    let settings = defaults.map(|d| given.unwrap_or(d));
+    let problems = super::confirm::settings_problems(def, settings.as_ref());
+    if problems.is_empty() {
+        return Ok(settings);
+    }
+    invalid(format!("flow {} does not read in its bundle's settings: {}", def.name, problems.join("; ")))
 }
 
 /// The run is active and the station exists.

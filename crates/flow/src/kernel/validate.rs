@@ -513,6 +513,12 @@ fn station_problems(c: &mut Ctx, s: &Station, cyclic: bool) {
                 for m in super::confirm::problems(e) {
                     c.at(id, m);
                 }
+                if super::confirm::uses_settings(e) {
+                    let declared = c.def.bundle.as_deref().and_then(|b| crate::bundle::meta_of(c.packs, b)).is_some_and(|m| m.settings.is_some());
+                    if !declared {
+                        c.at(id, "confirm: ${settings.*} reads the bundle's settings, and its bundle.yaml declares none");
+                    }
+                }
                 if let Some(t) = timeout {
                     if duration_ms(t).is_none() {
                         c.at(id, format!("confirm timeout {t:?}: a duration such as 90m, 8h, 3d or 1h30m"));

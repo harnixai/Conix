@@ -173,33 +173,41 @@ pub(crate) struct Env {
     pub git: Option<GitView>,
     /// The project's runs, as `flow.runs` gives them; empty when the script says nothing of runs.
     pub runs: Arc<Vec<Value>>,
+    /// `flow.settings`: what the run pinned; outside a run, the project's file now over the
+    /// defaults. An `Err` is a file that does not read, thrown when the script asks for it.
+    pub settings: Result<Value, String>,
 }
 
 impl Env {
     /// A script that gets nothing extra.
     pub fn bare() -> Self {
-        Self { modules: Modules::none(), git: None, runs: Default::default() }
+        Self { modules: Modules::none(), git: None, runs: Default::default(), settings: Ok(json!({})) }
     }
 
     /// For a script of a run: its pinned modules (`entry`: its path in the bundle), its workspace in
-    /// git, and — only when something in it says `runs` — the project's runs.
+    /// git, its pinned settings, and — only when something in it says `runs` — the project's runs.
     pub async fn for_run(engine: &Engine, rec: &RunRecord, ws: PathBuf, entry: Option<String>, text: &str) -> Self {
         let modules = Modules::pinned(rec, entry);
         let runs = if modules.mentions(text, "runs") { snapshot(engine, rec.project_root.as_deref()).await } else { vec![] };
         let git = Some(GitView::new(ws, rec.base_commit.clone(), engine));
-        Self { modules, git, runs: Arc::new(runs) }
+        Self { modules, git, runs: Arc::new(runs), settings: Ok(rec.parts.settings.clone().unwrap_or_else(|| json!({}))) }
     }
 }
 
 impl Env {
     /// For a gate tried outside any run: the bundle's files as the packs hold them (a trial pins
-    /// nothing), git in the directory judged with no base commit, and no runs.
+    /// nothing), git in the directory judged with no base commit, no runs, and the settings of
+    /// the directory judged as if it were the project.
     pub fn for_trial(engine: &Engine, packs: &dyn Packs, script: Option<&str>, text: Option<&str>, ws: PathBuf) -> Self {
         let modules = match (script.and_then(bundle::split), script.and_then(Modules::script_path), text) {
             (Some((b, _)), Some(entry), Some(text)) => Modules::from_packs(packs, b, entry, text),
             _ => Modules::none(),
         };
-        Self { modules, git: Some(GitView::new(ws, None, engine)), runs: Default::default() }
+        let settings = match script.and_then(bundle::split) {
+            Some((b, _)) => live_settings(packs, b, &ws),
+            None => Ok(json!({})),
+        };
+        Self { modules, git: Some(GitView::new(ws, None, engine)), runs: Default::default(), settings }
     }
 }
 
@@ -209,8 +217,14 @@ impl Env {
     pub async fn for_bundle(engine: &Engine, packs: &dyn Packs, bundle: &str, entry: String, text: &str, root: PathBuf) -> Self {
         let modules = Modules::from_packs(packs, bundle, entry, text);
         let runs = if modules.mentions(text, "runs") { snapshot(engine, root.to_str()).await } else { vec![] };
-        Self { modules, git: Some(GitView::new(root, None, engine)), runs: Arc::new(runs) }
+        let settings = live_settings(packs, bundle, &root);
+        Self { modules, git: Some(GitView::new(root, None, engine)), runs: Arc::new(runs), settings }
     }
+}
+
+/// A bundle's settings in the project at `root` now; `{}` for a bundle that declares none.
+fn live_settings(packs: &dyn Packs, bundle: &str, root: &std::path::Path) -> Result<Value, String> {
+    bundle::read_settings(packs, bundle, Some(root)).map(|s| s.unwrap_or_else(|| json!({})))
 }
 
 /// One run as `flow.runs` shows it.

@@ -1050,11 +1050,19 @@ pub struct Pinned {
     /// read): pinned with them, so a run's commands are judged by the declaration they were pinned under.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub command_decls: BTreeMap<String, crate::bundle::CommandDecl>,
+    /// The bundle's settings as they were when the run started (in Conix; `bundle.yaml`'s
+    /// `settings`): its file merged over its defaults. Pinned because they are rules — who may
+    /// confirm, which baselines are owed — and rules changed mid-run would judge work already
+    /// done by rules it was not done under. `None`: the bundle declares none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(type = "unknown"))]
+    pub settings: Option<Value>,
 }
 
 impl Pinned {
     pub fn is_empty(&self) -> bool {
         self.policies.is_empty() && self.gates.is_empty() && self.scripts.is_empty() && self.commands.is_empty() && self.libs.is_empty()
+            && self.settings.is_none()
     }
 }
 

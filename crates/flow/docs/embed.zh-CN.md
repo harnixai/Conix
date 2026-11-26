@@ -405,6 +405,13 @@ Conix 在 Harnix 0.4.7 分叉了这个库，先把站的治理（门禁、确认
   逐个算摘要，记在那一票上（`ConfirmRec::binds`；`ConfirmRec::cond` 是外部审批那一票属于哪个出口）；之后每一站通过前都有一道
   隐含的 `confirm-stale` 检查核对它们没变。两者都以保留名的 `WorkItem::Gate` 发出（`confirm-binds@<出口>`、`confirm-stale@`），
   经 `gate_result` 回来。`RunView::votes`（`Votes{cond, approvals, rejections, min}`）给出每个确认出口的票数。
+- **包的设置，按运行钉住**（`bundle.yaml` 的 `settings: {file, defaults}`，`bundle::SettingsDecl`、`BundleMeta::settings`、
+  `bundle::read_settings`、`bundle::default_settings`、`bundle::merge`）：runner 的 `start_run` 读项目里的文件（相对项目根），
+  合并到缺省之上（映射逐键合并），经 **`Prepared::settings`** 交给内核；内核钉进 **`Pinned::settings`**（没给就是缺省；同一个包的
+  子运行沿用父运行的，换路保留运行原来的）。文件读不成就拒绝启动。`ExitCond::Confirm` 的 `min`、`reject` 改成
+  **`OrSetting<T>`**（`Value(T)` 或 `Setting("${settings.<路径>}")`），`not` 的项可以是这样的引用，新的 `separate: OrSetting<bool>`
+  为真就是 `not: [author]`；引用在运行启动时按钉住的设置核对，读不出是 `invalid`。手工构造 `ExitCond::Confirm` 的宿主把 `min`、
+  `reject` 包进 `OrSetting::Value`。脚本与命令里的 `flow.settings` 是运行钉住的设置；运行之外的命令、门禁试跑读文件此刻的内容。
 - **按包启动、分诊、换路**（模块 `kernel::route`）：`bundle.yaml` 加 `flows`（顺序）、`start: {route, triage}`（`bundle::StartDef`）、
   `pace`，名字不对随包里每条流程一起报。启动写的是一个没有同名流程的包时选路：取 `start.route` 里第一条接受这份输入的流程。
   `Engine::create` 自己选；`Engine::resolve_start` 给先要为流程做事的宿主（runner 的 `start_run` 用它）；`Engine::route(name, inputs,

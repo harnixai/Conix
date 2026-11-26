@@ -174,6 +174,7 @@ const EXPORTS: &[(&str, &str)] = &[
     ("InputDef", "kernel::def"),
     ("MainSession", "kernel::def"),
     ("OnUnmet", "kernel::def"),
+    ("OrSetting", "kernel::def"),
     ("Pace", "kernel::def"),
     ("Retry", "kernel::def"),
     ("SessionBinding", "kernel::def"),

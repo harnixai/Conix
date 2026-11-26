@@ -10,9 +10,11 @@
 
 use std::collections::BTreeMap;
 
-use super::def::{Binds, BindsWord, ExitCond, FlowDef, RejectRule, BINDS_DELIVERABLES};
+use serde_json::Value;
+
+use super::def::{settings_ref, Binds, BindsWord, ExitCond, FlowDef, OrSetting, RejectRule, BINDS_DELIVERABLES};
 use super::host::{GateResult, WorkItem};
-use super::refs::refs_in;
+use super::refs::{refs_in, select};
 use super::run::{Actor, CheckRec, CheckStatus, ConfirmRec, RunRecord, StationRec, StationStatus, Votes, FLOW_KIND};
 
 /// The work item that records what a `confirm` exit approved: this, then the exit's index.
@@ -40,20 +42,111 @@ pub(crate) struct Rule {
 }
 
 impl Rule {
-    pub(crate) fn of(e: &ExitCond) -> Option<Rule> {
-        let ExitCond::Confirm { min, distinct, reject, not, binds, .. } = e else { return None };
-        let min = min.unwrap_or(1).max(1);
+    /// Exit `e`'s rule, `${settings.*}` read from the run's pinned `settings`. A run is refused at
+    /// its start when they do not read ([`settings_problems`]), so a field that still does not is
+    /// taken as unwritten here rather than stopping a judgement half done.
+    pub(crate) fn of(e: &ExitCond, settings: Option<&Value>) -> Option<Rule> {
+        Self::read(e, settings, &mut vec![])
+    }
+
+    /// [`Rule::of`], saying in `errs` what of the settings did not read.
+    fn read(e: &ExitCond, settings: Option<&Value>, errs: &mut Vec<String>) -> Option<Rule> {
+        let ExitCond::Confirm { min, distinct, reject, not, separate, binds, .. } = e else { return None };
+        let min = field("min", min, settings, errs, |n| *n >= 1, "a number of approvals, at least 1").unwrap_or(1).max(1);
+        let reject = field("reject", reject, settings, errs, |_| true, "any or majority").unwrap_or_default();
+        let mut not_author = field("separate", separate, settings, errs, |_| true, "true or false").unwrap_or(false);
+        for n in not {
+            if settings_ref(n).is_none() {
+                not_author |= n == "author";
+                continue;
+            }
+            let words = match lookup(n, settings) {
+                Ok(Value::String(s)) => vec![s.clone()],
+                Ok(Value::Array(a)) if a.iter().all(Value::is_string) => a.iter().filter_map(|w| w.as_str().map(String::from)).collect(),
+                Ok(v) => {
+                    errs.push(format!("confirm not: {n} is {v}, not a word or a list of words"));
+                    vec![]
+                }
+                Err(m) => {
+                    errs.push(format!("confirm not: {m}"));
+                    vec![]
+                }
+            };
+            for w in words {
+                if w == "author" {
+                    not_author = true;
+                } else {
+                    errs.push(format!("confirm not: {n} is {w:?} — only author (whoever authored the run may not confirm it)"));
+                }
+            }
+        }
         Some(Rule {
             min,
             distinct: distinct.unwrap_or(true),
-            reject_at: match reject.unwrap_or_default() {
+            reject_at: match reject {
                 RejectRule::Any => 1,
                 RejectRule::Majority => min,
             },
-            not_author: not.iter().any(|n| n == "author"),
+            not_author,
             binds: binds.clone().unwrap_or(Binds::Word(BindsWord::Deliverables)),
         })
     }
+}
+
+/// What `${settings.<path>}` stands for in `settings`: nothing there, or no settings at all, is an
+/// error — a rule the definition points at must be one the settings hold.
+fn lookup<'a>(s: &str, settings: Option<&'a Value>) -> Result<&'a Value, String> {
+    let path = settings_ref(s).ok_or_else(|| format!("{s:?} is not one ${{settings.<path>}}"))?;
+    let settings = settings.ok_or_else(|| format!("{s}: the flow's bundle declares no settings (bundle.yaml `settings`)"))?;
+    select(settings, path).filter(|v| !v.is_null()).ok_or_else(|| format!("{s}: the settings have nothing at {path}"))
+}
+
+/// A field as written, or what its reference stands for when that is a `T` that `fits`; `None`
+/// when unwritten, or when it does not read (said in `errs`).
+fn field<T: Clone + serde::de::DeserializeOwned>(
+    name: &str,
+    f: &Option<OrSetting<T>>,
+    settings: Option<&Value>,
+    errs: &mut Vec<String>,
+    fits: impl Fn(&T) -> bool,
+    want: &str,
+) -> Option<T> {
+    let s = match f.as_ref()? {
+        OrSetting::Value(v) => return Some(v.clone()),
+        OrSetting::Setting(s) => s,
+    };
+    match lookup(s, settings) {
+        Err(m) => errs.push(format!("confirm {name}: {m}")),
+        Ok(v) => match serde_json::from_value::<T>(v.clone()) {
+            Ok(t) if fits(&t) => return Some(t),
+            _ => errs.push(format!("confirm {name}: {s} is {v}, not {want}")),
+        },
+    }
+    None
+}
+
+/// What of a run's `confirm` exits does not read in the settings it pinned: references to nothing,
+/// or to a value of the wrong kind. Asked when a run starts, right after it pinned them, so a
+/// governance file that says `separate: yes` stops the start instead of quietly meaning `false`.
+pub(crate) fn settings_problems(def: &FlowDef, settings: Option<&Value>) -> Vec<String> {
+    let mut out = vec![];
+    for s in &def.stations {
+        for e in s.exit.iter().chain(s.task_exit.iter()) {
+            let mut errs = vec![];
+            Rule::read(e, settings, &mut errs);
+            out.extend(errs.into_iter().map(|m| format!("station {}: {m}", s.id)));
+        }
+    }
+    out
+}
+
+/// Whether exit `e` reads anything of the settings.
+pub(crate) fn uses_settings(e: &ExitCond) -> bool {
+    let ExitCond::Confirm { min, reject, not, separate, .. } = e else { return false };
+    matches!(min, Some(OrSetting::Setting(_)))
+        || matches!(reject, Some(OrSetting::Setting(_)))
+        || matches!(separate, Some(OrSetting::Setting(_)))
+        || not.iter().any(|n| n.contains("${"))
 }
 
 /// Where a `confirm` exit's votes stand.
@@ -165,7 +258,7 @@ pub(crate) fn authors(rec: &RunRecord) -> Vec<(Actor, String)> {
 /// Why `by` may not vote on `station`: a `confirm` exit of it says `not: [author]` and `by` is one.
 pub(crate) fn refused(rec: &RunRecord, station: &str, by: &Actor) -> Option<String> {
     let sdef = rec.def.station(station)?;
-    if !sdef.exit.iter().filter_map(Rule::of).any(|r| r.not_author) {
+    if !sdef.exit.iter().filter_map(|e| Rule::of(e, rec.parts.settings.as_ref())).any(|r| r.not_author) {
         return None;
     }
     let (_, why) = authors(rec).into_iter().find(|(a, _)| a.id == by.id)?;
@@ -192,7 +285,7 @@ fn ancestors(def: &FlowDef, id: &str) -> Vec<String> {
 /// for those the station and the stations it needs declare, in the run's directory (as written, for
 /// a run that has none: the protocol tells sessions the same).
 pub(crate) fn bind_patterns(rec: &RunRecord, station: &str, e: &ExitCond) -> Vec<String> {
-    let Some(rule) = Rule::of(e) else { return vec![] };
+    let Some(rule) = Rule::of(e, rec.parts.settings.as_ref()) else { return vec![] };
     let def = &rec.def;
     let deliverables = || {
         let before = ancestors(def, station);
@@ -294,7 +387,7 @@ pub(crate) fn approvals(rec: &RunRecord, except: &str) -> Vec<Approval> {
         }
         let Some(sdef) = rec.def.station(sid) else { continue };
         for (i, e) in sdef.exit.iter().enumerate() {
-            let Some(rule) = Rule::of(e) else { continue };
+            let Some(rule) = Rule::of(e, rec.parts.settings.as_ref()) else { continue };
             let Decision::Approved(_, vote) = tally(&rule, &st.confirms, st.round, i).decision else { continue };
             for (path, sha256) in vote.binds.iter().flatten() {
                 out.push(Approval { station: sid.clone(), path: path.clone(), sha256: sha256.clone() });
@@ -367,6 +460,7 @@ pub(crate) fn take_result(
 ) -> Option<bool> {
     let which = implicit(gate)?;
     let Some(sdef) = rec.def.station(station).cloned() else { return Some(false) };
+    let settings = rec.parts.settings.clone();
     let Some(st) = rec.stations.get_mut(station) else { return Some(false) };
     Some(match which {
         Implicit::Stale => match st.checks.iter_mut().find(|k| is_stale_check(k) && k.round == round && k.status == CheckStatus::Wait) {
@@ -381,7 +475,7 @@ pub(crate) fn take_result(
             None => false,
         },
         Implicit::Binds(cond) => {
-            let Some(rule) = sdef.exit.get(cond).and_then(Rule::of) else { return Some(false) };
+            let Some(rule) = sdef.exit.get(cond).and_then(|e| Rule::of(e, settings.as_ref())) else { return Some(false) };
             let waiting = st.checks.iter().any(|k| k.cond == Some(cond) && k.round == round && k.status == CheckStatus::Wait && k.detail == BINDING);
             let vote = match tally(&rule, &st.confirms, round, cond).decision {
                 Decision::Approved(i, v) if v.binds.is_none() => Some(i),
@@ -426,7 +520,7 @@ pub(crate) fn votes(rec: &RunRecord) -> BTreeMap<String, Vec<Votes>> {
             .iter()
             .enumerate()
             .filter_map(|(i, e)| {
-                let t = tally(&Rule::of(e)?, &st.confirms, st.round, i);
+                let t = tally(&Rule::of(e, rec.parts.settings.as_ref())?, &st.confirms, st.round, i);
                 Some(Votes { cond: i, approvals: t.approvals, rejections: t.rejections, min: t.min })
             })
             .collect();
@@ -437,16 +531,23 @@ pub(crate) fn votes(rec: &RunRecord) -> BTreeMap<String, Vec<Votes>> {
     out
 }
 
-/// What is wrong with a `confirm` exit's counting and binding fields.
+/// What is wrong with a `confirm` exit's counting and binding fields. What `${settings.*}` stands
+/// for is known only once a run pinned its settings ([`settings_problems`]); here only its form.
 pub(crate) fn problems(e: &ExitCond) -> Vec<String> {
-    let ExitCond::Confirm { min, not, binds, .. } = e else { return vec![] };
+    let ExitCond::Confirm { min, reject, not, separate, binds, .. } = e else { return vec![] };
     let mut out = vec![];
-    if *min == Some(0) {
+    if *min == Some(OrSetting::Value(0)) {
         out.push("confirm min: at least 1 approval".to_string());
     }
+    let refs = [("min", min.as_ref().and_then(written_ref)), ("reject", reject.as_ref().and_then(written_ref)), ("separate", separate.as_ref().and_then(written_ref))];
+    for (name, r) in refs {
+        if let Some(r) = r.filter(|r| settings_ref(r).is_none()) {
+            out.push(format!("confirm {name}: {r:?} — its value, or one reference ${{settings.<path>}}"));
+        }
+    }
     for n in not {
-        if n != "author" {
-            out.push(format!("confirm not: {n:?} — only author (whoever authored the run may not confirm it)"));
+        if n != "author" && settings_ref(n).is_none() {
+            out.push(format!("confirm not: {n:?} — only author (whoever authored the run may not confirm it), or ${{settings.<path>}}"));
         }
     }
     if let Some(Binds::List(list)) = binds {
@@ -457,6 +558,14 @@ pub(crate) fn problems(e: &ExitCond) -> Vec<String> {
         }
     }
     out
+}
+
+/// The string a field holds in place of its value.
+fn written_ref<T>(f: &OrSetting<T>) -> Option<&str> {
+    match f {
+        OrSetting::Setting(s) => Some(s),
+        OrSetting::Value(_) => None,
+    }
 }
 
 /// The references a `binds` path may use: the places a run's files are.
@@ -496,7 +605,7 @@ mod tests {
     }
 
     fn rule(yaml: &str) -> Rule {
-        Rule::of(&serde_yaml::from_str::<ExitCond>(yaml).unwrap()).unwrap()
+        Rule::of(&serde_yaml::from_str::<ExitCond>(yaml).unwrap(), None).unwrap()
     }
 
     #[test]
