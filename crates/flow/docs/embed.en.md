@@ -522,6 +522,17 @@ is so as not to collide with Harnix's own next one; what changes for a host is l
 - **A bundle's commands** (`TOOL_COMMAND`, `flow_command {command, args}`): the `commands/<name>.js` its `bundle.yaml`
   lists, pinned in `Pinned::commands`; run in the library's QuickJS with `write`, `append`, `remove` and `print` besides a
   gate script's `flow`, writing only the run's directory (not `_run/`) and `${data_dir}`. Not a read-only tool.
+- **Confirmations that count** (`ExitCond::Confirm` gains `min`, `distinct`, `reject` — `RejectRule` —, `not` and `binds` —
+  `Binds`, `BindsWord`, `BINDS_DELIVERABLES`): each decision is a vote of the round (a rework starts a new count); one per
+  actor id unless `distinct: false`; `reject: any` (default) is not met on one rejection, `majority` on `min` of them.
+  `not: [author]` makes `Engine::confirm` refuse (`Denied`) an actor that handed in a task of the run, worked one, or started
+  the run; an outside approval decided by one is an `error`. When the exit passes, what it `binds` (default: the
+  deliverables of the station and those it needs) is hashed by the runner and kept on the vote, `ConfirmRec::binds`
+  (`ConfirmRec::cond`: the exit an outside vote is for); every later station, before it passes, has an implicit
+  `confirm-stale` check that they are unchanged. Both go out as `WorkItem::Gate` under reserved names
+  (`confirm-binds@<exit>`, `confirm-stale@`) and come back through `gate_result`; a host that runs gates itself hands those
+  to the runner or answers them as it would any gate. `RunView::votes` (`Votes{cond, approvals, rejections, min}`) says
+  where each `confirm` exit stands.
 
 ### `FLOW_API_VERSION = 1`
 

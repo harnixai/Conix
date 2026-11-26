@@ -1112,31 +1112,32 @@ impl<'a> M<'a> {
                 },
                 },
                 C::Confirm { via, mcp, timeout, .. } => {
+                    use super::confirm::Decision;
                     let before = r.checks.iter().find(|k| k.cond == Some(i) && k.round == round);
-                    match r.confirms.iter().rev().find(|c| c.round == round) {
-                        Some(c) if c.pass => (CheckStatus::Pass, String::new()),
-                        Some(c) => (
-                            CheckStatus::Fail,
-                            format!(
-                                "rejected by {}: {}",
-                                c.by,
-                                c.reason.clone().unwrap_or_default()
-                            ),
-                        ),
+                    let rule = super::confirm::Rule::of(c).expect("a confirm exit");
+                    let tally = super::confirm::tally(&rule, &r.confirms, round, i);
+                    match tally.decision {
+                        Decision::Approved(_, vote) => {
+                            let a = super::confirm::approved(self.rec, sid, round, i, vote, before);
+                            self.fx.work.extend(a.ask);
+                            carried = a.carried;
+                            (a.status, a.detail)
+                        }
+                        Decision::Rejected(c) => (CheckStatus::Fail, tally.rejected(c)),
                         // An approval that could not be asked for stays so until someone asks again.
-                        None if before.is_some_and(|k| k.status == CheckStatus::Error) => {
+                        Decision::Open if before.is_some_and(|k| k.status == CheckStatus::Error) => {
                             let k = before.unwrap();
                             at = k.at;
                             (CheckStatus::Error, k.detail.clone())
                         }
-                        None => {
+                        Decision::Open => {
                             // Waiting since it first waited this round: what a timeout counts from.
                             let since = before.filter(|k| k.status == CheckStatus::Wait).map_or(now, |k| k.at);
                             at = since;
                             let limit = timeout.as_deref().and_then(super::def::duration_ms);
                             if limit.is_some_and(|l| now >= since.saturating_add(l)) {
                                 (CheckStatus::Fail, format!("no decision within {}", timeout.as_deref().unwrap_or_default()))
-                            } else if *via == Some(super::def::ConfirmVia::Mcp) {
+                            } else if *via == Some(super::def::ConfirmVia::Mcp) && !super::confirm::mcp_voted(&r, round, i) {
                                 let server = mcp.as_ref().map_or("", |m| m.server.as_str());
                                 match r.approvals.iter().find(|a| a.cond == i && a.round == round) {
                                     Some(a) => (
@@ -1161,7 +1162,7 @@ impl<'a> M<'a> {
                                     }
                                 }
                             } else {
-                                (CheckStatus::Wait, "awaiting confirmation".into())
+                                (CheckStatus::Wait, format!("awaiting confirmation{}", tally.so_far()))
                             }
                         }
                     }
@@ -1214,6 +1215,10 @@ impl<'a> M<'a> {
                 evidence: carried.evidence,
                 metrics: carried.metrics,
             });
+        }
+        if let Some((k, ask)) = super::confirm::stale_check(self.rec, sid, round, &r, &checks, now) {
+            self.fx.work.extend(ask);
+            checks.push(k);
         }
         let fail = checks.iter().any(|c| matches!(c.status, CheckStatus::Fail | CheckStatus::Error));
         let wait = checks.iter().any(|c| c.status == CheckStatus::Wait);

@@ -534,6 +534,22 @@ pub enum ExitCond {
         mcp: Option<Box<McpApproval>>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         timeout: Option<String>,
+        /// Approvals needed to pass (1 when absent); each decision is one vote of the round.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        min: Option<u32>,
+        /// One vote per actor, a later vote replacing an earlier one (true when absent).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        distinct: Option<bool>,
+        /// When rejections make the exit not met (`any` when absent).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reject: Option<RejectRule>,
+        /// Who may not vote: `author`, the actors that delivered in this run and whoever started it.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        not: Vec<String>,
+        /// What an approval is of: files whose digests are recorded when the exit passes, checked
+        /// again before every later station passes (`deliverables` when absent).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        binds: Option<Binds>,
     },
     /// The station's child runs finished, enough of them delivering (`require`, default all).
     Children {
@@ -589,6 +605,38 @@ pub struct FlowResult {
     #[cfg_attr(feature = "ts", ts(type = "unknown"))]
     pub schema: Option<Value>,
 }
+
+/// When rejections make a `confirm` exit not met: one is enough (`any`), or as many as the
+/// approvals it needs (`majority`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "snake_case")]
+pub enum RejectRule {
+    #[default]
+    Any,
+    Majority,
+}
+
+/// What a `confirm` exit's approval binds: `deliverables` (those of the station and of the
+/// stations it needs, in the run's directory), or a list of paths and globs, where the word
+/// `deliverables` may stand among them. `[]` binds nothing.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(untagged)]
+pub enum Binds {
+    Word(BindsWord),
+    List(Vec<String>),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "lowercase")]
+pub enum BindsWord {
+    Deliverables,
+}
+
+/// The word in a `binds` list that stands for the deliverables.
+pub const BINDS_DELIVERABLES: &str = "deliverables";
 
 /// Who decides a confirmation.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

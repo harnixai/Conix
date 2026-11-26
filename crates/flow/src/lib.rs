@@ -62,7 +62,7 @@ pub mod wire;
 
 pub use dryrun::{Mocks, Sandbox};
 pub use kernel::def::{
-    definition_schema, duration_ms, Assert, ConfirmVia, DecisionMap, Executor, ExitCond, FlowResult, McpApproval, McpCall, FlowDef, Guard, InputDef, MainSession,
+    definition_schema, duration_ms, Assert, Binds, BindsWord, ConfirmVia, RejectRule, BINDS_DELIVERABLES, DecisionMap, Executor, ExitCond, FlowResult, McpApproval, McpCall, FlowDef, Guard, InputDef, MainSession,
     OnUnmet, Require, RequireWord, Retry, SessionBinding, Station, TaskSpec, Work, DEFAULT_OUTPUT_DIR, DEFAULT_REWORK_LIMIT,
     EFFORTS, MAIN_SESSION_KEY, MAX_REWORK_LIMIT,
 };
@@ -83,7 +83,7 @@ pub use kernel::protocol::{agent_tag, ask_rules, skill_body, STRUCTURED_OUTPUT_T
 pub use kernel::run::{
     run_schema, Actor, AgentDelivery, ApprovalRec, BoundSession, CheckRec, CheckStatus, ConfirmRec, Evidence, Finding, ForcedRec, GateVerdict, History, Lease, ParentRef, Severity,
     AskRec, DeliveryRec, PauseRec, Phase, ReworkRec, RunQuery, RunRecord, RunStatus, RunSummary, RunView, StationRec,
-    StationStatus, TaskRec, TaskStatus, Trigger, Usage, Workspace, WorktreeEnd, WorktreeOutcome,
+    StationStatus, TaskRec, TaskStatus, Trigger, Usage, Votes, Workspace, WorktreeEnd, WorktreeOutcome,
     WorktreeRec, AGENT_KIND, DEVICE_KIND, FLOW_KIND,
 };
 pub use kernel::schema::minimal;

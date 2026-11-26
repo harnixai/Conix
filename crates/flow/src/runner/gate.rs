@@ -26,6 +26,8 @@ pub(crate) async fn run_gate(rn: &Arc<Runner>, run: String, station: String, rou
         }
     };
     let result = match rec.parts.gates.get(&gate) {
+        // What a confirmation approved, recorded or checked again: the library's own reading.
+        None if crate::kernel::confirm::implicit(&gate).is_some() => super::checks::implicit(engine, &rec, &station, &gate),
         // A command runs on this machine: a project's run gets to run one only while the project
         // is trusted, as its hooks and its own servers do.
         Some(g) if g.kind == GateKind::Command && rec.project_root.as_deref().is_some_and(|r| !rn.cfg.trust.trusted(r)) => {

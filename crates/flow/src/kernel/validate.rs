@@ -489,6 +489,9 @@ fn station_problems(c: &mut Ctx, s: &Station, cyclic: bool) {
             },
             ExitCond::Confirm { via, mcp, timeout, .. } => {
                 use super::def::{duration_ms, ConfirmVia};
+                for m in super::confirm::problems(e) {
+                    c.at(id, m);
+                }
                 if let Some(t) = timeout {
                     if duration_ms(t).is_none() {
                         c.at(id, format!("confirm timeout {t:?}: a duration such as 90m, 8h, 3d or 1h30m"));

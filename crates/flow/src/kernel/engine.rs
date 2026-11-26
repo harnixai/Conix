@@ -1235,13 +1235,14 @@ impl Engine {
             let sdef = def.station(station).cloned();
             // A gate, or an outside approval that could not be asked for (it errors, it never fails).
             let is_gate = |c: &CheckRec| {
-                c.cond
-                    .and_then(|i| sdef.as_ref().and_then(|s| s.exit.get(i)))
-                    .is_some_and(|e| match e {
-                        ExitCond::Gate { .. } => true,
-                        ExitCond::Confirm { .. } => c.status == CheckStatus::Error,
-                        _ => false,
-                    })
+                super::confirm::is_stale_check(c)
+                    || c.cond
+                        .and_then(|i| sdef.as_ref().and_then(|s| s.exit.get(i)))
+                        .is_some_and(|e| match e {
+                            ExitCond::Gate { .. } => true,
+                            ExitCond::Confirm { .. } => c.status == CheckStatus::Error,
+                            _ => false,
+                        })
             };
             let round = st.round;
             let again: Vec<String> = st
@@ -1278,7 +1279,7 @@ impl Engine {
             && mcp
             && st.round == round
             && st.status == StationStatus::Working
-            && !st.confirms.iter().any(|c| c.round == round)
+            && !super::confirm::mcp_voted(st, round, cond)
     }
 
     /// The request for an outside approval is open: what it gave back is kept, so it is polled
@@ -1338,6 +1339,22 @@ impl Engine {
                 return Ok(json!({"applied": false}));
             }
             let now = t.fx.now;
+            // Decided by an author where the exit says not: [author]: not a vote, and nothing the
+            // run can fix by itself — an error a person looks at, as a request that failed is.
+            if let Some(why) = super::confirm::refused(t.get(run), station, &by) {
+                let mut m = t.m(run);
+                if let Some(s) = m.rec.stations.get_mut(station) {
+                    for c in s.checks.iter_mut().filter(|c| c.cond == Some(cond) && c.round == round) {
+                        c.status = CheckStatus::Error;
+                        c.detail = why.clone();
+                        c.at = now;
+                    }
+                }
+                m.log("approval_refused", Some(station), None, json!({"cond": cond, "round": round, "by": by, "detail": why}));
+                m.judge_later(station);
+                t.settle().await?;
+                return Ok(json!({"applied": true, "refused": why}));
+            }
             let mut m = t.m(run);
             if let Some(s) = m.rec.stations.get_mut(station) {
                 s.confirms.push(ConfirmRec {
@@ -1348,6 +1365,8 @@ impl Engine {
                     reason: reason.clone(),
                     via: Some(super::def::ConfirmVia::Mcp),
                     reference: reference.clone(),
+                    cond: Some(cond),
+                    binds: None,
                 });
                 if let Some(a) = s.approvals.iter_mut().find(|a| a.cond == cond && a.round == round) {
                     a.polled_at = Some(now);
@@ -1440,6 +1459,9 @@ impl Engine {
                 &by,
                 Some(rec),
             )?;
+            if let Some(why) = super::confirm::refused(rec, station, &by) {
+                return Err(FlowError::Denied(why));
+            }
             let now = t.fx.now;
             let mut m = t.m(run);
             let round = m.rec.stations[station].round;
@@ -1452,6 +1474,8 @@ impl Engine {
                     reason: reason.map(String::from),
                     via: None,
                     reference: None,
+                    cond: None,
+                    binds: None,
                 });
             }
             let data = json!({"pass": pass, "reason": reason, "round": round});
@@ -1643,6 +1667,17 @@ impl Engine {
                 return Ok(json!({"applied": false}));
             }
             let now = t.fx.now;
+            if super::confirm::implicit(gate).is_some() {
+                let mut m = t.m(run);
+                let applied = super::confirm::take_result(m.rec, station, round, gate, &result, now) == Some(true);
+                if applied {
+                    m.log("gate_result", Some(station), None, json!({"gate": gate, "round": round, "pass": result.is_pass(), "verdict": result.verdict,
+                           "detail": result.summary, "findings": result.findings, "evidence": result.evidence}));
+                    m.judge_later(station);
+                    t.settle().await?;
+                }
+                return Ok(json!({"applied": applied}));
+            }
             let fail_on = rec.parts.gates.get(gate).and_then(|g| g.fail_on);
             // The transaction may run again on a conflict: the result is taken afresh each time.
             let result = result.clone().strict(fail_on);
@@ -1885,10 +1920,12 @@ pub fn view(mut record: RunRecord) -> RunView {
         unmet.insert(id.clone(), list);
     }
     let phase = Some(record.phase());
+    let votes = super::confirm::votes(&record);
     RunView {
         record,
         unmet,
         phase,
+        votes,
     }
 }
 

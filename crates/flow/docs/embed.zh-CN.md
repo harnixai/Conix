@@ -382,6 +382,13 @@ Conix 在 Harnix 0.4.7 分叉了这个库，先把站的治理（门禁、确认
 - **包的命令**（`TOOL_COMMAND`，`flow_command {command, args}`）：`bundle.yaml` 的 `commands` 列出的 `commands/<名>.js`，
   随运行钉进 `Pinned::commands`；在库自己的 QuickJS 里跑，`flow` 比脚本门禁的多 `write`、`append`、`remove`、`print`，
   只写得了运行目录（`_run/` 除外）与 `${data_dir}`。它不是只读的工具。
+- **计票的确认**（`ExitCond::Confirm` 加 `min`、`distinct`、`reject`（`RejectRule`）、`not`、`binds`（`Binds`、`BindsWord`、
+  `BINDS_DELIVERABLES`））：每个决定是这一轮的一票（打回就重新计）；缺省一个 actor id 一票，后一票替换前一票；`reject: any`
+  （缺省）一票驳回就不过，`majority` 驳回够 `min` 才不过。`not: [author]` 时 `Engine::confirm` 拒绝（`Denied`）这次运行里交付过、
+  做过任务或发起运行的人；外部审批由这样的人决定的，出口是 `error`。出口通过时运行器给 `binds`（缺省是本站及其前站的制品）
+  逐个算摘要，记在那一票上（`ConfirmRec::binds`；`ConfirmRec::cond` 是外部审批那一票属于哪个出口）；之后每一站通过前都有一道
+  隐含的 `confirm-stale` 检查核对它们没变。两者都以保留名的 `WorkItem::Gate` 发出（`confirm-binds@<出口>`、`confirm-stale@`），
+  经 `gate_result` 回来。`RunView::votes`（`Votes{cond, approvals, rejections, min}`）给出每个确认出口的票数。
 
 - **试运行用会话所在的流程包**：`Sandbox::start_in(input, by, packs)`；`flow_dry_run` 用会话读的那份（项目的流程、件），
   不再只看应用自己的包——项目里的流程以前试运行时找不到。
