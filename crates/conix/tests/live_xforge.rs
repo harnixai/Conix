@@ -1,10 +1,14 @@
 //! LIVE：Conix 内置的 xforge 流程包（源头 `examples/xforge/.conix/flows/xforge`）在演示项目 `examples/xforge` 上真跑
 //! `xforge/solid`，从提案到归档（docs/design/layout.md）：
 //!
-//! - 项目的制品目录配成 `xforge`（`.conix/conix.yaml`）：运行在 `xforge/runs/<运行>/`，包的数据（规格、归档）就在 `xforge/`。
-//! - 结构化的数据由包的命令写：规格增量（`xspec`）、台账（`xledger`）、工作包（`xpkg`）；策略不让模型直接写它们。
-//! - 主会话在 Claude；独立检查是子 Agent，换 DeepSeek。检查留下 open 的问题时，用例像人一样打回设计（至多两次）。
-//! - 两处人的确认（检查、验收）由用例来点；结束后归档进 `xforge/archive/`，规格增量并进 `xforge/specs/`，项目的验证照样过。
+//! - 项目的制品目录配成 `xforge`（`.conix/conix.yaml`）：运行在 `xforge/runs/<运行>/`，包的数据（规格、接口、归档）就在 `xforge/`；
+//!   两条基线都开着（`.conix/governance/xforge.yaml`）。
+//! - 结构化的数据由包的命令写：规格增量（`xspec`）、接口增量（`xarch`）、台账（`xledger`）、工作包（`xpkg`）；策略不让模型直接写它们。
+//! - 主会话在 Claude；独立检查是子 Agent，换 DeepSeek，逐条答原则。检查留下 open 的问题时，用例像人一样照检查的建议打回（至多三次）。
+//! - 实施按工作包，每包交付时过任务级出口；两处人的确认（检查、验收）由用例来点；归档是两个命令步骤，
+//!   规格与接口增量分别并进 `xforge/specs/`、`xforge/interfaces/`，项目的验证照样过。
+//!
+//! 这条流程的约定见 docs/design/xforge.md。
 //!
 //! 没有 Claude 的 key 就跳过。
 
@@ -250,9 +254,11 @@ async fn the_builtin_xforge_runs_a_change_from_proposal_to_archive_with_its_own_
     // 结构化的数据都是命令写的（策略不让模型直接写这几样）。
     for f in [
         "spec-delta.yaml",
+        "interface-delta.yaml",
         "work-packages.yaml",
-        "packages.paths",
         "ledgers/decisions.yaml",
+        "ledgers/findings.yaml",
+        "ledgers/constitution.yaml",
     ] {
         assert!(Path::new(&out).join(f).is_file(), "{out}/{f}");
     }
@@ -287,6 +293,11 @@ async fn the_builtin_xforge_runs_a_change_from_proposal_to_archive_with_its_own_
     let spec = std::fs::read_to_string(Path::new(&to).join("xforge/specs/textkit.md")).unwrap();
     eprintln!("---- xforge/specs/textkit.md\n{spec}");
     assert!(spec.contains("### TK-R3"), "归档并进了新需求");
+    // 接口基线也开着：新函数登记进了 textkit 模块（新元素缺省是试验）。
+    let api =
+        std::fs::read_to_string(Path::new(&to).join("xforge/interfaces/textkit.yaml")).unwrap();
+    eprintln!("---- xforge/interfaces/textkit.yaml\n{api}");
+    assert!(api.contains("fn:textkit.truncate"), "归档并进了接口增量");
     assert!(
         std::fs::read_to_string(Path::new(&to).join("src/textkit/__init__.py"))
             .unwrap()
