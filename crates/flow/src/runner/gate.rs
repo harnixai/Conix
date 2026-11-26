@@ -342,7 +342,11 @@ async fn script_gate(
         "workspace": ctx.get("workspace"),
         "params": crate::kernel::refs::resolve(&g.params, ctx),
     });
-    let (result, trace) = super::script::run(source, input, reader, Duration::from_secs(g.script_seconds())).await;
+    let env = match engine.workspace_for(rec) {
+        Some(ws) => super::scriptenv::Env::for_run(engine, rec, ws, super::scriptenv::Modules::script_path(&name), &source).await,
+        None => super::scriptenv::Env::bare(),
+    };
+    let (result, trace) = super::script::run(source, input, reader, env, Duration::from_secs(g.script_seconds())).await;
     if !trace.log.is_empty() {
         if let Some(dir) = super::project::station_dir(engine, rec, station) {
             let log = dir.join(format!("gate-{}.log", g.name));
@@ -382,6 +386,9 @@ pub(crate) struct Trial {
     pub data_dir: Option<String>,
     /// Why a command may not run here; `None`: it may.
     pub no_commands: Option<String>,
+    /// What the script may import and reach: the packs' bundle files (nothing is pinned in a trial).
+    #[cfg(feature = "script")]
+    pub env: super::scriptenv::Env,
 }
 
 /// What a trial gives back besides the result: what the gate wrote to its log.
@@ -431,6 +438,9 @@ async fn try_gate(rn: &Runner, t: Trial) -> Tried {
                 "inputs": t.inputs, "outputs": t.outputs, "output_dir": t.output_dir, "data_dir": t.data_dir,
                 "workspace": t.ws.to_string_lossy(), "params": crate::kernel::refs::resolve(&g.params, &ctx),
             });
+            #[cfg(feature = "script")]
+            return trial_script(source, input, reader, t.env.clone(), g.script_seconds()).await;
+            #[cfg(not(feature = "script"))]
             trial_script(source, input, reader, g.script_seconds()).await
         }
         GateKind::Command => {
@@ -474,8 +484,8 @@ fn trial_record(station: &str) -> RunRecord {
 }
 
 #[cfg(feature = "script")]
-async fn trial_script(source: String, input: Value, reader: Arc<super::files::Reader>, seconds: u64) -> Tried {
-    let (result, trace) = super::script::run(source, input, reader, Duration::from_secs(seconds)).await;
+async fn trial_script(source: String, input: Value, reader: Arc<super::files::Reader>, env: super::scriptenv::Env, seconds: u64) -> Tried {
+    let (result, trace) = super::script::run(source, input, reader, env, Duration::from_secs(seconds)).await;
     Tried { result, log: trace.log }
 }
 

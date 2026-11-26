@@ -165,6 +165,45 @@ pub(crate) fn probe(project: &Path) -> Result<Repo, NoRepo> {
     Ok(Repo { prefix, branch, head })
 }
 
+/// The commit `HEAD` is at in `dir`; `None` when `dir` is in no repository or the repository has no
+/// commit.
+pub(crate) fn head(dir: &Path) -> Option<String> {
+    run(dir, &["rev-parse", "--verify", "-q", "HEAD^{commit}"]).ok().filter(|h| !h.is_empty())
+}
+
+/// The files of `dir`'s tree that differ from the commit `since`, as paths relative to `dir`, sorted
+/// and without duplicates: what was committed since, what is staged, what is changed and not staged,
+/// and what is new and not tracked (but not what git ignores). The paths under one of `exclude`
+/// (names relative to `dir`) are left out.
+///
+/// `git diff <commit>` already folds the committed, staged and unstaged changes into one answer
+/// against the working tree, so the three need no merging; the untracked files are the one thing it
+/// does not know. `-z` because a name may hold any byte but NUL.
+pub(crate) fn changed_since(dir: &Path, since: &str, exclude: &[String]) -> Result<Vec<String>, String> {
+    let list = |args: &[&str]| -> Result<Vec<String>, String> {
+        let mut c = git(dir);
+        c.args(args);
+        let o = output(c)?;
+        if !o.status.success() {
+            return Err(said(args, &o));
+        }
+        Ok(String::from_utf8_lossy(&o.stdout).split('\0').filter(|p| !p.is_empty()).map(String::from).collect())
+    };
+    if !holds(dir, &["rev-parse", "--verify", "-q", &format!("{since}^{{commit}}")])? {
+        return Err(format!("{since:?} is not a commit of this repository"));
+    }
+    let mut all = list(&["diff", "--name-only", "--no-renames", "--relative", "-z", since, "--"])?;
+    all.extend(list(&["ls-files", "--others", "--exclude-standard", "-z"])?);
+    all.sort();
+    all.dedup();
+    let under = |p: &str, x: &str| {
+        let x = x.trim_matches('/');
+        !x.is_empty() && (p == x || p.strip_prefix(x).is_some_and(|r| r.starts_with('/')))
+    };
+    all.retain(|p| !exclude.iter().any(|x| under(p, x)));
+    Ok(all)
+}
+
 /// Make a worktree of `project` at `path` on a new branch `branch` from the commit `head`.
 pub(crate) fn add_worktree(project: &Path, path: &Path, branch: &str, head: &str) -> Result<(), String> {
     if let Some(parent) = path.parent() {

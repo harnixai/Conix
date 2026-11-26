@@ -1041,11 +1041,16 @@ pub struct Pinned {
     /// Command name → source, for a bundle's commands (in Conix; `flow_command`): pinned as scripts.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub commands: BTreeMap<String, String>,
+    /// Bundle-relative path (`lib/specs.js`) → source, for every file the pinned scripts and
+    /// commands import, followed to the end (in Conix): the loader reads only these, so a library
+    /// edited while the run goes on does not change how its gates judge.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub libs: BTreeMap<String, String>,
 }
 
 impl Pinned {
     pub fn is_empty(&self) -> bool {
-        self.policies.is_empty() && self.gates.is_empty() && self.scripts.is_empty() && self.commands.is_empty()
+        self.policies.is_empty() && self.gates.is_empty() && self.scripts.is_empty() && self.commands.is_empty() && self.libs.is_empty()
     }
 }
 
@@ -1105,6 +1110,18 @@ pub fn pin(def: &FlowDef, packs: &dyn super::host::Packs) -> Pinned {
                 out.commands.insert(c, src);
             }
         }
+        // What those import: the bundle's own files, found by the paths the importers give.
+        let mut roots: Vec<(String, String)> = vec![];
+        for (name, src) in &out.scripts {
+            if let Some((_, local)) = crate::bundle::split(name) {
+                roots.push((format!("scripts/{local}.js"), src.clone()));
+            }
+        }
+        for (name, src) in &out.commands {
+            roots.push((format!("commands/{name}.js"), src.clone()));
+        }
+        let refs: Vec<(&str, &str)> = roots.iter().map(|(p, s)| (p.as_str(), s.as_str())).collect();
+        out.libs = crate::bundle::import_closure(&refs, &|p| packs.bundle_file(b, p));
     }
     out
 }

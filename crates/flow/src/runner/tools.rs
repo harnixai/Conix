@@ -194,7 +194,8 @@ async fn command(rn: &Runner, b: &Binding, input: Value) -> ToolReply {
         "subject": rec.subject, "inputs": rec.inputs, "output_dir": rel(&rec.output_dir), "data_dir": rel(&rec.data_dir),
     });
     let writer = super::script::Writer { workspace: ws.clone(), roots, denied, written: Default::default() };
-    let out = super::script::command(source.clone(), given, std::sync::Arc::new(reader), std::sync::Arc::new(writer), COMMAND_TIMEOUT).await;
+    let env = super::scriptenv::Env::for_run(engine, &rec, ws.clone(), Some(format!("commands/{name}.js")), source).await;
+    let out = super::script::command(source.clone(), given, std::sync::Arc::new(reader), std::sync::Arc::new(writer), env, COMMAND_TIMEOUT).await;
     let mut text = out.text;
     if !out.written.is_empty() {
         let mut w = out.written.clone();

@@ -5,16 +5,13 @@
 //   xpkg list                           列出工作包
 //   xpkg done <编号> "<做了什么、怎么验证的>" [--files "a,b"]   登记做完
 //   xpkg blocked <编号> "<卡在哪>"      登记做不下去
+import { need, parseFlags } from "../lib/cli.js";
+
 export default function (input, flow) {
   const [sub, id, ...rest] = input.args;
-  const pos = [], opt = {};
-  for (let i = 0; i < rest.length; i++) {
-    if (rest[i].startsWith("--")) opt[rest[i].slice(2)] = rest[++i];
-    else pos.push(rest[i]);
-  }
+  const { pos, opt } = parseFlags(rest);
   const file = `${input.output_dir}/work-packages.yaml`;
   const plan = flow.read.yaml(file) || { packages: [] };
-  const need = (v, why) => { if (!v) throw new Error(why); return v; };
   const list = (s) => (s || "").split(/[,;]/).map((x) => x.trim()).filter(Boolean);
   const save = () => {
     flow.write.yaml(file, plan);

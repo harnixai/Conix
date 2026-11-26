@@ -695,6 +695,12 @@ pub struct RunRecord {
     /// start, and what became of it once the run was over. A child run holds its parent's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub worktree: Option<WorktreeRec>,
+    /// The commit the run's workspace stood at when it started (its worktree's `HEAD`, else the
+    /// project's): what `${base_commit}` and `flow.git` measure changes against. A record, not a
+    /// lookup, because the branch moves on while the run goes. Absent: the project is no git
+    /// repository (or the run has no project). A child run holds its parent's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_commit: Option<String>,
     /// Started from a governed flow (`Packs::governed`): it cannot be forced past a station.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub governed: bool,

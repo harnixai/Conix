@@ -4,6 +4,8 @@
 //   xledger add <种类> "<内容>"                      记一条，回它的编号（D1、R1、F1）
 //   xledger set <种类> <编号> <结论> ["<说明>"]       给一条定结论（open 也行：重新打开）
 //   xledger list [种类]                              列出来
+import { need } from "../lib/cli.js";
+
 const KINDS = { decisions: "D", risks: "R", findings: "F" };
 const CONCLUSIONS = ["open", "accepted", "rejected", "resolved", "deferred"];
 
@@ -11,7 +13,6 @@ export default function (input, flow) {
   const [sub, kind, ...rest] = input.args;
   const file = (k) => `${input.output_dir}/ledgers/${k}.yaml`;
   const load = (k) => (flow.read.yaml(file(k)) || { entries: [] });
-  const need = (v, why) => { if (!v) throw new Error(why); return v; };
   if (sub === "list") {
     const kinds = kind ? [kind] : Object.keys(KINDS);
     return kinds.map((k) => load(k).entries.map((e) => `${e.id} [${e.conclusion}] ${e.text}${e.note ? ` —— ${e.note}` : ""}`).join("\n")).filter(Boolean).join("\n") || "台账是空的";
