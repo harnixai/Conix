@@ -401,6 +401,17 @@ impl Hub {
         }
     }
 
+    /// 往一个会话发一轮（分诊用）：同界面的 `Submit`，正在跑一轮就拒。
+    pub(crate) async fn submit_turn(&self, session: &str, text: String) -> Result<(), PortError> {
+        self.dispatch(Command::Submit {
+            session: port::SessionId(session.to_string()),
+            text,
+            mode: port::SubmitMode::Turn,
+        })
+        .await
+        .map(|_| ())
+    }
+
     pub(crate) fn downgrade(&self) -> WeakHub {
         WeakHub(Arc::downgrade(&self.0))
     }
