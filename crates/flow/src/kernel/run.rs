@@ -772,6 +772,10 @@ pub struct RunRecord {
     /// Started from a governed flow (`Packs::governed`): it cannot be forced past a station.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub governed: bool,
+    /// Where the run was archived and the digest of the archive's `record.json` then. Written by
+    /// the library, so a `record.json` edited afterwards no longer matches (`archive::verify`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub archive: Option<ArchiveRef>,
     /// How it goes from station to station: `step` holds every station on entry.
     #[serde(default, skip_serializing_if = "Pace::is_auto")]
     pub pace: Pace,
@@ -877,6 +881,17 @@ impl ProposalRec {
     pub fn is_open(&self) -> bool {
         self.status == ProposalStatus::Open
     }
+}
+
+/// An archive as the ledger records it (in Conix: docs/design/layout.md §3).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct ArchiveRef {
+    /// The archive directory, relative to the project (the worktree's place in it, for a run that
+    /// worked in a worktree); absolute when it is under neither.
+    pub dir: String,
+    /// sha256 of its `record.json` as written.
+    pub record_sha256: String,
 }
 
 /// A run's worktree of its project (`docs/glossary.md`, 项目任务): outside the project, in the

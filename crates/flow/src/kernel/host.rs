@@ -177,8 +177,10 @@ pub trait Packs: Send + Sync {
         let mut g = super::def::parse_part::<GateDef>(&text, "gate").ok().filter(|g| crate::bundle::names_match(&g.name, name))?;
         g.name = name.to_string();
         // A bundle's gate runs the bundle's script (Conix: docs/design/layout.md §2).
-        if let (Some((bundle, _)), Some(script)) = (crate::bundle::split(name), g.script.as_mut()) {
-            *script = crate::bundle::in_bundle(bundle, script);
+        if let Some((bundle, _)) = crate::bundle::split(name) {
+            for script in g.script.iter_mut().chain(g.plan.iter_mut()) {
+                *script = crate::bundle::in_bundle(bundle, script);
+            }
         }
         Some(g)
     }

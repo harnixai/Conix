@@ -13,4 +13,4 @@ commands:
   xspec: {read_only: [list, get, delta, check, pending, help]}
   xarch: {read_only: [modules, list, get, delta, check, pending, help]}
   xledger: {read_only: [list, help]}
-  xpkg: {read_only: [list, help]}
+  xpkg: {read_only: [list, verify-menu, help]}

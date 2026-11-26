@@ -1,7 +1,7 @@
 //! xforge's ledgers and work packages (docs/design/xforge.md §2.3, §3, §4): the commands `xledger`
 //! and `xpkg` keep the rules of who may give which conclusion and what a package must say, and the
 //! gates `ledgers-settled`, `constitution-reply`, `packages-planned`, `package-check`, `unclaimed`
-//! judge the same data again. No model: a run of a probe flow (one station, one gate, copied beside
+//! judge the same data again; `package-tests` runs what a package chose from the project's menu. No model: a run of a probe flow (one station, one gate, copied beside
 //! the bundle) in a committed copy of the example, its commands called as a person, a station or a
 //! model would call them.
 
@@ -32,6 +32,7 @@ const PROBES: &[(&str, &str)] = &[
     ("packages-done", "packages-done"),
     ("planned", "probe-planned"),
     ("check", "probe-check"),
+    ("tests", "probe-tests"),
 ];
 
 /// The bundle as it is, plus probe flows and the two probe gates, in a directory of bundles.
@@ -51,6 +52,11 @@ fn bundles() -> tempfile::TempDir {
     std::fs::write(
         b.join("gates/probe-check.yaml"),
         "name: probe-check\nkind: script\nscript: package-check\nparams:\n  plan: \"${output_dir}/work-packages.yaml\"\n  item: p1\n",
+    )
+    .unwrap();
+    std::fs::write(
+        b.join("gates/probe-tests.yaml"),
+        "name: probe-tests\nkind: command\nplan: package-tests\nparams:\n  plan: \"${output_dir}/work-packages.yaml\"\n  item: p1\ntimeout_seconds: 120\n",
     )
     .unwrap();
     std::fs::write(
@@ -87,17 +93,28 @@ struct Rig {
 
 impl Rig {
     async fn new(probe: &str) -> Rig {
+        Rig::with(probe, false).await
+    }
+
+    /// In a project trusted to run its command gates (they are on in every rig).
+    async fn trusted(probe: &str) -> Rig {
+        Rig::with(probe, true).await
+    }
+
+    async fn with(probe: &str, trusted: bool) -> Rig {
         let (packs_dir, data, project) = (bundles(), tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
         let root = project.path().canonicalize().unwrap();
         sh(&root, &format!("cp -R {}/. . && rm -rf .conix/flows && git init -q && git add -A && git -c user.email=x@y -c user.name=x commit -qm base", example().display()));
         let host = ScriptedHost::new();
         host.main(vec![Turn::Runs]);
+        host.trust(&root, trusted);
         let cfg = RunnerConfig {
             profiles: vec!["flow-harnix".into()],
             submit_profiles: ["flow-harnix".to_string()].into(),
             main_profile: Some("flow-harnix".into()),
             lease_ms: 60_000,
             tick_ms: 1000,
+            command_gates: true,
             ..Default::default()
         };
         let packs = CatalogPacks::over(&cfg, vec![], Arc::new(DirPacks::new([packs_dir.path()])));
@@ -374,7 +391,7 @@ async fn complies(r: &Rig, ids: &[&str]) {
 
 // ── xpkg ─────────────────────────────────────────────────────────────────────
 
-const PLAN: &[&str] = &["plan", "p1", "加 truncate", "--paths", "src/textkit/**,tests/**", "--criteria", "超长截断;不超长原样返回", "--verify", "单测"];
+const PLAN: &[&str] = &["plan", "p1", "加 truncate", "--paths", "src/textkit/**,tests/**", "--criteria", "超长截断;不超长原样返回", "--verify", "unit"];
 
 #[tokio::test]
 async fn xpkg_plans_with_numbered_criteria_and_done_needs_evidence_for_each_and_files_in_the_paths() {
@@ -394,10 +411,11 @@ async fn xpkg_plans_with_numbered_criteria_and_done_needs_evidence_for_each_and_
     let plan: Value = serde_yaml::from_str(&std::fs::read_to_string(r.out.join("work-packages.yaml")).unwrap()).unwrap();
     let p1 = &plan["packages"][0];
     assert_eq!(p1["criteria"], json!([{"id": "C1", "text": "超长截断"}, {"id": "C2", "text": "不超长原样返回"}]));
-    assert_eq!((p1["status"].as_str(), p1["verify"].as_str(), p1["paths"].clone()), (Some("planned"), Some("单测"), json!(["src/textkit/**", "tests/**"])));
+    assert_eq!((p1["status"].as_str(), p1["paths"].clone()), (Some("planned"), json!(["src/textkit/**", "tests/**"])));
+    assert_eq!(p1["verify"], json!([{"name": "unit", "params": {}}]));
     assert_eq!(plan["packages"][1]["after"], json!(["p1"]));
     let t = r.ok(r.me("xpkg", &["list"]).await).await;
-    assert!(t.contains("p1 [planned]") && t.contains("C2 不超长原样返回") && t.contains("先做：p1"), "{t}");
+    assert!(t.contains("p1 [planned]") && t.contains("C2 不超长原样返回") && t.contains("先做：p1") && t.contains("验证：unit"), "{t}");
 
     let done = |files: &str, ev: &str| ["done", "p1", "加了函数", "--files", files, "--evidence", ev].map(String::from).to_vec();
     let run = async |a: Vec<String>| {
@@ -427,6 +445,56 @@ async fn xpkg_plans_with_numbered_criteria_and_done_needs_evidence_for_each_and_
     let mut c = CommandCall::new("xforge", "xpkg", vec!["plan".into()], CommandBy::person("me"));
     c.project_root = Some(r.root.clone());
     assert!(r.rn.run_command(c).await.unwrap_err().contains("要在运行里"));
+}
+
+/// `--verify` names what the project's menu declares, with exactly its parameters, each matching
+/// its pattern whole; anything else is refused before it is written.
+#[tokio::test]
+async fn xpkg_plan_takes_verify_only_from_the_projects_menu() {
+    let r = Rig::new("check").await;
+    let with = |v: &[&'static str]| {
+        let mut a = vec!["plan", "p1", "t", "--paths", "src/**,tests/**", "--criteria", "一"];
+        for x in v {
+            a.extend(["--verify", x]);
+        }
+        a
+    };
+    for (v, words) in [
+        (&["lint"][..], &["菜单里没有 lint", "compile, test, unit", "verify-menu"][..]),
+        (&["test"], &["要参数 file", "--verify test:file=…"]),
+        (&["unit:file=x"], &["没有参数 file"]),
+        (&["test:file=test_a;rm -rf ~"], &["file=test_a;rm -rf ~", "不合", "整串匹配"]),
+        (&["test:file=../test_a"], &["不合"]),
+        (&["test:file=xtest_a"], &["不合"]),
+        (&["test:file=test_a extra"], &["不合"]),
+        (&["test:file"], &["参数=值"]),
+        (&["test:file=test_a,file=test_b"], &["给了两次"]),
+        (&["Unit"], &["<名字>[:参数=值"]),
+        (&["unit", "unit"], &["写了两次"]),
+    ] {
+        refused(r.model("design", "xpkg", &with(v)).await, words);
+    }
+    assert!(!r.out.join("work-packages.yaml").exists(), "nothing was written by the refusals");
+    let t = r.ok(r.model("design", "xpkg", &with(&["unit", "test:file=test_textkit"])).await).await;
+    assert!(t.contains("交付时跑 unit、test:file=test_textkit"), "{t}");
+    let plan: Value = serde_yaml::from_str(&std::fs::read_to_string(r.out.join("work-packages.yaml")).unwrap()).unwrap();
+    assert_eq!(plan["packages"][0]["verify"], json!([{"name": "unit", "params": {}}, {"name": "test", "params": {"file": "test_textkit"}}]));
+
+    // The menu, read-only and outside any run too.
+    let mut c = CommandCall::new("xforge", "xpkg", vec!["verify-menu".into()], CommandBy::model("m"));
+    c.project_root = Some(r.root.clone());
+    let menu = r.rn.run_command(c).await.unwrap().text;
+    assert!(menu.contains("unit：python3 -m unittest discover -s tests -q") && menu.contains("用法：--verify test:file=…") && menu.contains("test_[a-z0-9_]+"), "{menu}");
+
+    // A menu that names a parameter it does not declare is the people's to fix: nothing is chosen from it.
+    r.write(".conix/governance/xforge.yaml", "verify:\n  bad: {argv: [echo, \"{x}\"], params: {y: \"a\"}}\n");
+    refused(r.model("design", "xpkg", &with(&["bad"])).await, &["{x} 在 params 里没有声明", "params.y 在 argv 里没用到", "要人改"]);
+    refused(r.me("xpkg", &["verify-menu"]).await, &["{x}"]);
+    // No menu: nothing to choose, and a package without --verify is planned as before.
+    r.write(".conix/governance/xforge.yaml", "governance: {spec: true}\n");
+    refused(r.model("design", "xpkg", &with(&["unit"])).await, &["没有声明验证"]);
+    r.ok(r.model("design", "xpkg", &with(&[])).await).await;
+    assert!(r.ok(r.me("xpkg", &["verify-menu"]).await).await.contains("没有声明验证"));
 }
 
 // ── the package gates ────────────────────────────────────────────────────────
@@ -593,4 +661,65 @@ async fn unclaimed_wants_every_change_since_the_base_in_some_packages_paths() {
     let c = r.judge(json!({})).await;
     assert_ne!(c.status, CheckStatus::Pass);
     assert!(said(&c).contains("xpkg plan"), "{}", said(&c));
+}
+
+
+/// `package-tests` turns the package's choices into runs from the menu and the library runs them:
+/// each must exit 0. A choice that no longer agrees with the menu runs nothing.
+#[tokio::test]
+async fn package_tests_runs_what_the_package_chose_from_the_menu() {
+    // Two choices, both pass: one finding-free pass naming each, the evidence the files it read.
+    let r = Rig::trusted("tests").await;
+    plan(&r, "p1", "src/textkit/**,tests/**", &["--verify", "unit", "--verify", "test:file=test_textkit"]).await;
+    let c = r.judge(json!({})).await;
+    assert_eq!(c.status, CheckStatus::Pass, "{}", said(&c));
+    assert_eq!(c.detail, "工作包 p1: 2 passed: unit, test:file=test_textkit");
+    let read: Vec<&str> = c.evidence.iter().map(|e| e.path.as_str()).collect();
+    assert!(read.contains(&".conix/governance/xforge.yaml") && read.iter().any(|p| p.ends_with("work-packages.yaml")), "{read:?}");
+
+    // A failing test: a finding for that choice, with what unittest said; the others still run.
+    let r = Rig::trusted("tests").await;
+    r.write("tests/test_broken.py", "import unittest\nclass T(unittest.TestCase):\n    def test_x(self):\n        self.fail('boom')\n");
+    plan(&r, "p1", "src/textkit/**,tests/**", &["--verify", "test:file=test_broken", "--verify", "compile"]).await;
+    let c = r.judge(json!({})).await;
+    assert_eq!(c.status, CheckStatus::Fail, "{}", said(&c));
+    assert_eq!(c.findings.len(), 1, "{}", said(&c));
+    assert_eq!(c.findings[0].rule, "test:file=test_broken");
+    assert!(c.findings[0].message.contains("exited with 1") && c.findings[0].message.contains("boom"), "{}", said(&c));
+
+    // Nothing chosen (or the sentence older packages wrote): nothing owed.
+    for verify in ["", "    verify: 单测\n"] {
+        let r = Rig::trusted("tests").await;
+        let dir = r.out.strip_prefix(&r.root).unwrap().display().to_string();
+        r.write(&format!("{dir}/work-packages.yaml"), &format!("packages:\n  - id: p1\n    title: t\n    paths: [src/**]\n    criteria: [{{id: C1, text: x}}]\n    status: planned\n{verify}"));
+        let c = r.judge(json!({})).await;
+        assert_eq!((c.status, c.detail.as_str()), (CheckStatus::Pass, "没有要跑的"), "{verify:?}");
+    }
+
+    // What a model wrote into the package by hand, past the command: the menu's pattern refuses it
+    // and nothing runs — and it would only have been one argument of `-p`, never a command line.
+    let r = Rig::trusted("tests").await;
+    let dir = r.out.strip_prefix(&r.root).unwrap().display().to_string();
+    r.write(
+        &format!("{dir}/work-packages.yaml"),
+        "packages:\n  - id: p1\n    title: t\n    paths: [src/**]\n    status: planned\n    verify: [{name: test, params: {file: 'test_textkit.py; touch pwned #'}}]\n",
+    );
+    let c = r.judge(json!({})).await;
+    assert_eq!(c.status, CheckStatus::Error, "{}", said(&c));
+    assert!(said(&c).contains("需要人看") && said(&c).contains("不合"), "{}", said(&c));
+    assert!(!r.root.join("pwned").exists());
+
+    // The menu changed under a planned package: the people's to look at.
+    let r = Rig::trusted("tests").await;
+    plan(&r, "p1", "src/**", &["--verify", "test:file=test_textkit"]).await;
+    r.write(".conix/governance/xforge.yaml", "verify:\n  unit: {argv: [python3, -m, unittest, discover, -s, tests]}\n");
+    let c = r.judge(json!({})).await;
+    assert_eq!(c.status, CheckStatus::Error);
+    assert!(said(&c).contains("菜单里没有 test"), "{}", said(&c));
+
+    // Not trusted, the project's commands do not run, as for any command gate.
+    let r = Rig::new("tests").await;
+    plan(&r, "p1", "src/**", &["--verify", "unit"]).await;
+    let c = r.judge(json!({})).await;
+    assert_eq!(c.status, CheckStatus::Error);
 }

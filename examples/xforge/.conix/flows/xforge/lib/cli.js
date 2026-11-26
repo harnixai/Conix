@@ -6,6 +6,13 @@ export function need(v, why) {
   return v;
 }
 
+// 可以写几次的选项：["--k", "a", "--k", "b"] → ["a", "b"]（parseFlags 只留最后一个）。
+export function allOf(args, flag) {
+  const out = [];
+  for (let i = 0; i < args.length; i++) if (args[i] === `--${flag}`) out.push(args[++i]);
+  return out;
+}
+
 // ["a", "--k", "v", "b"] → { pos: ["a", "b"], opt: { k: "v" } }
 export function parseFlags(args) {
   const pos = [], opt = {};

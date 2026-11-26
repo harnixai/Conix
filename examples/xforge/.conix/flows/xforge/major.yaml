@@ -123,6 +123,7 @@ stations:
       properties: {package: {type: string}, status: {enum: [done, blocked]}, summary: {type: string}}
     task_exit:
       - {kind: gate, gate: package-check}
+      - {kind: gate, gate: package-tests}
     exit:
       - {kind: output}
       - {kind: gate, gate: packages-done}

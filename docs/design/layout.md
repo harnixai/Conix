@@ -77,6 +77,15 @@
     交付出处、用量与耗时。租约、token、日志、上下文不进。
   - 取消的运行不归档，留在 `runs/` 里；`archive.when: always` 时也归档，`record.json` 的状态是 `cancelled`。
   - `workspace: worktree` 的运行在它的 worktree 里归档，跟代码一起合回去。
+  - **事后核对**：`record.json` 带 `format` 和 `files: [{path, sha256, size}]`，列出归档目录里除它自己以外的每个文件
+    （相对路径、`/` 分隔、排序，格式同导出包的 `MANIFEST.yaml`）；运行账本记下 `archive: {dir, record_sha256}`
+    （`dir` 相对项目，`record_sha256` 是写完时 `record.json` 的摘要）。账本模型写不了，所以 `record.json` 连同 `files`
+    被改写也看得出来。**不做哈希链**：归档提交进 git，历史加账本里这一个摘要，批过的制品之后被改就看得见，
+    链只会多出一套要维护的东西。
+  - `conix flow verify <归档目录> [--project 目录]`（不要实例，直接读项目的运行账本，调 `harnix_flow::archive::verify`）报告：`missing`（列了没有）、
+    `extra`（有了没列）、`changed`（摘要或大小不同）；门禁证据与确认绑定的摘要对着归档里的文件重算，不符的列出；
+    `record` 是 `matches` / `differs` / `no_ledger`（账本里没有这次归档，如旧的）。没有 `files` 的旧归档只报
+    `unlisted`、仍核对证据摘要——这是核对不了，不算失败。
 - **在自己 worktree 里的子运行**（flows.md §6.5）：worktree 是 `.wkts/<子运行>`，与父运行的并排；它的工作目录是父运行工作目录
   映射进它 worktree 的 `children/<站>/<任务>/`，父运行的那份（`${parent.output_dir}`）是分叉时拷过去的。合回去时这个目录拷回
   父运行的 `conix/runs/<父运行>/children/<站>/<任务>/`，跟着父运行归档。

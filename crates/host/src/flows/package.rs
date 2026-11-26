@@ -8,6 +8,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::io::{Cursor, Read, Write};
 use std::path::{Path, PathBuf};
 
+pub use harnix_flow::archive;
 use harnix_flow::bundle;
 use harnix_flow::{
     Catalog, DEFINITION_FORMAT, DirPacks, FLOW_API_VERSION, MemPacks, Packs, PartKind,
@@ -729,6 +730,22 @@ pub fn import(file: &Path, project: &Path, o: &ImportOptions) -> Result<FlowImpo
 pub struct Inspected {
     pub manifest: Option<String>,
     pub verified: Result<FlowPackageInfo, String>,
+}
+
+/// 归档的事后核对（layout.md §3）：`runs_dir` 是项目的运行账本目录。直接读账本、不经实例：实例开着也只是
+/// 读一个文件，账本的写入（与它的索引）仍只有实例一家。record.json 里没写运行、账本里没有，都是"没有账本可对"。
+pub fn verify_archive(runs_dir: &Path, dir: &Path) -> harnix_flow::archive::ArchiveReport {
+    use harnix_flow::RunStore as _;
+    let run = std::fs::read(dir.join(harnix_flow::archive::RECORD))
+        .ok()
+        .and_then(|t| serde_json::from_slice::<serde_json::Value>(&t).ok())
+        .and_then(|v| v["run"].as_str().map(str::to_string));
+    let ledger = run.and_then(|run| {
+        let store = harnix_flow::FileStore::new(runs_dir);
+        // 没有运行时：FileStore 在没有 Tokio 运行时的时候就地读，这个 future 不会挂起。
+        futures::executor::block_on(store.load(&run)).ok().flatten()
+    });
+    harnix_flow::archive::verify(dir, ledger.as_ref())
 }
 
 pub fn inspect(file: &Path) -> Inspected {

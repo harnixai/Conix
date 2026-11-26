@@ -434,9 +434,13 @@ fn conix_disclosure(m: &Mounted, d: &mut port::PluginDisclosure) {
             };
             match g.kind {
                 harnix_flow::GateKind::Command => d.conix.push(format!(
-                    "command gate `{}` runs `{}` on this machine (in trusted projects){}",
+                    "command gate `{}` runs {} on this machine (in trusted projects){}",
                     g.name,
-                    g.command.as_deref().unwrap_or_default(),
+                    // `plan` 的门禁没有命令行：跑什么由包里的脚本从人声明的清单里挑。
+                    match (&g.plan, &g.command) {
+                        (Some(s), _) => format!("what its script `{s}` picks"),
+                        (None, c) => format!("`{}`", c.as_deref().unwrap_or_default()),
+                    },
                     if g.env.is_empty() {
                         String::new()
                     } else {

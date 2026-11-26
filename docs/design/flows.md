@@ -136,6 +136,39 @@ timeout_seconds: 900
 - **谁能跑**：命令门禁会在本机执行任意命令，只在受信的项目里跑；`conix.yaml` 的 `flows.command_gates: off` 整机关掉
   （缺省 `trusted`）。这与 Agix 对项目 hook、项目 MCP stdio server 的规矩一致：项目受信，它的配置才能在本机执行命令。
 
+#### `plan`：脚本挑，Rust 跑
+
+```yaml
+name: package-tests
+kind: command
+plan: package-tests        # 件 scripts/package-tests.js，代替 command（两者只能写一个）
+params: {plan: "${output_dir}/work-packages.yaml", item: "${item}"}
+env: [CI_*]
+timeout_seconds: 900       # 所有 run 加起来的时限
+```
+
+```js
+// scripts/package-tests.js：input 与 §2.3 的一样（任务级出口里有 item），flow 只读
+export default function (input, flow) {
+  return { summary: "p1 的验证", runs: [{ name: "unit", argv: ["python3", "-m", "unittest", "discover", "-s", "tests"], cwd: "." }] };
+}
+```
+
+- **为什么**：要跑哪些命令常常取决于模型写的数据（这个工作包要跑哪几项验证）。拼成一行交给 `sh -c`，模型写进数据里的
+  `; rm -rf ~` 就成了程序。所以分两层：**脚本是策略**，与门禁脚本一样只读、确定，只从人声明过（进 git）的东西里挑，
+  挑不出来就自己回门禁结果；**Rust 是机制**，按 `argv` 直接起进程，程序与参数原样传过去，中间没有 shell，`;`、`$(…)`、
+  `|` 在参数里只是字符。流程库从不把字符串交给 shell。
+- **脚本回什么**：§3 的门禁结果就照它判，什么都不跑（证据仍是它读过的文件）；`{runs: [{name, argv, cwd?, timeout_seconds?}], summary?}`
+  就依次跑。别的形状、抛错、超时（脚本自己的时限是 30 秒，与 run 的无关）算 `error`。
+- **先全部核对，一个不合就一个都不跑**（`error`）：`argv` 非空、程序非空、没有 NUL；`cwd` 相对运行的工作目录，绝对路径、
+  `..`、经符号链接出界、不存在的都拒绝；`argv[0]` 是带 `/` 的相对路径时按 `cwd` 找；至多 32 个 run。
+- **跑**：与命令门禁同一套——环境变量白名单与宿主的拒绝表、`FLOW_*` 变量、自己的进程组、只在受信的项目里、
+  `flows.command_gates: off` 一样关掉。门禁的 `timeout_seconds` 是所有 run 加起来的时限，run 自己的 `timeout_seconds` 只能更短。
+- **结论**：每个 run 都退出 0 才 `pass`。退出非 0 的每个一条 finding（`rule` 是 run 的名字，消息带输出的尾巴），后面的照跑，
+  结论 `fail`；起不来、超时、被信号杀掉算 `error`（同命令门禁），后面的不跑。`runs` 为空是 `pass`（`summary` 用脚本给的，
+  没给是 "nothing to run"）。
+- `gate-<名>.log` 里是脚本的 `flow.log` 与每个 run 的输出。门禁上不写 `command`、`cwd`、`result`；`params` 照样给脚本。
+
 ### 2.3 `script`
 
 ```yaml
@@ -449,7 +482,7 @@ commands:
 
 | 件 | 位置 | 由谁调 | 能写 | 返回 |
 |---|---|---|---|---|
-| 门禁脚本 | `scripts/<名>.js` | 门禁 `kind: script` | 否 | 门禁结果（§3） |
+| 门禁脚本 | `scripts/<名>.js` | 门禁 `kind: script`；`kind: command` 的 `plan` | 否 | 门禁结果（§3）；`plan` 也可以回要跑的 `runs`（§2.2） |
 | 选值脚本 | `scripts/<名>.js` | `foreach: {script: …}`、`start.route` 的 `script` | 否 | 一个值（工作项列表、流程名） |
 | 命令 | `commands/<名>.js` | `flow_command`、`/…:<命令>`、站 `executor: {kind: command}` | 运行目录（`_run/` 除外）、`${data_dir}` | 文本或值 |
 | 库 | `lib/<名>.js` | 上面三种 `import` | 无 | 无 |
@@ -545,7 +578,7 @@ files: [{path, sha256, size}, …]
 |---|---|
 | 门禁定义、脚本件、校验 | `crates/flow/src/kernel/parts.rs`、`kernel/validate.rs` |
 | 门禁结果、`CheckRec` 的证据、重跑门禁 | `kernel/host.rs`（`GateResult`）、`kernel/run.rs`、`kernel/engine.rs`（`gate_result`、`rerun_gates`） |
-| 执行 `check` / `command` / `script` | `runner/gate.rs`；`runner/files.rs`（限在工作目录里读、记证据）、`runner/checks.rs`、`runner/script.rs`（rquickjs，与 Agix 同一版本） |
+| 执行 `check` / `command` / `script` | `runner/gate.rs`、`runner/plan.rs`（命令门禁的 `plan`）；`runner/files.rs`（限在工作目录里读、记证据）、`runner/checks.rs`、`runner/script.rs`（rquickjs，与 Agix 同一版本） |
 | 打回时告诉会话为什么 | `kernel/run.rs`（`StationRec::reworked`）、`kernel/protocol.rs` |
 | 确认、轮询审批 | `kernel/def.rs`（`ExitCond::Confirm`）、`kernel/txn.rs`、`runner/approvals.rs`（新） |
 | 受管流程 | `packs.rs`（`ProjectPacks`、`DirPacks`）、`kernel/run.rs`（`governed`） |

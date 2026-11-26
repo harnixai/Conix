@@ -29,6 +29,12 @@ pub enum FlowCmd {
     },
     /// 看包里的 MANIFEST 并核对：不装。
     Inspect { file: PathBuf },
+    /// 核对一份归档：文件与 record.json 的清单、证据与确认的摘要、record.json 与运行账本。
+    Verify {
+        dir: PathBuf,
+        #[arg(long)]
+        project: Option<PathBuf>,
+    },
 }
 
 /// 帮助文字按当前语言重写（见 `main::localized_command`）。
@@ -49,6 +55,11 @@ pub fn localize(c: clap::Command) -> clap::Command {
         .mut_subcommand("inspect", |c| {
             c.about(i18n::t!("app.cli.flow_inspect"))
                 .mut_arg("file", |a| a.help(i18n::t!("app.cli.flow_file")))
+        })
+        .mut_subcommand("verify", |c| {
+            c.about(i18n::t!("app.cli.flow_verify"))
+                .mut_arg("dir", |a| a.help(i18n::t!("app.cli.flow_archive_dir")))
+                .mut_arg("project", |a| a.help(i18n::t!("app.cli.flow_project")))
         })
 }
 
@@ -155,6 +166,56 @@ pub fn run(cmd: FlowCmd, here: impl FnOnce() -> Result<PathBuf>) -> Result<()> {
                 }
             }
         }
+        FlowCmd::Verify { dir, project } => {
+            let project = project_of(project, here)?;
+            let runs = client::layout::ProjectState::new(&project).flow_runs();
+            let r = package::verify_archive(&runs, &dir);
+            print_report(&r);
+            if !r.ok {
+                bail!("{}", i18n::t!("app.flow_verify_failed"));
+            }
+            println!("{}", i18n::t!("app.flow_verify_ok", n = r.checked));
+        }
     }
     Ok(())
+}
+
+fn print_report(r: &package::archive::ArchiveReport) {
+    for p in &r.missing {
+        println!("{}", i18n::t!("app.flow_verify_missing", path = p));
+    }
+    for p in &r.extra {
+        println!("{}", i18n::t!("app.flow_verify_extra", path = p));
+    }
+    for p in &r.changed {
+        println!("{}", i18n::t!("app.flow_verify_changed", path = p));
+    }
+    for e in &r.evidence {
+        println!(
+            "{}",
+            i18n::t!(
+                "app.flow_verify_evidence",
+                path = e.path,
+                by = e.by,
+                problem = e.problem
+            )
+        );
+    }
+    for p in &r.problems {
+        println!("{}", i18n::t!("app.flow_verify_problem", problem = p));
+    }
+    if r.unlisted {
+        println!("{}", i18n::t!("app.flow_verify_unlisted"));
+    }
+    match r.record {
+        package::archive::RecordState::Matches => {
+            println!("{}", i18n::t!("app.flow_verify_record_matches"))
+        }
+        package::archive::RecordState::Differs => {
+            println!("{}", i18n::t!("app.flow_verify_record_differs"))
+        }
+        package::archive::RecordState::NoLedger => {
+            println!("{}", i18n::t!("app.flow_verify_no_ledger"))
+        }
+    }
 }
