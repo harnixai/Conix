@@ -86,6 +86,9 @@
     `extra`（有了没列）、`changed`（摘要或大小不同）；门禁证据与确认绑定的摘要对着归档里的文件重算，不符的列出；
     `record` 是 `matches` / `differs` / `no_ledger`（账本里没有这次归档，如旧的）。没有 `files` 的旧归档只报
     `unlisted`、仍核对证据摘要——这是核对不了，不算失败。
+- **在自己 worktree 里的子运行**（flows.md §6.5）：worktree 是 `.wkts/<子运行>`，与父运行的并排；它的工作目录是父运行工作目录
+  映射进它 worktree 的 `children/<站>/<任务>/`，父运行的那份（`${parent.output_dir}`）是分叉时拷过去的。合回去时这个目录拷回
+  父运行的 `conix/runs/<父运行>/children/<站>/<任务>/`，跟着父运行归档。
 - 权威的运行账本仍是 `.conix/state/conix/flow-runs/`（带租约与 token，模型写不了）；`_run/` 与 `record.json` 都是它的投影。
 - 模型能写 `conix/runs/<运行>/`，不能写 `_run/`；`conix/<包>/` 只经包的命令与归档写。
 

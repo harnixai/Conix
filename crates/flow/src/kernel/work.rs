@@ -236,6 +236,8 @@ pub(crate) fn dispatched_work_with(rec: &RunRecord, eng: &Engine, now: u64) -> V
         // Hand-ins waiting on their `task_exit` gates, items a script is working out.
         out.extend(super::handin::pending_work(rec, sid, st));
         out.extend(super::items::pending_work(rec, sid, st));
+        // Children in worktrees of their own still to be forked, or over and to be merged back.
+        out.extend(super::fork::pending_work(rec, sid, st));
         if matches!(st.status, StationStatus::Working | StationStatus::Unmet) {
             for c in &st.checks {
                 if let Some(w) = super::confirm::pending(rec, sid, st, c) {

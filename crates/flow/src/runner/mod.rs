@@ -39,6 +39,7 @@ mod checks;
 pub(crate) mod commands;
 mod dispatch;
 mod files;
+mod fork;
 pub(crate) mod gate;
 mod git;
 mod hooks;

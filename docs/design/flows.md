@@ -362,6 +362,44 @@ exit: [{kind: children, require: all}]   # all（缺省）| any | 正整数：�
 每个任务交付时记 `delivery`：谁交的（`Actor`）、什么时候、以什么身份（会话、子 Agent 任务、程序步骤、外部认领、子运行），
 与输出放在一起。审计时一个任务"谁做的、凭什么"都在这一条里。
 
+### 6.5 子运行在自己的 worktree 里
+
+双路开发：父运行写规格侧（提案、规格增量、接口增量），人批准；之后两个子运行各干各的——一个写实现，一个照同一份规格写
+黑盒测试、看不到实现；最后一站把两边合起来，用测试跑实现。
+
+```yaml
+- id: dual
+  tasks:
+    - {id: impl,  executor: {kind: subflow, flow: xforge/impl,  workspace: worktree}}
+    - {id: tests, executor: {kind: subflow, flow: xforge/tests, workspace: worktree}}
+  exit: [{kind: children}]
+```
+
+- **只在父运行自己在 worktree 里时允许。** 分叉要往父运行的分支上提交，用户自己的分支一律不自动提交。定义里写明
+  `workspace: project` 的流程读定义时就拒；没写的看启动时选了什么，派任务时父运行不在自己的 worktree 里，任务失败并写明原因。
+  `workspace` 只认 `worktree`（不写就是原来的样子：子运行与父运行共用 worktree）。
+- **分叉提交。** 这一站本轮第一次派这种任务时，派工器在父运行的 worktree 里把没提交的全部提交到父运行的分支
+  （`Harnix task <父运行> (<流程>): forked at <站>`，什么都没改也取当时的 HEAD），记在站上（`StationRec::fork`：轮次、提交）。
+  同一轮的子运行都从这一个提交分出去，哪怕前一个已经合回去、父运行的分支往前走了；打回后的新一轮另做一次。
+- **子运行的 worktree** 是 `<worktrees_root>/<子运行>`，分支 `<前缀>/<子运行>`，从分叉提交建；与父运行的并排，不嵌套
+  （Conix 只认 `.wkts/<运行>` 这一层）。子运行的 `base_commit` 就是分叉提交；`WorktreeRec::fork` 记父运行的 worktree、分支和映射过来的输出目录。
+- **输出目录。** 父运行的输出目录按同样的相对位置映射进子运行的 worktree，就是 `${parent.output_dir}`：分叉时的规格侧，
+  子运行自己的一份，父运行之后再改也不影响它（不让它写，用站的 `writes` 收紧）。子运行自己的输出目录是它下面的
+  `children/<站>/<任务>/`：两个子运行合回去时各在各的目录，不会写到同一个文件上。git 不管的部分（比如忽略掉的运行目录
+  `conix/runs/`）分叉时把父运行输出目录里子运行 worktree 缺的文件拷过去（`_run/` 不拷），合回去时把子运行的输出目录整个拷回父运行那里，盖掉上一轮留下的。
+- **合回去。** 子运行交付了（`finished`），而且父任务还在等它：派工器先把子运行 worktree 里的全部提交到它的分支，再把父运行
+  worktree 里没提交的提交上，然后把子运行的分支合进父运行的分支（`git.rs` 的合并：合并提交在旁边的临时 worktree 里做，父运行的
+  树不会停在合了一半）。合上了，子运行的 worktree 和分支都删掉，父任务拿到子运行的结果。冲突了，父任务失败，错误里一个文件一条
+  （`<路径>: changed on both sides`），父运行的树不变，子运行的分支留着、worktree 删掉。这一步不用人决定；父运行自己结束时照旧由人决定合不合进用户的分支。
+- **失败或取消的子运行**（或者父任务已经不等它了）：它的工作提交到它的分支，分支留着，worktree 删掉，记成 `kept`；父任务照旧失败。
+- **读隔离。** 子运行的会话读不到父运行的 worktree，也读不到同一站其他子运行的 worktree：一个合回去之后父运行的 worktree 里就有它的东西了，
+  另一个读了就不再独立。派工器开会话时给宿主 `OpenSpec::deny_read`（绝对路径），宿主翻成 Agix 的 `Read(...)` deny 规则，进沙箱。
+  这份名单在开会话时算：`max_parallel` 让兄弟子运行晚起的，早开的会话名单里没有它。
+- **为什么走 git，不让子运行直接读父运行的目录。** 父运行的目录一直在变，读它就看得见兄弟合回来的东西；分叉提交是定下来、不会再变的规格侧，
+  两边看到的一模一样，事后也查得到它们是从哪个提交出发的。合回去也走 git，冲突是 git 判的，不是谁覆盖了谁。
+- **重启之后**：派工器从父运行的记录里把没做完的分叉（任务已认领、还没有子运行）与合回（任务在等、子运行已结束、worktree 还没处理）
+  重新交出来（`WorkItem::Fork`、`WorkItem::Join`），两者重复做也只做一次。
+
 ## 7. 流程包、制品与包的命令
 
 流程的组织与项目里的目录见 [layout.md](layout.md)：一个**流程包**自洽地放一个或几个流程（同一件事的几条路径）和它们用的全部件，
@@ -516,7 +554,7 @@ settings:                              # 项目的治理文件，启动时读、
 | 数据目录的锁 | 同一个包的 `${data_dir}` 写入跨运行串行（命令、归档）；`flow.runs` 让命令算"别的在途运行占了哪些编号" | 做 |
 | 自描述与测试 | 每个命令的 `help` 来自文件头的用法；`flow test`：`tests/*.yaml` 给一份样例目录与期望（门禁结论、命令输出），不用模型跑完 | 做 |
 | 证据链 | 运行历史与门禁证据成哈希链，`inspect` 能验 | 后做 |
-| 子运行看父运行 | 子运行能读 `${parent.output_dir}`（只读）：双路开发时两个子运行（各在 worktree）共用父运行的规格侧 | 需要双路时再做 |
+| 子运行看父运行 | 子运行在自己的 worktree 里（`executor: {kind: subflow, workspace: worktree}`）：从父运行的分叉提交分出去，`${parent.output_dir}` 是分叉时规格侧的一份，交付后合回父运行的分支，读不到父运行与兄弟的 worktree（§6.5） | 做 |
 
 ### 7.11 兼容
 
@@ -566,6 +604,7 @@ files: [{path, sha256, size}, …]
 | 确认、轮询审批 | `kernel/def.rs`（`ExitCond::Confirm`）、`kernel/txn.rs`、`runner/approvals.rs`（新） |
 | 受管流程 | `packs.rs`（`ProjectPacks`、`DirPacks`）、`kernel/run.rs`（`governed`） |
 | 子流程结果、`children`、交付 | `kernel/def.rs`、`kernel/txn.rs`、`runner/tools.rs`（`flow_submit`） |
+| 子运行在自己的 worktree 里（分叉提交、合回、读隔离） | `crates/flow/src/kernel/fork.rs`、`runner/fork.rs`（新）、`runner/worktree.rs`（`make` 带起点）、`runner/host.rs`（`OpenSpec::deny_read`）；Conix 把 `deny_read` 翻成 `Read(...)` deny：`crates/host/src/flows/session_host.rs` |
 | Conix 的授权（人、角色、受管） | `crates/host/src/flows/authorize.rs`（新） |
 | Conix 的审批（MCP） | `crates/host/src/flows/approvals.rs`（新） |
 | `[x-conix] governed`、`command_gates` | `crates/host/src/plugins/mod.rs`、`crates/host/src/config` |

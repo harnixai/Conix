@@ -35,6 +35,8 @@ pub(crate) enum Cross {
         flow: String,
         subject: String,
         inputs: Value,
+        /// A child in a worktree of its own: the id the runner made it under, and where it works.
+        own: Option<Box<super::fork::Own>>,
     },
     ChildDone {
         child: String,
@@ -157,7 +159,8 @@ impl<'e> Txn<'e> {
                 flow,
                 subject,
                 inputs,
-            } => self.spawn(parent, token, flow, subject, inputs).await,
+                own,
+            } => self.spawn(parent, token, flow, subject, inputs, own).await,
             Cross::ChildDone {
                 child,
                 parent,
@@ -200,6 +203,7 @@ impl<'e> Txn<'e> {
         flow: String,
         subject: String,
         inputs: Value,
+        own: Option<Box<super::fork::Own>>,
     ) -> Result<()> {
         self.load(&parent.run).await?;
         let waiting = self
@@ -254,7 +258,10 @@ impl<'e> Txn<'e> {
                     match apply_inputs(&def, &inputs).and_then(|i| settings.map(|s| (i, s))) {
                         Err(e) => Err(e),
                         Ok((inputs, settings)) => {
-                            let id = self.eng.store.alloc_id(&super::engine::id_base(&flow)).await?;
+                            let id = match &own {
+                                Some(o) => o.id.clone(),
+                                None => self.eng.store.alloc_id(&super::engine::id_base(&flow)).await?,
+                            };
                             let title = format!("{} / {}", parent.run, parent.task);
                             let mut parts = super::parts::pin(&def, packs.as_ref());
                             parts.settings = settings;
@@ -279,6 +286,9 @@ impl<'e> Txn<'e> {
                             child.worktree = up.worktree.clone();
                             child.base_commit = up.base_commit.clone();
                             child.pace = super::route::pace_of(&child.def, packs.as_ref(), None);
+                            if let Some(o) = &own {
+                                o.apply(&mut child);
+                            }
                             Ok(child)
                         }
                     }
@@ -804,7 +814,9 @@ impl<'a> M<'a> {
                 Executor::Session { .. } | Executor::Agent { .. } | Executor::Program { .. } | Executor::Command { .. } => {
                     self.claim_push(sid, &tid, &spec)
                 }
-                Executor::Subflow { flow, inputs } => self.claim_subflow(sid, &tid, flow, inputs),
+                Executor::Subflow { flow, inputs, workspace } => {
+                    self.claim_subflow(sid, &tid, flow, inputs, *workspace == Some(Workspace::Worktree))
+                }
             }
             busy += 1;
         }
@@ -856,11 +868,11 @@ impl<'a> M<'a> {
         self.by = by;
     }
 
-    fn claim_subflow(&mut self, sid: &str, tid: &str, flow: &str, inputs: &Value) {
+    fn claim_subflow(&mut self, sid: &str, tid: &str, flow: &str, inputs: &Value, own_worktree: bool) {
         let token = new_token();
         let dispatcher = Actor::flow("dispatch");
         let now = self.now();
-        let item = {
+        {
             let Some(t) = self.task_mut(sid, tid) else {
                 return;
             };
@@ -874,8 +886,25 @@ impl<'a> M<'a> {
                 token: token.clone(),
                 until: FOREVER,
             });
-            t.item.clone()
-        };
+        }
+        self.emit(
+            "task.claimed",
+            Some(sid),
+            Some(tid),
+            json!({"by": dispatcher}),
+        );
+        // A worktree of its own is made by the runner first (git is not the kernel's): it starts
+        // the child once it has one (`fork.rs`).
+        if own_worktree {
+            self.fork_or_fail(sid, tid, token);
+            return;
+        }
+        self.spawn_child(sid, tid, flow, inputs, token, None);
+    }
+
+    /// Start the child of a claimed subflow task: queued, started by [`Txn::settle`].
+    pub(crate) fn spawn_child(&mut self, sid: &str, tid: &str, flow: &str, inputs: &Value, token: String, own: Option<Box<super::fork::Own>>) {
+        let item = self.rec.station(sid).and_then(|s| s.task(tid)).and_then(|t| t.item.clone());
         let ctx = self.ctx(item.as_ref(), Some(tid));
         let subject = match &item {
             Some(Value::String(s)) => s.clone(),
@@ -892,13 +921,8 @@ impl<'a> M<'a> {
             flow: flow.to_string(),
             subject,
             inputs: resolve(inputs, &ctx),
+            own,
         });
-        self.emit(
-            "task.claimed",
-            Some(sid),
-            Some(tid),
-            json!({"by": dispatcher}),
-        );
     }
 
     /// A task handed in its output (already checked against the contract).
@@ -1348,6 +1372,9 @@ impl<'a> M<'a> {
         self.close_keyed_sessions();
         self.emit("run.finished", None, None, Value::Null);
         self.log("finish", None, None, Value::Null);
+        if self.joins_later() {
+            return;
+        }
         if let Some(p) = self.rec.parent.clone() {
             let result = self.child_result();
             self.fx.cross.push_back(Cross::ChildDone {
@@ -1360,7 +1387,7 @@ impl<'a> M<'a> {
 
     /// What this run, as a child, hands its parent task: the flow's `result`, or every station's
     /// output. A `result` short of its schema fails the parent's task, saying where.
-    fn child_result(&self) -> std::result::Result<Value, String> {
+    pub(crate) fn child_result(&self) -> std::result::Result<Value, String> {
         let Some(r) = &self.def.result else {
             let stations: serde_json::Map<String, Value> = self
                 .def
@@ -1389,6 +1416,9 @@ impl<'a> M<'a> {
         let data = json!({"reason": reason});
         self.emit("run.cancelled", None, None, data.clone());
         self.log("cancel", None, None, data);
+        if self.joins_later() {
+            return;
+        }
         if let Some(p) = self.rec.parent.clone() {
             self.fx.cross.push_back(Cross::ChildDone {
                 child: self.rec.id.clone(),

@@ -31,7 +31,9 @@ fn run_of(w: &WorkItem) -> Option<&str> {
         | WorkItem::Gate { run, .. }
         | WorkItem::Approval { run, .. }
         | WorkItem::TaskGate { run, .. }
-        | WorkItem::Items { run, .. } => Some(run),
+        | WorkItem::Items { run, .. }
+        | WorkItem::Fork { run, .. }
+        | WorkItem::Join { run, .. } => Some(run),
         WorkItem::CloseSession { .. } => None,
     }
 }
@@ -234,6 +236,8 @@ async fn run_work(rn: Arc<Runner>, w: WorkItem, resume: bool) {
             super::steps::run_task_gate(&rn, run, station, round, task, seq, cond, gate).await
         }
         WorkItem::Items { run, station, round, script } => super::steps::run_items(&rn, run, station, round, script).await,
+        WorkItem::Fork { run, station, task, token, .. } => super::fork::run_fork(&rn, run, station, task, token).await,
+        WorkItem::Join { run, station, task, child } => super::fork::run_join(&rn, run, station, task, child).await,
         WorkItem::CloseSession { session } => {
             rn.state.unbind_session(&session);
             let host = rn.host();

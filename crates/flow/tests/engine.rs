@@ -1308,6 +1308,7 @@ async fn a_child_run_works_where_its_parent_does() {
         branch: format!("harnix/flow/{id}"),
         base: "0123".into(),
         outcome: None,
+        fork: None,
     };
     let prepared = Prepared { id: Some(id.clone()), worktree: Some(worktree.clone()), ..Default::default() };
     let o = h

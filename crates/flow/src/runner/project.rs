@@ -97,7 +97,7 @@ pub(crate) async fn start(rn: &Arc<Runner>, mut input: CreateIn, by: Actor) -> c
         let workspace = Workspace::chosen(input.workspace, def.as_ref().and_then(|d| d.workspace), Some(root));
         input.workspace = Some(workspace);
         if workspace == Workspace::Worktree && def.is_some() {
-            let (id, w) = super::worktree::make(engine, root, &input.flow).await?;
+            let (id, w) = super::worktree::make(engine, root, &input.flow, None).await?;
             prepared = Prepared { base_commit: Some(w.base.clone()), id: Some(id), worktree: Some(w), ..prepared };
         } else if workspace.in_project() {
             // Where the run works is the project itself: what its `HEAD` is now.

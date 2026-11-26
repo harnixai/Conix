@@ -203,6 +203,9 @@ pub fn worktree_may_end(rec: &RunRecord) -> Result<&WorktreeRec> {
         return invalid(format!("run {} does not work in a worktree", rec.id));
     };
     if let Some(p) = &rec.parent {
+        if w.fork.is_some() {
+            return invalid(format!("run {} works in a worktree of its own forked from its parent run {}'s: it is merged back into {} when it delivers, else its branch {} is kept", rec.id, p.run, p.run, w.branch));
+        }
         return invalid(format!("run {} works in the worktree of its parent run {}: decide there", rec.id, p.run));
     }
     if rec.is_active() {
