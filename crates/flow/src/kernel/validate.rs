@@ -442,15 +442,26 @@ fn station_problems(c: &mut Ctx, s: &Station, cyclic: bool) {
     for t in &specs {
         executor_problems(c, id, t);
     }
-    if let Some(items) = &s.foreach {
-        let r = refs_in(items);
-        if r.len() != 1 || !items.trim().starts_with("${") || !items.trim().ends_with('}') {
-            c.at(
-                id,
-                "foreach must be one reference, like ${stations.<id>.output.<list>}",
-            );
+    match &s.foreach {
+        Some(super::def::Foreach::Ref(items)) => {
+            let r = refs_in(items);
+            if r.len() != 1 || !items.trim().starts_with("${") || !items.trim().ends_with('}') {
+                c.at(
+                    id,
+                    "foreach must be one reference, like ${stations.<id>.output.<list>}, or {script: <name>}",
+                );
+            }
         }
+        Some(super::def::Foreach::Script(f)) => {
+            if f.script.trim().is_empty() {
+                c.at(id, "foreach names its script: {script: <name>}");
+            } else if c.packs.part(PartKind::Script, &f.script).is_none() {
+                c.at(id, format!("foreach: there is no script {} (scripts/<name>.js)", f.script));
+            }
+        }
+        None => {}
     }
+    task_exit_problems(c, s);
 
     // exits
     if s.exit.is_empty() {
@@ -646,6 +657,48 @@ fn gate_rework_problems(c: &mut Ctx, s: &Station) {
     }
 }
 
+/// `task_exit`: gates only, on a station that has tasks to hand in, each gate as an exit's would be.
+fn task_exit_problems(c: &mut Ctx, s: &Station) {
+    let id = s.id.as_str();
+    if s.task_exit.is_empty() {
+        return;
+    }
+    if matches!(s.work(), Work::None) {
+        c.at(id, "task_exit judges each task's hand-in; a checkpoint has no tasks");
+    }
+    for e in &s.task_exit {
+        let ExitCond::Gate { gate, .. } = e else {
+            c.at(id, format!("task_exit holds only gates (kind: gate), not {}", e.kind()));
+            continue;
+        };
+        match c.packs.part(PartKind::Gate, gate) {
+            None => c.at(id, format!("task_exit: gate {gate} is not in the packs")),
+            Some((text, _)) => {
+                for m in part_problems(PartKind::Gate, gate, &text, c.packs) {
+                    c.at(id, format!("task_exit: gate {gate}: {m}"));
+                }
+                if let Some(g) = c.packs.gate(gate) {
+                    if !g.args.is_null() {
+                        ref_problems(c, s, &refs_in_value(&g.args));
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// The commands a bundle declares in its `bundle.yaml`: a list of names, or a table by name (what
+/// each read-only subcommand is, in Conix); `None` when the file is not there or does not parse.
+fn declared_commands(packs: &dyn Packs, bundle: &str) -> Option<Vec<String>> {
+    let text = packs.bundle_file(bundle, crate::bundle::BUNDLE_FILE)?;
+    let v: serde_yaml::Value = serde_yaml::from_str(&text).ok()?;
+    Some(match v.get("commands") {
+        Some(serde_yaml::Value::Sequence(l)) => l.iter().filter_map(|x| x.as_str().map(String::from)).collect(),
+        Some(serde_yaml::Value::Mapping(m)) => m.keys().filter_map(|x| x.as_str().map(String::from)).collect(),
+        _ => vec![],
+    })
+}
+
 fn executor_problems(c: &mut Ctx, id: &str, t: &TaskSpec) {
     match &t.executor {
         e @ Executor::Session {
@@ -751,6 +804,20 @@ fn executor_problems(c: &mut Ctx, id: &str, t: &TaskSpec) {
             }
         }
         Executor::External { .. } => {}
+        Executor::Command { command, args } => match &c.def.bundle {
+            None => c.at(id, format!("command task {}: a command is a bundle's; this flow is in none", t.id)),
+            Some(b) => {
+                if !declared_commands(c.packs, b).unwrap_or_default().iter().any(|x| x == command) {
+                    c.at(id, format!("command task {}: bundle {b} declares no command {command} (bundle.yaml commands)", t.id));
+                } else if c.packs.bundle_file(b, &format!("commands/{command}.js")).is_none() {
+                    c.at(id, format!("command task {}: there is no commands/{command}.js in bundle {b}", t.id));
+                }
+                let refs: Vec<String> = args.iter().flat_map(|a| refs_in(a).into_iter().map(String::from).collect::<Vec<_>>()).collect();
+                if let Some(st) = c.def.station(id).cloned() {
+                    ref_problems(c, &st, &refs);
+                }
+            }
+        },
         Executor::Subflow { flow, .. } => {
             if c.packs.flow(flow).is_none() {
                 c.at(id, format!("subflow {flow} is not a flow in the packs"));

@@ -421,6 +421,13 @@ Conix 在 Harnix 0.4.7 分叉了这个库，先把站的治理（门禁、确认
   note）按站的回退点核对 `to`，记一条 `ProposalRec`（`ProposalKind`、`ProposalStatus`）进 `RunRecord::proposals`；打回到那里就是
   接受，站往前走就作废，`Engine::dismiss_proposal`（`Op::DismissProposal`）也能作废。`RunView::proposals` 是还开着的；事件
   `proposal.opened`、`proposal.accepted`、`proposal.dismissed`。
+- **命令步骤、脚本给的工作项、工作项的先后、任务级出口**（Conix 的 M3、M9）：`Executor::Command{command, args}`
+  （`kind: command`）不用模型，把包声明的命令当作站的任务跑，返回值就是输出（不是对象时包成 `{result}`）。`Station::foreach`
+  是 `Foreach`（`Ref` 或 `Script(ForeachScript)`）；脚本的工作项用 **`WorkItem::Items`** 要、经 **`Engine::foreach_items`**
+  报回。工作项的 `after: [<id>]` 让它等那几项的任务做完再派。`Station::task_exit`（只收门禁）在收下每次交付之前判它：
+  **`WorkItem::TaskGate`**，经 **`Engine::task_gate_result`** 报回；`TaskRec::task_exit`（`TaskExitRec`）记交付与结果，
+  事件 `task.checked`。`Gates::run_for_task`（缺省同 `Gates::run`）是对一个任务跑的宿主门禁。`Work::Foreach::items`
+  改成了 `Foreach`（原来是 `String`）；试运行里 `Mocks::items` 给脚本的工作项。
 
 - **试运行用会话所在的流程包**：`Sandbox::start_in(input, by, packs)`；`flow_dry_run` 用会话读的那份（项目的流程、件），
   不再只看应用自己的包——项目里的流程以前试运行时找不到。

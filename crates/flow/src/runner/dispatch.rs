@@ -27,7 +27,11 @@ pub(crate) fn dispatcher() -> Actor {
 
 fn run_of(w: &WorkItem) -> Option<&str> {
     match w {
-        WorkItem::Task { run, .. } | WorkItem::Gate { run, .. } | WorkItem::Approval { run, .. } => Some(run),
+        WorkItem::Task { run, .. }
+        | WorkItem::Gate { run, .. }
+        | WorkItem::Approval { run, .. }
+        | WorkItem::TaskGate { run, .. }
+        | WorkItem::Items { run, .. } => Some(run),
         WorkItem::CloseSession { .. } => None,
     }
 }
@@ -180,6 +184,9 @@ async fn run_work(rn: Arc<Runner>, w: WorkItem, resume: bool) {
             }
             match executor {
                 Executor::Program { step } => program_task(&rn, &key, &token, &step, item.as_ref()).await,
+                Executor::Command { command, args } => {
+                    super::steps::command_task(&rn, &key, &token, &command, &args, item.as_ref()).await
+                }
                 Executor::Session { .. } | Executor::Agent { .. } => {
                     // A write scope no reference could be expanded for is a failed task, not an open door.
                     if let Some(e) = writes.as_ref().and_then(|w| w.error.clone()) {
@@ -223,6 +230,10 @@ async fn run_work(rn: Arc<Runner>, w: WorkItem, resume: bool) {
         }
         WorkItem::Gate { run, station, round, gate } => super::gate::run_gate(&rn, run, station, round, gate).await,
         WorkItem::Approval { run, station, round, cond } => super::approvals::run_approval(&rn, run, station, round, cond).await,
+        WorkItem::TaskGate { run, station, round, task, seq, cond, gate } => {
+            super::steps::run_task_gate(&rn, run, station, round, task, seq, cond, gate).await
+        }
+        WorkItem::Items { run, station, round, script } => super::steps::run_items(&rn, run, station, round, script).await,
         WorkItem::CloseSession { session } => {
             rn.state.unbind_session(&session);
             let host = rn.host();

@@ -604,6 +604,12 @@ impl GateResult {
 #[async_trait]
 pub trait Gates: Send + Sync {
     async fn run(&self, run: &RunRecord, station: &str, gate: &str) -> GateResult;
+
+    /// A `task_exit` gate on one task's hand-in ([`WorkItem::TaskGate`]): `item` is the task's
+    /// `foreach` item. A host that judges only stations judges it as [`Gates::run`] does.
+    async fn run_for_task(&self, run: &RunRecord, station: &str, _task: &str, _item: Option<&Value>, gate: &str) -> GateResult {
+        self.run(run, station, gate).await
+    }
 }
 
 /// Calls the MCP tools of `via: mcp` confirmations (called by the module for a
@@ -717,6 +723,7 @@ pub const EVENT_KINDS: &[&str] = &[
     "proposal.opened",
     "proposal.accepted",
     "proposal.dismissed",
+    "task.checked",
 ];
 
 /// Work for the module to carry out after the commit.
@@ -796,6 +803,25 @@ pub enum WorkItem {
     },
     /// A session served a task that was cancelled.
     CloseSession { session: String },
+    /// Run `task_exit` condition `cond` of the station (a `gate` the run pins) on hand-in `seq` of
+    /// a task, with that task's context; report through `task_gate_result`.
+    TaskGate {
+        run: String,
+        station: String,
+        round: u32,
+        task: String,
+        seq: u32,
+        cond: usize,
+        gate: String,
+    },
+    /// Evaluate a `foreach: {script}` station's script (the run pins it) for its items; report
+    /// through `foreach_items`.
+    Items {
+        run: String,
+        station: String,
+        round: u32,
+        script: String,
+    },
 }
 
 /// A session task's placement, as the station gave it with `params` resolved for the run.

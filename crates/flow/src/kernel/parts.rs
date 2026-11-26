@@ -1071,11 +1071,12 @@ pub fn uses(def: &FlowDef, kind: PartKind, name: &str) -> bool {
         PartKind::Gate => def.stations.iter().any(|s| {
             s.exit
                 .iter()
+                .chain(s.task_exit.iter())
                 .any(|e| matches!(e, super::def::ExitCond::Gate { gate, .. } if gate == name))
         }),
         PartKind::Hook => false,
-        // A gate names a script, a flow never does.
-        PartKind::Script => false,
+        // A gate names a script; a flow only for its items (`foreach: {script}`).
+        PartKind::Script => def.stations.iter().any(|s| s.foreach.as_ref().and_then(|f| f.script()) == Some(name)),
     }
 }
 
@@ -1089,7 +1090,12 @@ pub fn pin(def: &FlowDef, packs: &dyn super::host::Packs) -> Pinned {
         }
     }
     for s in stations {
-        for e in &s.exit {
+        if let Some(name) = s.foreach.as_ref().and_then(|f| f.script()) {
+            if let Some((text, _)) = packs.part(PartKind::Script, name) {
+                out.scripts.insert(name.to_string(), text);
+            }
+        }
+        for e in s.exit.iter().chain(s.task_exit.iter()) {
             if let super::def::ExitCond::Gate { gate, .. } = e {
                 if let Some(g) = packs.gate(gate) {
                     if let Some(name) = g.script.as_ref().filter(|_| g.kind == GateKind::Script) {

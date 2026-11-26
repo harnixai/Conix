@@ -23,6 +23,7 @@ use serde_json::Value;
 use super::dispatch::{apply, dispatcher, fail, renew, renew_every, settle, settle_quiet};
 use super::host::{Frame, SessionHost, SessionId, TurnEnd};
 use super::session::{standing, Standing};
+use super::steps::{wait_checked, Checked};
 use super::state::{Binding, TaskKey};
 use super::Runner;
 use crate::kernel::host::Delivery;
@@ -180,15 +181,37 @@ where
         // A structured output is the turn's hand-in, whichever way the session was told to hand
         // in: the dispatcher submits it under the task's claim.
         let mut problem: Option<String> = None;
+        // What the station's `task_exit` gates found in the last hand-in, when they sent it back.
+        let mut sent_back: Option<String> = None;
         if let Some(output) = handed {
             let r = engine.submit(&key.run, &key.station, &key.task, token, output, dispatcher()).await;
             match r {
-                Ok(o) => apply(rn, Some(&key.run), o).await,
+                Ok(o) => {
+                    let checking = o.value.get("checking").and_then(Value::as_bool).unwrap_or(false);
+                    let back = o.value.get("sent_back").and_then(Value::as_str).map(String::from);
+                    apply(rn, Some(&key.run), o).await;
+                    problem = match (back, checking) {
+                        (Some(why), _) => Some(format!("the checks of your task did not pass: {why}")),
+                        (None, true) => match wait_checked(rn, key, token).await {
+                            Checked::SentBack(why) => Some(format!("the checks of your task did not pass: {why}")),
+                            Checked::Taken | Checked::Open => None,
+                            Checked::Gone => return false,
+                        },
+                        (None, false) => None,
+                    };
+                }
                 Err(FlowError::Contract(m)) => problem = Some(m),
                 Err(e) => {
                     tracing::debug!(run = key.run, error = %e, "structured output not taken");
                     return false;
                 }
+            }
+        } else {
+            // A hand-in by `flow_submit` (or one made before a restart) may still be checked:
+            // its answer comes before the turn is judged.
+            match wait_checked(rn, key, token).await {
+                Checked::SentBack(why) => sent_back = Some(why),
+                Checked::Taken | Checked::Open | Checked::Gone => {}
             }
         }
         settle(rn, &key.run, "evaluate", engine.evaluate(&key.run).await).await;
@@ -245,8 +268,14 @@ where
             Delivery::FlowSubmit => NUDGE,
             Delivery::StructuredOutput => NUDGE_STRUCTURED,
         };
-        own.texts.push(nudge.to_string());
-        if let Err(e) = session.send(nudge).await {
+        // Sent back by the task's own checks: what they found goes with the reminder, so a session
+        // that never saw the reply (a restart in between) knows what to fix.
+        let nudge = match &sent_back {
+            Some(why) => format!("{nudge} What you handed in last was not taken: the checks of your task did not pass: {why}."),
+            None => nudge.to_string(),
+        };
+        own.texts.push(nudge.clone());
+        if let Err(e) = session.send(&nudge).await {
             fail(rn, key, token, &format!("the reminder was not sent: {e}")).await;
             return false;
         }
@@ -414,7 +443,13 @@ mod tests {
             .gate_def("{name: zero, kind: tool, tool: count, args: {run: '${run}'}, assert: [{path: total, eq: 0}]}")
             .flow(FLOW)
             .flow(COUNTED)
+            .flow(CHECKED)
     }
+
+    /// The same, the tool judging each hand-in before it is taken (`task_exit`).
+    const CHECKED: &str = "{name: checked, stations: [\
+        {id: a, executor: {kind: session, scene: harnix}, skill: do, output: {type: object}, task_exit: [{kind: gate, gate: zero}], exit: [{kind: output}]},\
+        {id: b, exit: [{kind: confirm}]}]}";
 
     /// `count`: what is left to fix, outside the run — what a session's work changes.
     struct Count(Arc<AtomicI64>);
@@ -546,6 +581,20 @@ mod tests {
         t.carry(turns(Delivery::StructuredOutput)).await;
         assert_eq!(t.sent(), ["Do the task.", NUDGE_STRUCTURED]);
         assert_eq!(t.station().await, StationStatus::Passed);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_hand_in_its_tasks_gate_sends_back_goes_back_and_the_reminder_says_what_was_found() {
+        let left = Arc::new(AtomicI64::new(2));
+        let mut t = start_on(Arc::new(MemStore::new()), "checked", left, vec![ends(Some(json!({"n": 1}))), ends(None), ends(None)]).await;
+        t.carry(turns(Delivery::StructuredOutput)).await;
+        let sent = t.sent();
+        assert_eq!(sent.len(), 3, "{sent:?}");
+        assert!(sent[1].starts_with("The flow did not take your output: the checks of your task did not pass: gate zero"), "{}", sent[1]);
+        assert!(sent[2].starts_with(NUDGE_STRUCTURED) && sent[2].contains("What you handed in last was not taken"), "{}", sent[2]);
+        let task = t.task().await;
+        assert_eq!(task.status, TaskStatus::Failed);
+        assert_eq!(task.task_exit.map(|x| x.status), Some(CheckStatus::Fail));
     }
 
     #[tokio::test(start_paused = true)]

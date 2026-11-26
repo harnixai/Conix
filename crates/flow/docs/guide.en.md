@@ -228,6 +228,28 @@ stations:
     exit: [{kind: output}]
 ```
 
+In a bundle, the list can come from a script and the work need no model:
+
+```yaml
+  - id: build
+    foreach: {script: pending-packages}   # scripts/pending-packages.js returns the items
+    max_parallel: 2
+    executor: {kind: command, command: xpkg, args: [build, "${item.id}"]}
+    output: {type: object}
+    task_exit: [{kind: gate, gate: package-verify}]   # each hand-in, with its ${item}
+    exit: [{kind: output}]
+```
+
+- `foreach: {script}`: the script reads as a gate script does and returns the list, when the station is entered; a throw or no
+  list leaves the station unmet with why.
+- An item `{id, after: [<id>…]}` waits until the items it names are done (handed in and taken), within `max_parallel`; an
+  `after` naming no item, or going round, leaves the station unmet; one after an item that failed for good fails too.
+- `executor: {kind: command}` runs one of the bundle's declared commands with no model: its return value is the output (a value
+  that is no object as `{result}`), a throw fails the attempt (`retry` applies); `input.by` is `{kind: station}`.
+- `task_exit` (gates only) judges each task's hand-in before it is taken. One that does not pass sends it back: a session or
+  sub-agent is told what was found and hands in again (as for an output the contract refuses), a command or program fails the
+  attempt. The station's own `exit` sees only hand-ins taken.
+
 ### Rules, policies, gates
 
 ```yaml

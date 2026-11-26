@@ -168,6 +168,44 @@ pub struct TaskRec {
     /// Who handed the output in, and as what (docs/design/flows.md §6.4, in Conix).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub delivery: Option<DeliveryRec>,
+    /// Its station's `task_exit` gates on its latest hand-in: waiting, taken, or sent back.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_exit: Option<TaskExitRec>,
+}
+
+/// A hand-in judged by its station's `task_exit` gates. While they run the task stays claimed (its
+/// lease does not run out: the wait is the flow's, not the worker's) and the output waits here;
+/// taken, it becomes the task's output; sent back, it stays here with what was found.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct TaskExitRec {
+    /// Which hand-in of the task's this is (from 1): a result for another one is not this one's.
+    pub seq: u32,
+    /// `wait` while a gate runs; `pass` taken; `fail` or `error` sent back.
+    pub status: CheckStatus,
+    /// One per `task_exit` condition, `cond` its index.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub checks: Vec<CheckRec>,
+    /// What was handed in, until it is taken.
+    #[serde(default, skip_serializing_if = "Value::is_null")]
+    #[cfg_attr(feature = "ts", ts(type = "unknown"))]
+    pub output: Value,
+    pub by: Actor,
+    pub at: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent: Option<AgentDelivery>,
+}
+
+impl TaskExitRec {
+    /// What did not pass, in one piece, for the task sent back to fix it.
+    pub fn explain(&self) -> String {
+        self.checks
+            .iter()
+            .filter(|c| matches!(c.status, CheckStatus::Fail | CheckStatus::Error))
+            .map(|c| format!("{}: {}", c.label, c.explain()))
+            .collect::<Vec<_>>()
+            .join("; ")
+    }
 }
 
 /// How a task's output came in: who handed it in, when, as which kind of executor — and for a
@@ -227,7 +265,13 @@ impl TaskRec {
             usage: Usage::default(),
             asking: None,
             delivery: None,
+            task_exit: None,
         }
+    }
+
+    /// A hand-in of it is still being judged by its station's `task_exit`.
+    pub fn checking(&self) -> bool {
+        self.status == TaskStatus::Claimed && self.task_exit.as_ref().is_some_and(|x| x.status == CheckStatus::Wait)
     }
 
     /// Ready or claimed: still to be done.
@@ -1128,7 +1172,7 @@ impl RunRecord {
             .stations
             .values()
             .flat_map(|s| &s.tasks)
-            .filter(|t| t.status == TaskStatus::Claimed)
+            .filter(|t| t.status == TaskStatus::Claimed && !t.checking())
             .filter_map(|t| t.lease.as_ref().map(|l| l.until));
         let confirms = self
             .stations

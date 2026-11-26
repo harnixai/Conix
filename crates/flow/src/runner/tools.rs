@@ -268,8 +268,34 @@ async fn submit(rn: &std::sync::Arc<Runner>, b: &Binding, session: &SessionId, i
     };
     match result {
         Ok(o) => {
-            let status = o.value.get("station").cloned().unwrap_or(Value::Null);
+            let mut status = o.value.get("station").cloned().unwrap_or(Value::Null);
+            let checking = o.value.get("checking").and_then(Value::as_bool).unwrap_or(false);
+            let sent_back = o.value.get("sent_back").and_then(Value::as_str).map(String::from);
             rn.apply_for(&b.run, o).await;
+            // The station's `task_exit` gates answer before the session does: what they found is
+            // this call's reply, as a contract's refusal is.
+            let key = super::state::TaskKey { run: b.run.clone(), station: b.station.clone(), round: b.round, task: b.task.clone() };
+            let checked = match (sent_back, checking) {
+                (Some(why), _) => super::steps::Checked::SentBack(why),
+                (None, true) => super::steps::wait_checked(rn, &key, &b.token).await,
+                (None, false) => super::steps::Checked::Taken,
+            };
+            match checked {
+                super::steps::Checked::Taken if checking => {
+                    if let Ok(rec) = rn.engine().record(&b.run).await {
+                        status = serde_json::to_value(rec.stations.get(&b.station).map(|s| s.status)).unwrap_or(Value::Null);
+                    }
+                }
+                super::steps::Checked::Taken => {}
+                super::steps::Checked::SentBack(why) => {
+                    return ToolReply::error(format!(
+                        "Not accepted: the checks of your task did not pass: {why}. Fix the work and call {TOOL_SUBMIT} again."
+                    ))
+                }
+                super::steps::Checked::Gone | super::steps::Checked::Open => {
+                    return ToolReply::error("Not accepted: your claim on this task is no longer current; stop working on it.")
+                }
+            }
             ToolReply::text(format!(
                 "Accepted. Station `{}` is now {}. If it is still working, others' tasks or its checks \
                  are outstanding; your part is done unless you want to improve your output.",

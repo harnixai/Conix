@@ -7,6 +7,8 @@ pub mod def;
 pub mod engine;
 pub mod parts;
 pub mod host;
+pub(crate) mod handin;
+pub(crate) mod items;
 pub mod layout;
 pub mod output;
 pub mod protocol;
