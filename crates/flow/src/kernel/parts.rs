@@ -1046,6 +1046,10 @@ pub struct Pinned {
     /// edited while the run goes on does not change how its gates judge.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub libs: BTreeMap<String, String>,
+    /// What `bundle.yaml` said of those commands when the run started (which subcommands only
+    /// read): pinned with them, so a run's commands are judged by the declaration they were pinned under.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub command_decls: BTreeMap<String, crate::bundle::CommandDecl>,
 }
 
 impl Pinned {
@@ -1105,9 +1109,10 @@ pub fn pin(def: &FlowDef, packs: &dyn super::host::Packs) -> Pinned {
             .and_then(|t| serde_yaml::from_str::<crate::bundle::BundleMeta>(&t).ok())
             .map(|m| m.commands)
             .unwrap_or_default();
-        for c in listed {
+        for (c, decl) in listed.0 {
             if let Some(src) = packs.bundle_file(b, &format!("commands/{c}.js")) {
-                out.commands.insert(c, src);
+                out.commands.insert(c.clone(), src);
+                out.command_decls.insert(c, decl);
             }
         }
         // What those import: the bundle's own files, found by the paths the importers give.

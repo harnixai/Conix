@@ -114,7 +114,7 @@ async fn a_bundles_scripts_and_commands_import_its_lib_pinned_and_reach_git_and_
     let main = eventually("the main session opened", async || host.opened().into_iter().find(|s| s.main)).await;
     let sid = eventually("the session got its key", async || host.session_of(&main.key)).await;
     eventually("the task was sent", async || host.sent_to(&sid).into_iter().next()).await;
-    let call = |cmd: &str| rn.tools().call(&sid, TOOL_COMMAND, json!({"command": cmd}));
+    let call = |cmd: &str| rn.tools().call(&sid, TOOL_COMMAND, json!({"command": cmd, "args": ["go"]}));
     let ok = async |cmd: &str| -> Value {
         let r = call(cmd).await;
         assert!(!r.is_error, "{cmd}: {}", r.text);

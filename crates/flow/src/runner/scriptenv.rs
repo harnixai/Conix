@@ -203,6 +203,16 @@ impl Env {
     }
 }
 
+impl Env {
+    /// For a bundle's command run outside any run (in Conix): the bundle's files as the packs hold
+    /// them now, git in the project with no base commit, and the project's runs when it says `runs`.
+    pub async fn for_bundle(engine: &Engine, packs: &dyn Packs, bundle: &str, entry: String, text: &str, root: PathBuf) -> Self {
+        let modules = Modules::from_packs(packs, bundle, entry, text);
+        let runs = if modules.mentions(text, "runs") { snapshot(engine, root.to_str()).await } else { vec![] };
+        Self { modules, git: Some(GitView::new(root, None, engine)), runs: Arc::new(runs) }
+    }
+}
+
 /// One run as `flow.runs` shows it.
 pub(crate) fn plain(rec: &RunRecord) -> Value {
     json!({

@@ -6,7 +6,11 @@
 //! | `flow_state` | the run as far as this task is concerned: the station, what is still unmet |
 //! | `flow_submit {output}` | hands the output in under the session's claim; problems come back to fix |
 //! | `flow_propose {kind, to?, reason}` | writes a `proposal` note; a person accepts it or not |
-//! | `flow_command {command, args}` | runs a command of the run's bundle (in Conix): it writes only the run's directory and the bundle's data |
+//! | `flow_command {command, args, run?}` | runs a command of a bundle (in Conix): in a run's session the run's own; for the main conversation `bundle:command`. It writes only the run's directory and the bundle's data; outside a run a model only runs the read-only subcommands |
+//!
+//! `flow_command` is the one tool here a session with no task may call ([`FlowTools::call_in`]);
+//! [`command_tool_spec`] is its spec alone, for a host that offers it to such a session next to
+//! the authoring tools without registering the other three — a session is never given two tools of one name.
 
 use std::sync::Weak;
 
@@ -23,8 +27,6 @@ pub const TOOL_STATE: &str = "flow_state";
 pub const TOOL_SUBMIT: &str = "flow_submit";
 pub const TOOL_PROPOSE: &str = "flow_propose";
 pub const TOOL_COMMAND: &str = "flow_command";
-/// How long a bundle's command may run.
-const COMMAND_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// What a tool answers: text for the model, and whether it is an error.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -62,10 +64,21 @@ impl FlowTools {
 
     /// Answer a call of `tool` from the session `session` (the id the host got from `open`).
     pub async fn call(&self, session: &SessionId, tool: &str, input: Value) -> ToolReply {
+        self.call_in(session, tool, input, None).await
+    }
+
+    /// [`FlowTools::call`] with the project the session works in: `flow_command` is answered for a
+    /// session that serves no task (the main conversation) too, outside a run in that project.
+    /// The other tools are a task's own and need its binding.
+    pub async fn call_in(&self, session: &SessionId, tool: &str, input: Value, project: Option<&std::path::Path>) -> ToolReply {
         let Some(rn) = super::upgrade(&self.runner) else {
             return ToolReply::error("the flow runner has stopped");
         };
-        let Some(b) = rn.state.binding(session) else {
+        let b = rn.state.binding(session);
+        if tool == TOOL_COMMAND {
+            return command(&rn, session, b.as_ref(), project, input).await;
+        }
+        let Some(b) = b else {
             return ToolReply::error(
                 "This session is not working on a flow task (or its task is over): there is nothing \
                  to read or hand in here.",
@@ -75,7 +88,6 @@ impl FlowTools {
             TOOL_STATE => state(&rn, &b).await,
             TOOL_SUBMIT => submit(&rn, &b, session, input).await,
             TOOL_PROPOSE => propose(&rn, &b, session, input).await,
-            TOOL_COMMAND => command(&rn, &b, input).await,
             other => ToolReply::error(format!("no flow tool `{other}`")),
         }
     }
@@ -128,17 +140,21 @@ pub fn tool_specs() -> Vec<ToolSpec> {
         },
         ToolSpec {
             name: TOOL_COMMAND.into(),
-            description: "Run one of this flow's own commands (the flow protocol names them), as on a command \
-                 line: `args` a list of strings (`[\"help\"]` says what it does). A command reads the project \
-                 and writes only this run's directory and the flow's data directory; structured data the \
-                 flow keeps is written with them."
+            description: "Run one of a flow bundle's commands, as on a command line: `args` a list of strings \
+                 (`[\"help\"]` or no args says what it does and which subcommands only read, without \
+                 running it). In a flow run's session the command is the run's bundle's and `run` is this \
+                 run; elsewhere name it `bundle:command` (as `xforge:xspec`). A command reads the project \
+                 and writes only the run's directory and the bundle's data directory; structured data the \
+                 bundle keeps is written with them. Outside a run only the read-only subcommands are for \
+                 you: for the rest, give a `run` of that bundle, or ask the person."
                 .into(),
             input_schema: json!({
                 "type": "object",
                 "required": ["command"],
                 "properties": {
-                    "command": {"type": "string"},
-                    "args": {"type": "array", "items": {"type": "string"}}
+                    "command": {"type": "string", "description": "`name` in a run's session, else `bundle:name`."},
+                    "args": {"type": "array", "items": {"type": "string"}},
+                    "run": {"type": "string", "description": "The flow run it is for (its pinned command, its directory); only outside a run's own session."}
                 }
             }),
             // It writes, but only where the run keeps its own: no person is asked.
@@ -147,27 +163,22 @@ pub fn tool_specs() -> Vec<ToolSpec> {
     ]
 }
 
+/// The spec of `flow_command` alone (also the last of [`tool_specs`]).
+pub fn command_tool_spec() -> ToolSpec {
+    tool_specs().into_iter().find(|t| t.name == TOOL_COMMAND).expect("flow_command is one of the tools")
+}
+
 fn pretty(v: &Value) -> String {
     serde_json::to_string_pretty(v).unwrap_or_else(|_| v.to_string())
 }
 
-/// Run one of the run's bundle's commands (pinned when the run started) for the task's session.
-async fn command(rn: &Runner, b: &Binding, input: Value) -> ToolReply {
+/// Run a bundle's command for a session: a station's (its run's pinned commands, the run's bundle
+/// the default), or the main conversation's (`bundle:command`, or the run its main session is of).
+/// `b` is the task the session serves, if any.
+async fn command(rn: &Runner, session: &SessionId, b: Option<&Binding>, project: Option<&std::path::Path>, input: Value) -> ToolReply {
     let engine = rn.engine();
-    let rec = match engine.record(&b.run).await {
-        Ok(r) => r,
-        Err(e) => return ToolReply::error(e.to_string()),
-    };
-    let have = || rec.parts.commands.keys().map(|c| format!("`{c}`")).collect::<Vec<_>>().join(", ");
     let Some(name) = input.get("command").and_then(Value::as_str).map(str::trim) else {
-        return ToolReply::error(format!("say which command: {{command, args}}; this flow has {}", have()));
-    };
-    let Some(source) = rec.parts.commands.get(name) else {
-        return ToolReply::error(if rec.parts.commands.is_empty() {
-            format!("this flow has no commands (no `{name}`)")
-        } else {
-            format!("no command `{name}`; this flow has {}", have())
-        });
+        return ToolReply::error("say which command: {command, args} — `bundle:command` outside a run (`args: [\"help\"]` says what it does)");
     };
     let args: Vec<String> = match input.get("args") {
         None | Some(Value::Null) => vec![],
@@ -175,34 +186,34 @@ async fn command(rn: &Runner, b: &Binding, input: Value) -> ToolReply {
         Some(Value::String(s)) => s.split_whitespace().map(String::from).collect(),
         Some(other) => return ToolReply::error(format!("args is a list of strings, not {other}")),
     };
-    let Some(ws) = engine.workspace_for(&rec) else {
-        return ToolReply::error("the run has no place it works in");
-    };
-    let reader = match super::files::Reader::new(&ws) {
-        Ok(r) => r,
-        Err(e) => return ToolReply::error(e.0),
-    };
-    let roots: Vec<std::path::PathBuf> = [&rec.output_dir, &rec.data_dir].into_iter().flatten().map(std::path::PathBuf::from).collect();
-    let denied: Vec<std::path::PathBuf> = super::project::process_dir(engine, &rec).into_iter().collect();
-    let rel = |p: &Option<String>| -> Value {
-        p.as_deref().map_or(Value::Null, |p| {
-            Value::String(std::path::Path::new(p).strip_prefix(&ws).map(|r| r.to_string_lossy().into_owned()).unwrap_or_else(|_| p.to_string()))
-        })
-    };
-    let given = json!({
-        "command": name, "args": args, "run": rec.id, "flow": rec.def.name, "station": b.station, "task": b.task,
-        "subject": rec.subject, "inputs": rec.inputs, "output_dir": rel(&rec.output_dir), "data_dir": rel(&rec.data_dir),
-    });
-    let writer = super::script::Writer { workspace: ws.clone(), roots, denied, written: Default::default() };
-    let env = super::scriptenv::Env::for_run(engine, &rec, ws.clone(), Some(format!("commands/{name}.js")), source).await;
-    let out = super::script::command(source.clone(), given, std::sync::Arc::new(reader), std::sync::Arc::new(writer), env, COMMAND_TIMEOUT).await;
-    let mut text = out.text;
-    if !out.written.is_empty() {
-        let mut w = out.written.clone();
-        w.dedup();
-        text.push_str(&format!("\n(written: {})", w.join(", ")));
+    let named = input.get("run").and_then(Value::as_str).map(str::trim).filter(|r| !r.is_empty());
+    // A station's session works for its own run only: naming another is a mistake, not a way into
+    // someone else's directory.
+    if let (Some(b), Some(r)) = (b, named) {
+        if r != b.run {
+            return ToolReply::error(format!("this session works for run {}: `run` is that one here", b.run));
+        }
     }
-    if out.ok { ToolReply::text(text) } else { ToolReply::error(text) }
+    let run = named.map(String::from).or_else(|| b.map(|b| b.run.clone())).or_else(|| rn.state.watched_run(session));
+    let run_bundle = match &run {
+        Some(r) => match engine.record(r).await {
+            Ok(rec) => rec.def.bundle.clone(),
+            Err(e) => return ToolReply::error(e.to_string()),
+        },
+        None => None,
+    };
+    let Some((bundle, command)) = super::commands::split_command(name, run_bundle.as_deref()) else {
+        return ToolReply::error(format!("`{name}`: outside a run a command is named with its bundle, `bundle:command` (`xforge:xspec`)"));
+    };
+    let mut call = super::commands::CommandCall::new(bundle, command, args, super::commands::CommandBy::model(session.clone()));
+    call.run = run;
+    call.project_root = project.map(std::path::PathBuf::from);
+    call.station = b.map(|b| b.station.clone());
+    call.task = b.map(|b| b.task.clone());
+    match rn.run_command(call).await {
+        Ok(r) => ToolReply::text(r.shown()),
+        Err(e) => ToolReply::error(e),
+    }
 }
 
 async fn state(rn: &Runner, b: &Binding) -> ToolReply {

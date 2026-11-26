@@ -471,6 +471,7 @@ const RUNNER: &[(&str, &str)] = &[
     ("CatalogPacks::set_layout", "fnset_layout(&self,layout:ProjectLayout)"),
     ("FlowTools::specs", "fnspecs(&self)->&[ToolSpec]"),
     ("FlowTools::call", "asyncfncall(&self,session:&SessionId,tool:&str,input:Value)->ToolReply"),
+    ("FlowTools::call_in", "asyncfncall_in(&self,session:&SessionId,tool:&str,input:Value,project:Option<&std::path::Path>)->ToolReply"),
     ("ScriptedHost::new", "fnnew()->Arc<Self>"),
     ("ScriptedHost::station", "fnstation(&self,station:&str,turns:Vec<Turn>)->&Self"),
     ("ScriptedHost::main", "fnmain(&self,turns:Vec<Turn>)->&Self"),
