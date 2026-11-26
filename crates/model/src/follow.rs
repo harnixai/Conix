@@ -178,6 +178,7 @@ fn row_keys(s: &State, tab: Tab, upper: bool) -> Vec<String> {
             .iter()
             .map(|r| match r {
                 FlowLower::Main => "main".into(),
+                FlowLower::Proposal(i) => format!("prop:{i}"),
                 FlowLower::Station(id) => format!("st:{id}"),
                 FlowLower::StationTask(id, k) => format!("stt:{id}:{k}"),
                 FlowLower::Task(id, _) => format!("task:{id}"),
@@ -564,6 +565,23 @@ fn target_at(s: &State, tab: Tab, upper: bool) -> Option<Target> {
                 .get(s.ui.lower[Tab::Flows.index()].selected)?
             {
                 FlowLower::Main => Some(Target::Session(v.main_session.clone(), vec![], None)),
+                // 建议是哪一站的会话提的，就切到哪里去看。
+                FlowLower::Proposal(i) => {
+                    let p = v.proposals.get(*i)?;
+                    let own = v
+                        .stations
+                        .iter()
+                        .find(|x| x.id == p.station)
+                        .and_then(|x| x.session.clone());
+                    Some(match own {
+                        Some(id) => Target::Session(
+                            id,
+                            vec![(v.main_session.clone(), v.summary.subject.clone())],
+                            None,
+                        ),
+                        None => Target::Session(v.main_session.clone(), vec![], None),
+                    })
+                }
                 // 有独立会话的站切到它；其余的站都在运行的主会话里做。
                 FlowLower::Station(st) => {
                     let st = v.stations.iter().find(|x| &x.id == st)?;

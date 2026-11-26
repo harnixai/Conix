@@ -3,6 +3,7 @@
 
 mod backend;
 mod catalog;
+mod flowops;
 mod instances;
 mod plugins;
 mod scenario;

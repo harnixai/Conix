@@ -51,3 +51,8 @@ flows:
   prefill_new: "新建一个流程："
   notice_tool: "接着说清楚要求再发出：每个会话里都有流程工具"
   definition_of: "{name} 的定义"
+  pace_step_tag: "  步进"
+  proposal: "建议打回到「{to}」（{station} 站：{reason}）  {by}"
+  proposal_accept: "接受：/{bundle}:{to}"
+  votes: "{n}/{min} 票"
+  votes_rejected: "，{n} 票驳回"

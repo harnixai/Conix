@@ -4,6 +4,7 @@ const SEEDS: &[(&str, &str)] = &[
     ("empty", include_str!("../seeds/empty.yaml")),
     ("default", include_str!("../seeds/default.yaml")),
     ("demo", include_str!("../seeds/demo.yaml")),
+    ("xforge", include_str!("../seeds/xforge.yaml")),
 ];
 
 const SCENARIOS: &[(&str, &str)] = &[
@@ -60,6 +61,7 @@ const SCENARIOS: &[(&str, &str)] = &[
         include_str!("../scenarios/m20-first-run.yaml"),
     ),
     ("m16-storm", include_str!("../scenarios/m16-storm.yaml")),
+    ("m22-xforge", include_str!("../scenarios/m22-xforge.yaml")),
 ];
 
 pub fn seed(name: &str) -> Option<&'static str> {

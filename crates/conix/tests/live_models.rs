@@ -168,6 +168,8 @@ async fn start(lv: &Live, flow: &str) -> (Client, RunId) {
             flow: flow.into(),
             subject: "why tests should be fast".into(),
             inputs: Value::Null,
+            step: false,
+            session: None,
         })
         .await
     {

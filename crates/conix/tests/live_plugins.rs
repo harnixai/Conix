@@ -88,6 +88,8 @@ async fn a_plugin_from_the_package_dirs_is_installed_enabled_and_its_flow_runs()
             flow: "demo-flow".into(),
             subject: "live".into(),
             inputs: serde_json::Value::Null,
+            step: false,
+            session: None,
         })
         .await
     else {
@@ -183,6 +185,8 @@ async fn xforge_quick_goes_from_open_to_archive_with_a_real_model() {
                 "title": "Add a farewell line to greet.txt: after the line hello, add the line goodbye",
                 "risk": "low"
             }),
+            step: false,
+            session: None,
         })
         .await
     else {

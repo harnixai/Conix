@@ -169,6 +169,8 @@ async fn a_plugin_is_installed_enabled_and_its_flow_runs_on_its_functions() {
             flow: "demo-flow".into(),
             subject: "try it".into(),
             inputs: serde_json::Value::Null,
+            step: false,
+            session: None,
         })
         .await
         .unwrap()

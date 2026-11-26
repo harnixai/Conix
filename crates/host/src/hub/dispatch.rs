@@ -499,10 +499,13 @@ impl Hub {
             | C::GetFlow { .. }
             | C::GetRun { .. }
             | C::StartRun { .. }
+            | C::ListBundles
+            | C::FlowCommand { .. }
             | C::RunOp { .. }) => match self.flows() {
                 Some(f) => f.command(cmd).await,
                 None => match cmd {
                     C::ListFlows => Ok(Reply::Flows(vec![])),
+                    C::ListBundles => Ok(Reply::Bundles(vec![])),
                     C::ListRuns { .. } | C::ListEndedRuns { .. } => Ok(Reply::Runs(vec![])),
                     // 列表回空、由 Hello 的 flows 能力位让界面说明；具体原因在接入时提示过、也在 host.log。
                     _ => Err(PortError::Unsupported(
