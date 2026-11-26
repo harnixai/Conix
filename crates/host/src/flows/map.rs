@@ -43,6 +43,35 @@ pub(crate) fn flow_summary(d: &DefRow, active_runs: u32) -> port::FlowSummary {
     }
 }
 
+pub(crate) fn pace(p: harnix_flow::kernel::def::Pace) -> port::Pace {
+    match p {
+        harnix_flow::kernel::def::Pace::Auto => port::Pace::Auto,
+        harnix_flow::kernel::def::Pace::Step => port::Pace::Step,
+    }
+}
+
+/// 站里的会话提的建议。端口只有"建议打回"一种：`cancel` 的建议界面还没有位置放，先不推
+/// （库的记录里还在，模型的 `flow_cancel` 与人的 `/cancel` 都照旧）。
+pub(crate) fn proposal(p: &harnix_flow::kernel::run::ProposalRec) -> Option<port::ProposalView> {
+    use harnix_flow::kernel::run::{ProposalKind, ProposalStatus};
+    if p.kind != ProposalKind::Rework {
+        return None;
+    }
+    Some(port::ProposalView {
+        id: p.id.clone(),
+        station: StationId(p.station.clone()),
+        kind: port::ProposalKind::Rework,
+        to: StationId(p.to.clone()?),
+        reason: p.reason.clone(),
+        by: p.by.id.clone(),
+        status: match p.status {
+            ProposalStatus::Open => port::ProposalStatus::Open,
+            ProposalStatus::Accepted => port::ProposalStatus::Accepted,
+            ProposalStatus::Dismissed => port::ProposalStatus::Dismissed,
+        },
+    })
+}
+
 fn status(s: StationStatus) -> port::StationStatus {
     match s {
         StationStatus::Pending => port::StationStatus::Pending,
@@ -164,8 +193,8 @@ fn summary_of(rec: &RunRecord, phase: &Phase, now: u64) -> port::RunSummary {
         started_ms: rec.created_at,
         ended_ms: rec.finished_at,
         usage: usage(&rec.usage()),
-        bundle: None,
-        pace: port::Pace::Auto,
+        bundle: rec.def.bundle.clone(),
+        pace: pace(rec.pace),
     }
 }
 
@@ -186,7 +215,8 @@ pub(crate) fn run_summary(s: &harnix_flow::RunSummary) -> port::RunSummary {
         started_ms: s.created_at,
         ended_ms: s.finished_at,
         usage: usage(&s.usage),
-        bundle: None,
+        // 列表摘要不带运行记录里的步调，取名字里的包；读得到记录时用的是上面那个。
+        bundle: harnix_flow::bundle::split(&s.flow).map(|(b, _)| b.to_string()),
         pace: port::Pace::Auto,
     }
 }
@@ -269,6 +299,57 @@ pub(crate) fn run_view(v: &harnix_flow::RunView) -> port::RunView {
         stations,
         def_digest: rec.def_digest.clone(),
         def_state: port::DefState::Current,
-        proposals: vec![],
+        proposals: rec.proposals.iter().filter_map(proposal).collect(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use harnix_flow::kernel::run::{ProposalKind, ProposalRec, ProposalStatus};
+
+    fn rec(kind: ProposalKind, to: Option<&str>, status: ProposalStatus) -> ProposalRec {
+        ProposalRec {
+            id: "p1".into(),
+            station: "apply".into(),
+            round: 1,
+            task: "t".into(),
+            kind,
+            to: to.map(String::from),
+            reason: "spec is wrong".into(),
+            by: harnix_flow::Actor::new("agent", "s1"),
+            at: 1,
+            status,
+            decided_by: None,
+            decided_at: None,
+        }
+    }
+
+    #[test]
+    fn a_rework_proposal_is_shown_and_a_cancel_one_is_not() {
+        let v = proposal(&rec(
+            ProposalKind::Rework,
+            Some("propose"),
+            ProposalStatus::Open,
+        ))
+        .unwrap();
+        assert_eq!(
+            (
+                v.id.as_str(),
+                v.station.0.as_str(),
+                v.to.0.as_str(),
+                v.by.as_str()
+            ),
+            ("p1", "apply", "propose", "s1")
+        );
+        assert_eq!(v.status, port::ProposalStatus::Open);
+        let done = proposal(&rec(
+            ProposalKind::Rework,
+            Some("propose"),
+            ProposalStatus::Accepted,
+        ))
+        .unwrap();
+        assert_eq!(done.status, port::ProposalStatus::Accepted);
+        assert!(proposal(&rec(ProposalKind::Cancel, None, ProposalStatus::Open)).is_none());
     }
 }
