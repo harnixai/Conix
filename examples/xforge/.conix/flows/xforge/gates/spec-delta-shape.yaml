@@ -1,34 +1,9 @@
 name: spec-delta-shape
 title: 规格增量的格式
-kind: check
-check: schema
-file: "${output_dir}/spec-delta.yaml"
-schema:
-  type: object
-  additionalProperties: false
-  properties:
-    added:
-      type: array
-      items:
-        type: object
-        required: [id, title, text]
-        properties:
-          id: {type: string, pattern: "^[A-Z]+-R[0-9]+$"}
-          title: {type: string, minLength: 1}
-          text: {type: string, minLength: 10}
-    modified:
-      type: array
-      items:
-        type: object
-        required: [id, text]
-        properties:
-          id: {type: string, pattern: "^[A-Z]+-R[0-9]+$"}
-          title: {type: string}
-          text: {type: string, minLength: 10}
-    removed:
-      type: array
-      items: {type: string, pattern: "^[A-Z]+-R[0-9]+$"}
-  anyOf:
-    - {required: [added], properties: {added: {minItems: 1}}}
-    - {required: [modified], properties: {modified: {minItems: 1}}}
-    - {required: [removed], properties: {removed: {minItems: 1}}}
+description: >-
+  spec-delta.yaml 的形状：added 要 id、title、text，modified 要 id、text，removed 是编号，三者至少一个非空。
+  关着规格基线（governance.spec=false）的项目不欠。
+kind: script
+script: spec-delta-shape
+params:
+  file: "${output_dir}/spec-delta.yaml"
