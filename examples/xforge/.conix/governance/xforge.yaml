@@ -19,3 +19,6 @@ verify:
   compile:
     description: 源码都能编译
     argv: [python3, -m, compileall, -q, src]
+  blackbox:
+    description: 黑盒测试（tests_blackbox/）：只经 textkit 的公开接口照规格测。xforge/dual 合起来时门禁 blackbox 跑它，测试那一路写在这里
+    argv: [python3, -m, unittest, discover, -s, tests_blackbox, -q]
