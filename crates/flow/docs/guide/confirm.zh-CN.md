@@ -21,6 +21,24 @@
 - `timeout` 到了还没有决定，同样不过，说明写"3d 内没有决定"。
 - 每个决定都记下谁、什么时候、第几轮、通过与否、理由。
 
+## 多人确认，以及批的是什么
+
+```yaml
+      - kind: confirm
+        who: reviewer
+        min: 2                  # 至少几票批准（缺省 1）
+        distinct: true          # 一人一票，后投的替换自己先投的（缺省）
+        reject: any             # any（缺省）：一票驳回就不过；majority：驳回够 min 票才不过
+        not: [author]           # 可选：这次运行里交付过的、发起运行的人不能投
+        binds: [deliverables, "${data_dir}/specs/*.md"]   # 缺省 deliverables
+```
+
+- 每个决定是这一轮的一票，批准够 `min` 才过，期间显示"1 of 2 approvals"。外部审批（`via: mcp`）算一票。打回到这一站重新计票。
+- 作者可以确认自己的工作；写了 `not: [author]` 时作者的票被拒，并说明为什么。
+- **批过的就是批过的。** 出口通过时记下 `binds` 每个文件的摘要：`deliverables` 是本站及之前各站声明的制品（在运行的目录里）；
+  路径与 glob 可以从 `${output_dir}`、`${data_dir}`、`${workspace}` 起，不出工作区；`binds: []` 什么都不绑。之后每一站通过前
+  都会再核对：文件被改或被删，那一站就不过（`confirm-stale`，写明文件和批它的站）。把文件改回去，或打回那一站重批。
+
 ## 外部审批系统（`via: mcp`）
 
 要"别人"批（主管、法务、另一个团队），而他们不在这个应用里时，经 MCP 工具在外部审批系统（飞书、钉钉、Jira……）建单，

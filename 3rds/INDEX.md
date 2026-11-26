@@ -30,3 +30,4 @@ workspace 的成员。为什么分叉、改成什么样见 `docs/design/flows.md
 | 试运行用会话读的流程包（`Sandbox::start_in`）：项目里的流程以前试运行时找不到 | — | 594f782 | 否 |
 | 流程包（`bundle` 模块，`<包>/<名>`，自洽、项目里整包代替或加 `local.md`，`Packs::bundle_file`）；制品目录（`ProjectLayout::with_artifacts_dir`，运行的目录与 `_run/` 投影，`${data_dir}`、`RunRecord::data_dir`）；归档（`FlowDef::archive`、`record.json`）；制品声明（`Station::deliverables`、骨架、隐含的 deliverables 门禁）；包的命令（`flow_command`、`Pinned::commands`、可写的 QuickJS）；运行 id 由流程名把 `/` 换成 `.` | layout.md | b73663e | 否 |
 | `flow_gate_try` 带 `data_dir`；包里门禁的脚本按包的名字找（校验与试门禁） | layout.md §2 | 1bea032 | 否 |
+| 确认计票：`min`、`distinct`、`reject`（`RejectRule`）、`not: [author]`；`binds`（`Binds`）通过时记摘要（`ConfirmRec::binds`、`cond`），之后各站通过前隐含的 `confirm-stale` 检查（保留名 `confirm-binds@<出口>`、`confirm-stale@` 的门禁工作项）；`RunView::votes`（`Votes`） | flows.md §4 | c942e5c | 否 |
