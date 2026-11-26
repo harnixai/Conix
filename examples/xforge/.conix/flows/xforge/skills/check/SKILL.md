@@ -13,5 +13,9 @@ description: 用新的眼光检查提案与设计，问题记进台账。
 只是提醒的 `xledger set findings <编号> deferred "<说明>"`。查过没问题的点写在交出的 summary 里，不进台账。
 `ready` 如实写：有 open 的问题就是 false。
 
+问题的根在提案或规格增量（提案没跟上增量、需求互相矛盾、漏了需求）时，除了记进台账，再建议打回到提案；
+根在设计的建议打回 `design`。建议用 `flow_propose {kind: rework, to: propose|design, reason: "<哪条发现、为什么回那里>"}` 提；
+你是子 Agent、调不到它时，在交回的结果里写明"建议打回到 <站>：<理由>"，由主 Agent 代为 `flow_propose`。人按建议决定打回到哪。
+
 打回重做之后再来检查时，先看上一轮的问题：作者标成 resolved 的到文档里核实真的解决了，没解决就
 `xledger set findings <编号> open "<还差什么>"`。

@@ -16,3 +16,4 @@ description: 把提案落成设计和工作包，逐条对照项目原则，决�
 
 被检查站打回来时，先 `xledger list findings` 看 open 的问题：照它改提案、规格增量（xspec）或设计，再
 `xledger set findings <编号> resolved "<怎么解决的>"`；不同意的标 rejected 并写理由。
+改了规格增量就同步改 `proposal.md` 的「改什么」：批准的人主要看提案，提案与增量对不上就是没解决。
