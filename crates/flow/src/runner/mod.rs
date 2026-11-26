@@ -390,7 +390,12 @@ impl Runner {
                         Some(d) if rec.def.bundle.is_some() => Some(commands::data_lock(std::path::Path::new(d)).lock_owned().await),
                         _ => None,
                     };
-                    project::project_run(&self.engine, &rec);
+                    if let Some(a) = project::project_run(&self.engine, &rec) {
+                        // Not applied: no one is told of it, and applying would judge the run again.
+                        if let Err(e) = self.engine.note_archive(run, a).await {
+                            tracing::warn!(run, error = %e, "the archive was made but the ledger not told");
+                        }
+                    }
                 }
             }
         }

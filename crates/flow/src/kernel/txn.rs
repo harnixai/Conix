@@ -374,6 +374,7 @@ pub(crate) fn new_record(
         worktree: None,
         base_commit: None,
         governed: false,
+        archive: None,
         pace: Default::default(),
         routed: None,
         switched: vec![],

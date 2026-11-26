@@ -826,6 +826,18 @@ impl Engine {
         })
     }
 
+    /// Record where the run was archived and the digest of its `record.json` (`RunRecord::archive`).
+    /// Not an event: nothing a hook or a person is told.
+    pub async fn note_archive(&self, run: &str, archive: super::run::ArchiveRef) -> Result<Outcome> {
+        transact!(self, Actor::flow("archive"), |t| {
+            t.load(run).await?;
+            let mut m = t.m(run);
+            m.log("archived", None, None, json!({"dir": archive.dir, "record_sha256": archive.record_sha256}));
+            m.rec.archive = Some(archive.clone());
+            Ok(json!({"run": run}))
+        })
+    }
+
     /// Judge again every open station whose tasks are settled (tool gates are called again).
     pub async fn evaluate(&self, run: &str) -> Result<Outcome> {
         transact!(self, Actor::flow("evaluate"), |t| {

@@ -431,6 +431,10 @@ Conix 在 Harnix 0.4.7 分叉了这个库，先把站的治理（门禁、确认
 
 - **试运行用会话所在的流程包**：`Sandbox::start_in(input, by, packs)`；`flow_dry_run` 用会话读的那份（项目的流程、件），
   不再只看应用自己的包——项目里的流程以前试运行时找不到。
+- **事后可核对的归档**（Conix）：`record.json` 带 `format` 与 `files: [{path, sha256, size}]`（归档里其余每个文件），
+  账本记下归档——**`RunRecord::archive`**（`ArchiveRef`：`dir`、`record_sha256`），由运行器经 **`Engine::note_archive`**
+  （历史操作 `archived`，不发事件）写入。`archive` 模块读回来核对：`verify(dir, ledger) -> ArchiveReport`、
+  `ledger_record(engine, dir)`、`list_files`、`hash_file`。没有 `archive` 的旧记录照常读。
 
 ### `FLOW_API_VERSION = 1`
 
