@@ -1,0 +1,9 @@
+name: blackbox
+title: 黑盒测试跑实现都过了
+description: >-
+  双路开发合起来时：两路都合进来了，跑项目 .conix/governance/xforge.yaml 的 verify 菜单里名叫 blackbox 的一项
+  （人声明的：测试子运行写的黑盒测试在哪、怎么跑），退出码 0 才过。流程库按 argv 直接起进程，不经 shell。
+  菜单里没有 blackbox（或它带参数）是 error：没有可跑的测试，双路开发就没有可判的。
+kind: command
+plan: blackbox
+timeout_seconds: 900

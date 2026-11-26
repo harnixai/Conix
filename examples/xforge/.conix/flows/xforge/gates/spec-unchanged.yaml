@@ -1,0 +1,10 @@
+name: spec-unchanged
+title: 子运行没改规格侧
+description: >-
+  双路开发的子运行：手里那一份规格侧（分叉时父运行目录在子运行 worktree 里的一份，children/ 与 _run/ 除外）的每个文件，
+  与父运行分叉前封存的摘要（子运行的输入 spec_side，xspec seal 算的）一样，没有改、没有删。不是 xforge/dual 的子运行就判不了（error）。
+kind: script
+script: spec-unchanged
+params:
+  dir: "${parent.output_dir}"
+  sealed: "${inputs.spec_side}"

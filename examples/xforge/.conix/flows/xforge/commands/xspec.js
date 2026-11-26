@@ -18,15 +18,18 @@
 //   xspec remove <编号>                       增量里删一条
 //   xspec revert <编号>                       把一个编号从增量里拿掉
 //   xspec archive                             把增量并进规格（归档站用；有冲突或对不上基线就不并）
+//   xspec seal                                封存规格侧：这次运行目录里每个文件的摘要（双路开发 dual 的 seal 站用，
+//                                             交给两个子运行，门禁 spec-unchanged 拿它核对子运行没改规格侧）
 //
 // 项目的 .conix/governance/xforge.yaml 里 governance.spec 为 false 时没有规格基线：只有读的子命令能用。
 import { need, parseFlags } from "../lib/cli.js";
 import { governance } from "../lib/governance.js";
 import { readSpecs, scenarioProblems, unescapeBody, SCENARIO_SHAPE } from "../lib/specs.js";
 import { checkDelta, inflight, highestTaken } from "../lib/delta.js";
+import { sealSide } from "../lib/side.js";
 
 const WRITES = ["init", "add", "modify", "remove", "revert", "archive"];
-const NEEDS_RUN = ["add", "modify", "remove", "revert", "delta", "check", "archive"];
+const NEEDS_RUN = ["add", "modify", "remove", "revert", "delta", "check", "archive", "seal"];
 
 export default function (input, flow) {
   const [sub, ...rest] = input.args;
@@ -137,8 +140,13 @@ export default function (input, flow) {
       for (const f of touched) flow.write.text(f.path, f.text.replace(/\n{3,}/g, "\n\n"));
       return `并进了 ${[...touched].map((f) => f.path).join("、") || "（没有要并的）"}`;
     }
+    case "seal": {
+      const files = sealSide(flow, input.output_dir);
+      need(Object.keys(files).length, `${input.output_dir} 里没有文件：规格侧还没写`);
+      return { files, count: Object.keys(files).length };
+    }
     default:
-      throw new Error(`xspec 没有子命令 ${sub || "（空）"}：list|get|delta|check|pending|init|add|modify|remove|revert|archive（xspec help 看用法）`);
+      throw new Error(`xspec 没有子命令 ${sub || "（空）"}：list|get|delta|check|pending|init|add|modify|remove|revert|archive|seal（xspec help 看用法）`);
   }
 }
 
@@ -152,3 +160,4 @@ function replaceReq(text, id, by) {
   const re = new RegExp(`^###\\s+${id}\\s.*$[\\s\\S]*?(?=^###\\s|(?![\\s\\S]))`, "m");
   return text.replace(re, by);
 }
+

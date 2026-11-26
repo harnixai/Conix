@@ -10,7 +10,7 @@ start:
   triage: triage
 pace: auto
 commands:
-  xspec: {read_only: [list, get, delta, check, pending, help]}
+  xspec: {read_only: [list, get, delta, check, pending, seal, help]}
   xarch: {read_only: [modules, list, get, delta, check, pending, help]}
   xledger: {read_only: [list, help]}
   xpkg: {read_only: [list, verify-menu, help]}
