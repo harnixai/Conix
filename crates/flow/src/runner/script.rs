@@ -118,6 +118,8 @@ const PRELUDE: &str = r#"(() => {
   return Object.freeze({
     git,
     runs,
+    // A getter: a settings file that does not read fails the script that asks, not one that does not.
+    get settings() { return JSON.parse(n.settings()); },
     yaml,
     path: pathApi,
     sha256: sha,
@@ -489,6 +491,12 @@ fn install_with<'js>(ctx: &Ctx<'js>, reader: Arc<Reader>, trace: Arc<Mutex<Trace
             let o: Value = serde_json::from_str(&opts).unwrap_or(Value::Null);
             let active = o.get("active").and_then(Value::as_bool).unwrap_or(false);
             Value::Array(env.runs_list(o.get("bundle").and_then(Value::as_str), active)).to_string()
+        })?)?;
+    }
+    {
+        let settings = env.settings.clone();
+        n.set("settings", Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<String> {
+            settings.as_ref().map(|v| v.to_string()).map_err(|e| rquickjs::Exception::throw_message(&ctx, &format!("flow.settings: {e}")))
         })?)?;
     }
     {

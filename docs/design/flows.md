@@ -293,12 +293,21 @@ exit:
   distinct: true         # 一人一票（缺省）
   reject: any            # any（缺省：一人驳回就不过）| majority
   not: [author]          # 可选：作者不能投
+  separate: true         # 可选：true 就是 not: [author]
   binds: [deliverables]  # 批的是什么：deliverables（缺省）| 路径 glob 列表
 ```
 
 - 每个 `/confirm` 记一票（`ConfirmRec` 加上票序），够 `min` 才过；`distinct` 下同一个人投两次只算一票。
 - **职责分离不强制**：缺省作者也能投。要分开就写 `not: [author]`；作者指这次运行里交付过的会话、子 Agent 的发起人。为什么不缺省强制：
   一个人用 Conix 时作者与批准人就是同一人，强制了流程就走不通。
+- **`separate`** 是 `not: [author]` 的开关写法：治理文件里放一个 `true` / `false` 就能管，不用让人往文件里写列表。
+- **从包的设置取值**：`min`、`reject`、`separate` 和 `not` 的项可以写成 `${settings.<路径>}`（§7.1），按运行启动时钉住的设置取。
+  设置里没有这个路径、或值的类型不对（`separate: "yes"`、`min: 0`），**启动就拒**，写明哪一站哪个字段；不回落到缺省：
+  治理文件写错了却悄悄按"作者也能批"跑，比起不来更糟。别处的字段这次不开 `${settings.*}`。
+
+```yaml
+- {kind: confirm, who: reviewer, separate: "${settings.review.separate}"}
+```
 - **`reject: any`** 缺省：一人驳回，这条出口就不过；`majority` 是驳回票过半才不过。
 - **绑定**：通过时记下 `binds` 每个文件的摘要，`deliverables` 是本站及之前各站声明的制品。之后每一站出站、运行结束前，引擎自动核对一遍
   （隐含的出口，同 `sealed` 的做法）；被改过就**不过**，findings 写"检查站批过的 design.md 改了"，出路是打回那一站重批。
@@ -417,6 +426,9 @@ commands:
   xspec:   {read_only: [list, get, delta, check, pending, help]}
   xledger: {read_only: [list, help]}
   xpkg:    {read_only: [list, help]}
+settings:                              # 项目的治理文件，启动时读、钉进运行
+  file: .conix/governance/xforge.yaml
+  defaults: {governance: {spec: true, interface: false}, review: {separate: false}}
 ```
 
 | 字段 | 意思 |
@@ -426,6 +438,7 @@ commands:
 | `start.triage` | 分诊 skill（§7.2） |
 | `pace` | `auto`（缺省）或 `step`（§7.4） |
 | `commands` | 包的命令（§7.6）。写成列表（`[xspec, xledger]`）时每个命令的全部子命令都算会写；写成映射时 `read_only` 列出只读的子命令 |
+| `settings` | 项目里的设置文件（`file`，相对项目根、不出项目）与缺省（`defaults`，映射）。见下 |
 
 - **`read_only`** 按命令名后的第一个词匹配，照 Agix `[[command]]` 的约定。声明它是为了让运行之外也能放心地查
   （`/flow:xforge:xspec list`）：会写的命令运行之外只有人能调（§7.6）。
@@ -434,6 +447,13 @@ commands:
   只能靠不重名。
 - 包目录：`flows/*.yaml`（或平铺的 `<流程>.yaml`）、`skills/`、`gates/`、`scripts/`、`commands/`、`lib/`、`templates/`、`policies/`。
 - 不在包里的流程，包名就是流程名；选路、换路、步进照样能用。
+- **`settings`：按运行钉住。** 运行启动时读项目根下的 `file`（YAML），深合并到 `defaults` 之上（映射逐键合并，别的值整个替换），
+  结果钉进运行（`Pinned::settings`，与脚本、库一起）。之后改这个文件**不影响已经在跑的运行**，只影响之后启动的：设置是规则
+  （谁能批、欠哪几条基线），规则半路变了，已经做完的站就是按别的规则做的、却按新规则判，证据对不上。要新规则就取消重开。
+  - 没有文件就是缺省；没有项目的运行也是缺省。文件不是 YAML、或顶层不是映射，**拒绝启动**并写明文件：读不成的规则不能拿缺省顶。
+  - 读的是项目根的文件，worktree 运行也是：规则是项目此刻说的，不是 worktree 检出那一刻提交里的。
+  - 同一个包的子运行沿用父运行钉住的设置；换路（§7.3）保留运行原来的。
+  - 用在确认出口的 `${settings.<路径>}`（§4.1）与包 JS 的 `flow.settings`（§7.7）。
 
 ### 7.2 启动与选路
 
@@ -506,6 +526,7 @@ commands:
 | 算 | `validate(value, schema)`、`yaml` / `json` 编解码、`sha256`、`path.*` | 全部 |
 | git | `git.base()`（运行的基线提交）、`git.changed({since?})`（基线以来的改动加没提交的，排除制品目录与 `.conix/`）、`git.head()` | 全部，只读 |
 | 运行 | `runs.list({bundle?, active?})`、`runs.get(id)`：状态、输入、输出、运行目录 | 全部，只读 |
+| 设置 | `settings`：包的设置（§7.1）。运行里是启动时钉住的；运行之外的命令、门禁试跑是文件此刻合并缺省的结果；包没声明是 `{}`；文件读不成时读它就抛错 | 全部，只读 |
 | 日志 | `log` | 全部 |
 
 读写都限在工作目录与各件允许的范围里，出界报错。git 由 Rust 跑，不给 JS 起进程：JS 里有了进程就绕过了"只读、确定"。

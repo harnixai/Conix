@@ -24,8 +24,13 @@ fn example() -> PathBuf {
 
 /// The packs as Conix offers the bundle: a built-in directory of bundles.
 fn packs() -> DirPacks {
+    packs_in(&example().join(".conix/flows"))
+}
+
+/// The same over another directory of bundles.
+fn packs_in(dir: &Path) -> DirPacks {
     let catalog = MemPacks::new().scene("code").main_scene("code").submit_scene("code").command_gates().catalog();
-    DirPacks::new([example().join(".conix/flows")]).with_catalog(catalog)
+    DirPacks::new([dir]).with_catalog(catalog)
 }
 
 fn sh(dir: &Path, cmd: &str) -> String {
@@ -129,7 +134,11 @@ fn a_start_of_the_bundle_goes_by_risk_and_to_triage_without_it() {
 }
 
 fn sandbox() -> Sandbox {
-    Sandbox::new(Arc::new(packs()), SandboxConfig { guarded: vec![], submit_scenes: vec!["code".into()], main_scene: Some("code".into()) })
+    sandbox_over(packs())
+}
+
+fn sandbox_over(packs: DirPacks) -> Sandbox {
+    Sandbox::new(Arc::new(packs), SandboxConfig { guarded: vec![], submit_scenes: vec!["code".into()], main_scene: Some("code".into()) })
 }
 
 fn person() -> Actor {
@@ -183,6 +192,9 @@ async fn each_path_dry_runs_through_the_people_it_waits_for_to_its_end() {
     let mut m = ends();
     m["propose"] = json!({"summary": "s", "packages": packages()});
     let rec = dry_through("xforge/quick", "low", json!({"stations": m}), &["verify"]).await;
+    // A dry run reads no project: the bundle's defaults, under which whoever started it confirmed.
+    let settings = rec.parts.settings.as_ref().unwrap();
+    assert_eq!((&settings["governance"], &settings["review"]), (&json!({"spec": true, "interface": false}), &json!({"separate": false})));
     let apply = &rec.stations["apply"];
     assert_eq!(apply.tasks.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(), ["core", "tests"], "a task per package");
 
@@ -195,6 +207,48 @@ async fn each_path_dry_runs_through_the_people_it_waits_for_to_its_end() {
 
     m["clarify"] = json!({"summary": "s", "questions": 1});
     dry_through("xforge/major", "high", json!({"stations": m}), &["clarify", "check", "verify"]).await;
+}
+
+#[tokio::test]
+async fn with_review_separate_on_whoever_authored_the_run_does_not_confirm_it() {
+    // Every confirmation of the three paths reads the switch.
+    let p = packs();
+    for f in PATHS {
+        for s in &p.flow(f).unwrap().0.stations {
+            for e in &s.exit {
+                if let ExitCond::Confirm { separate, .. } = e {
+                    assert_eq!(separate, &Some(OrSetting::Setting("${settings.review.separate}".into())), "{f} {}", s.id);
+                }
+            }
+        }
+    }
+    // A dry run pins the bundle's defaults: a copy whose defaults turn it on stands for a project
+    // whose governance file does.
+    let d = tempfile::tempdir().unwrap();
+    sh(d.path(), &format!("cp -R {}/. .", example().join(".conix/flows").display()));
+    let meta = d.path().join("xforge/bundle.yaml");
+    let text = std::fs::read_to_string(&meta).unwrap();
+    assert!(text.contains("review: {separate: false}"), "{text}");
+    std::fs::write(&meta, text.replace("review: {separate: false}", "review: {separate: true}")).unwrap();
+    let sb = sandbox_over(packs_in(d.path()));
+    let mut m = ends();
+    m["propose"] = json!({"summary": "s", "packages": packages()});
+    let start = StartIn {
+        flow: Some("xforge/quick".into()),
+        inputs: json!({"title": "truncate", "risk": "low"}),
+        mocks: serde_json::from_value(json!({"stations": m})).unwrap(),
+        ..Default::default()
+    };
+    let run = sb.start(start, person()).await.unwrap();
+    sb.run(&run).await.unwrap();
+    let eng = sb.engine_for(&run).await.unwrap();
+    assert_eq!(eng.record(&run).await.unwrap().stations["verify"].status, StationStatus::Working);
+    let e = eng.confirm(&run, "verify", true, None, person()).await.unwrap_err();
+    assert!(matches!(&e, FlowError::Denied(why) if why.contains("started the run")), "{e:?}");
+    let o = eng.confirm(&run, "verify", true, None, Actor::new("person", "rev")).await.unwrap();
+    sb.absorb(&run, o).await.unwrap();
+    sb.run(&run).await.unwrap();
+    assert_eq!(eng.record(&run).await.unwrap().status, RunStatus::Finished);
 }
 
 #[derive(Default)]

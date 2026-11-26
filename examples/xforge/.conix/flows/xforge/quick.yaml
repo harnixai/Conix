@@ -86,7 +86,7 @@ stations:
       - {kind: output}
       - {kind: gate, gate: verification}
       - {kind: gate, gate: unit-tests}
-      - {kind: confirm, who: owner, label: 验收}
+      - {kind: confirm, who: owner, label: 验收, separate: "${settings.review.separate}"}
     rework_to: [apply, propose]
 
   - id: archive

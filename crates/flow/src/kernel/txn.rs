@@ -247,15 +247,24 @@ impl<'e> Txn<'e> {
                             .join("; ")
                     ))
                 } else {
-                    match apply_inputs(&def, &inputs) {
+                    // A child of its parent's bundle goes by the settings its parent started under: one
+                    // piece of work, one set of rules, whatever the file says by the time it starts.
+                    let up = self.get(&parent.run);
+                    let given = if up.def.bundle == def.bundle { up.parts.settings.clone() } else { None };
+                    let settings = super::engine::pinned_settings(&def, packs.as_ref(), given).map_err(|e| match e {
+                        super::FlowError::Invalid(m) => m,
+                        e => e.to_string(),
+                    });
+                    match apply_inputs(&def, &inputs).and_then(|i| settings.map(|s| (i, s))) {
                         Err(e) => Err(e),
-                        Ok(inputs) => {
+                        Ok((inputs, settings)) => {
                             let id = match &own {
                                 Some(o) => o.id.clone(),
                                 None => self.eng.store.alloc_id(&super::engine::id_base(&flow)).await?,
                             };
                             let title = format!("{} / {}", parent.run, parent.task);
-                            let parts = super::parts::pin(&def, packs.as_ref());
+                            let mut parts = super::parts::pin(&def, packs.as_ref());
+                            parts.settings = settings;
                             let mut child = new_record(
                                 id,
                                 def,
@@ -1120,7 +1129,7 @@ impl<'a> M<'a> {
                 C::Confirm { via, mcp, timeout, .. } => {
                     use super::confirm::Decision;
                     let before = r.checks.iter().find(|k| k.cond == Some(i) && k.round == round);
-                    let rule = super::confirm::Rule::of(c).expect("a confirm exit");
+                    let rule = super::confirm::Rule::of(c, self.rec.parts.settings.as_ref()).expect("a confirm exit");
                     let tally = super::confirm::tally(&rule, &r.confirms, round, i);
                     match tally.decision {
                         Decision::Approved(_, vote) => {

@@ -554,6 +554,15 @@ is so as not to collide with Harnix's own next one; what changes for a host is l
   (`confirm-binds@<exit>`, `confirm-stale@`) and come back through `gate_result`; a host that runs gates itself hands those
   to the runner or answers them as it would any gate. `RunView::votes` (`Votes{cond, approvals, rejections, min}`) says
   where each `confirm` exit stands.
+- **A bundle's settings, pinned per run** (`bundle.yaml`'s `settings: {file, defaults}`, `bundle::SettingsDecl`,
+  `BundleMeta::settings`, `bundle::read_settings`, `bundle::default_settings`, `bundle::merge`): the runner's `start_run` reads the
+  project's file (relative to its root), merges it over the defaults (mappings key by key) and hands it over in
+  **`Prepared::settings`**; the kernel pins it in **`Pinned::settings`** (the defaults when none is given; a child run of the
+  same bundle takes its parent's, a switch keeps the run's). A file that does not read refuses the start. `ExitCond::Confirm`'s
+  `min` and `reject` are now **`OrSetting<T>`** (`Value(T)` or `Setting("${settings.<path>}")`), `not` items may be such a
+  reference, and the new `separate: OrSetting<bool>` is `not: [author]` when true; what they refer to is checked against the
+  pinned settings when the run starts (`invalid` otherwise). A host that builds `ExitCond::Confirm` by hand wraps `min` and
+  `reject` in `OrSetting::Value`.
 
 - **Starting by a bundle, triage, switching** (module `kernel::route`): `bundle.yaml` gains `flows` (their order),
   `start: {route, triage}` (`bundle::StartDef`) and `pace`; what they name is checked with every flow of the bundle. A start
@@ -666,4 +675,7 @@ gone, and a store directory without `FORMAT` is refused — clear it, or migrate
   `flow.git.changed({since?})` (committed since, staged, unstaged and untracked; sorted; without the artifacts
   directory and the data directory); `flow.runs.list({bundle?, active?})` and `flow.runs.get(id)` (a snapshot of the
   project's runs: `{id, flow, bundle, subject, status, inputs, output_dir, data_dir, stations: {id: status}}`).
-- `Prepared` gained `base_commit` (build it with `..Default::default()`).
+- `flow.settings`: the bundle's settings the run pinned (`Pinned::settings`; `{}` for a bundle that declares none); for a
+  command outside a run, and in a gate trial, the project's (or the tried directory's) file now over the defaults. A file
+  that does not read throws when `flow.settings` is read.
+- `Prepared` gained `base_commit` and `settings` (build it with `..Default::default()`).

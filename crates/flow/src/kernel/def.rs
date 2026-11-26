@@ -599,16 +599,20 @@ pub enum ExitCond {
         timeout: Option<String>,
         /// Approvals needed to pass (1 when absent); each decision is one vote of the round.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        min: Option<u32>,
+        min: Option<OrSetting<u32>>,
         /// One vote per actor, a later vote replacing an earlier one (true when absent).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         distinct: Option<bool>,
         /// When rejections make the exit not met (`any` when absent).
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        reject: Option<RejectRule>,
+        reject: Option<OrSetting<RejectRule>>,
         /// Who may not vote: `author`, the actors that delivered in this run and whoever started it.
+        /// An item may be `${settings.<path>}`, standing for a word or a list of words.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         not: Vec<String>,
+        /// `true` is `not: [author]` (in Conix): an on/off a governance file can hold as it is.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        separate: Option<OrSetting<bool>>,
         /// What an approval is of: files whose digests are recorded when the exit passes, checked
         /// again before every later station passes (`deliverables` when absent).
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -667,6 +671,24 @@ pub struct FlowResult {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ts", ts(type = "unknown"))]
     pub schema: Option<Value>,
+}
+
+/// A field written as its value or as `${settings.<path>}` (in Conix; docs/design/flows.md §4.1):
+/// read from the settings the run pinned when it started, so a governance file decides it and an
+/// edit to that file mid-run does not. Only `confirm`'s counting fields take one.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(untagged)]
+pub enum OrSetting<T> {
+    Value(T),
+    Setting(String),
+}
+
+/// The settings path a string refers to when it is exactly one `${settings.<path>}`.
+pub fn settings_ref(s: &str) -> Option<&str> {
+    let inner = s.trim().strip_prefix("${")?.strip_suffix('}')?.trim();
+    let path = inner.strip_prefix("settings.")?.trim();
+    (!path.is_empty() && !path.contains(['$', '{', '}'])).then_some(path)
 }
 
 /// When rejections make a `confirm` exit not met: one is enough (`any`), or as many as the

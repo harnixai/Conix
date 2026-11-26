@@ -23,6 +23,7 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::kernel::def::{Executor, ExitCond, FlowDef, Pace};
 use crate::kernel::parts::PartKind;
@@ -65,6 +66,9 @@ pub struct BundleMeta {
     /// How its runs go from station to station when a flow says nothing ([`Pace`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pace: Option<Pace>,
+    /// The project's file of settings for its runs, over defaults ([`SettingsDecl`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub settings: Option<SettingsDecl>,
     /// What running it needs of the host (checked when a package is imported).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub requires: Option<BundleRequires>,
@@ -256,8 +260,8 @@ impl BundleMeta {
         }
     }
 
-    /// What is wrong with its `flows`, `start` and `pace`, given the stems of the flows it has
-    /// and whether it has a skill of a name.
+    /// What is wrong with its `flows`, `start`, `pace` and `settings`, given the stems of the flows
+    /// it has and whether it has a skill of a name.
     pub fn start_problems(&self, stems: &BTreeSet<String>, has_skill: &dyn Fn(&str) -> bool) -> Vec<String> {
         let mut out = vec![];
         let mut seen = BTreeSet::new();
@@ -280,7 +284,122 @@ impl BundleMeta {
                 out.push(format!("{BUNDLE_FILE}: start.triage names the skill {t}, which the bundle does not have (skills/{t}/SKILL.md)"));
             }
         }
+        if let Some(s) = &self.settings {
+            out.extend(s.problems().into_iter().map(|m| format!("{BUNDLE_FILE}: settings: {m}")));
+        }
         out
+    }
+}
+
+/// A bundle's `settings` (in Conix; docs/design/flows.md §7.1): a file of the project, read when a
+/// run starts and merged over `defaults`; the result is pinned with the run. A confirm exit refers
+/// to it as `${settings.<path>}`, its JS reads it as `flow.settings`.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SettingsDecl {
+    /// Relative to the project's root, inside it (`.conix/governance/xforge.yaml`).
+    pub file: String,
+    /// A mapping: what holds where the file says nothing, or where there is no file.
+    #[serde(default, skip_serializing_if = "Value::is_null")]
+    pub defaults: Value,
+}
+
+impl SettingsDecl {
+    pub fn problems(&self) -> Vec<String> {
+        let mut out = vec![];
+        if let Some(m) = settings_path_problem(&self.file) {
+            out.push(format!("file {:?}: {m}", self.file));
+        }
+        if !(self.defaults.is_null() || self.defaults.is_object()) {
+            out.push("defaults is a mapping".into());
+        }
+        out
+    }
+
+    /// The defaults, a mapping however written.
+    pub fn defaults(&self) -> Value {
+        if self.defaults.is_object() {
+            self.defaults.clone()
+        } else {
+            Value::Object(Default::default())
+        }
+    }
+
+    /// The settings a file's text makes: merged over the defaults (`None`: no file). A text that is
+    /// not YAML, or not a mapping, is refused rather than taken as the defaults: the file is the
+    /// project's rules, and rules that did not read are not the defaults' to replace.
+    pub fn with_file(&self, text: Option<&str>) -> Result<Value, String> {
+        let mut out = self.defaults();
+        let Some(text) = text else { return Ok(out) };
+        let v: Value = serde_yaml::from_str(text).map_err(|e| format!("{}: {e}", self.file))?;
+        match v {
+            Value::Null => {}
+            Value::Object(_) => merge(&mut out, v),
+            _ => return Err(format!("{}: settings are a mapping", self.file)),
+        }
+        Ok(out)
+    }
+
+    /// The settings of the project at `root` now (`None`: a run of no project, which has the
+    /// defaults). A file that is not there is no error; one that cannot be read is.
+    pub fn read(&self, root: Option<&Path>) -> Result<Value, String> {
+        let Some(root) = root else { return self.with_file(None) };
+        if let Some(m) = settings_path_problem(&self.file) {
+            return Err(format!("{}: {m}", self.file));
+        }
+        match std::fs::read_to_string(root.join(&self.file)) {
+            Ok(t) => self.with_file(Some(&t)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => self.with_file(None),
+            Err(e) => Err(format!("{}: {e}", self.file)),
+        }
+    }
+}
+
+/// What is wrong with a settings file's path: it is the project's, so relative and inside it.
+fn settings_path_problem(p: &str) -> Option<&'static str> {
+    use std::path::Component;
+    if p.trim().is_empty() {
+        return Some("a path relative to the project");
+    }
+    let path = Path::new(p);
+    if path.is_absolute() || p.starts_with('\\') {
+        return Some("an absolute path; the file is the project's, relative to its root");
+    }
+    if path.components().any(|c| !matches!(c, Component::Normal(_) | Component::CurDir)) {
+        return Some("a path stays inside the project (no `..`)");
+    }
+    None
+}
+
+/// `over` merged into `base`: mappings key by key, any other value replacing what was there.
+pub fn merge(base: &mut Value, over: Value) {
+    match (base, over) {
+        (Value::Object(b), Value::Object(o)) => {
+            for (k, v) in o {
+                match b.get_mut(&k) {
+                    Some(old) => merge(old, v),
+                    None => {
+                        b.insert(k, v);
+                    }
+                }
+            }
+        }
+        (b, o) => *b = o,
+    }
+}
+
+/// A bundle's settings as a run of no project's, or one the host gave no file for, has them:
+/// `None` when the bundle declares none.
+pub fn default_settings(packs: &dyn crate::Packs, bundle: &str) -> Option<Value> {
+    meta_of(packs, bundle)?.settings.map(|s| s.defaults())
+}
+
+/// A bundle's settings in the project at `root` now: what a start pins, and what `flow.settings`
+/// is outside a run. `Ok(None)` when the bundle declares none.
+pub fn read_settings(packs: &dyn crate::Packs, bundle: &str, root: Option<&Path>) -> Result<Option<Value>, String> {
+    match meta_of(packs, bundle).and_then(|m| m.settings) {
+        None => Ok(None),
+        Some(s) => s.read(root).map(Some).map_err(|e| format!("the settings of bundle {bundle}: {e}")),
     }
 }
 

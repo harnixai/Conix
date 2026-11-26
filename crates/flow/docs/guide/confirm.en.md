@@ -40,6 +40,10 @@ tool call does them.
 - Each decision is one vote of the round; the exit passes once `min` approvals are in ("1 of 2 approvals" shows
   meanwhile). An outside approval (`via: mcp`) counts as one vote. A rework to the station starts the count again.
 - Authors may confirm their own work unless the exit says `not: [author]`; then their vote is refused, saying why.
+  `separate: true` says the same as an on/off.
+- **From the project's settings**: in a bundle whose `bundle.yaml` declares `settings`, `min`, `reject`, `separate` and
+  an item of `not` may be `"${settings.<path>}"` (`separate: "${settings.review.separate}"`). They are read from the
+  settings the run pinned when it started; a path the settings lack, or a value of the wrong kind, refuses the start.
 - **What was approved stays approved.** When the exit passes, the files it binds are recorded with their digests:
   `deliverables` are those of this station and of the stations before it (in the run's directory); paths and globs may
   start at `${output_dir}`, `${data_dir}` or `${workspace}` and stay in the workspace; `binds: []` binds nothing.
