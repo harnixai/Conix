@@ -724,6 +724,9 @@ pub enum WorkItem {
         /// tasks).
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         permissions: Vec<Granted>,
+        /// The station's write allow-list, resolved for this task.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        writes: Option<super::parts::WriteScope>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         item: Option<Value>,
         /// The station's output contract (for the session's `output_schema`).

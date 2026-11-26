@@ -303,21 +303,20 @@ pub(crate) fn answers(j: &Judging, asked: &[String], tool: &str) -> bool {
 
 /// What becomes of a question about a call of a task's turn: its permissions judge it.
 fn verdict(rn: &Runner, b: &Binding, q: &Question<'_>, input: Option<&Value>, j: &Judging) -> Verdict {
-    judge_under(
-        j.guard,
-        &b.permissions,
-        &rn.cfg.guarded,
-        &Call {
-            tool: q.tool,
-            input,
-            paths: q.paths,
-            workspace: j.workspace.as_deref(),
-            root: j.root.as_deref(),
-            reserved: &j.reserved,
-            agent_dirs: &j.agent_dirs,
-        },
-        &b.station,
-    )
+    let call = Call {
+        tool: q.tool,
+        input,
+        paths: q.paths,
+        workspace: j.workspace.as_deref(),
+        root: j.root.as_deref(),
+        reserved: &j.reserved,
+        agent_dirs: &j.agent_dirs,
+    };
+    let v = judge_under(j.guard, &b.permissions, &rn.cfg.guarded, &call, &b.station);
+    match &b.writes {
+        Some(w) => crate::kernel::parts::narrow_writes(w, v, &call, &b.station),
+        None => v,
+    }
 }
 
 /// The answer to give the host for a verdict; `None` for `ask` (a person answers).

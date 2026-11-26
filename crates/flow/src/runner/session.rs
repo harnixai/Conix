@@ -117,6 +117,7 @@ pub(crate) struct SessionJob {
     pub(crate) rules: Vec<(String, Option<String>)>,
     /// What it works under.
     pub(crate) permissions: Vec<crate::kernel::parts::Granted>,
+    pub(crate) writes: Option<crate::kernel::parts::WriteScope>,
     pub(crate) protocol: String,
     pub(crate) session_key: Option<String>,
     pub(crate) recording: Option<String>,
@@ -344,6 +345,7 @@ async fn with_session(rn: &Arc<Runner>, job: &SessionJob) {
             task: key.task.clone(),
             token: job.token.clone(),
             permissions: job.permissions.clone(),
+            writes: job.writes.clone(),
         },
     );
     let turns = Turns {
@@ -419,6 +421,7 @@ mod tests {
             skill_digest: None,
             rules: vec![],
             permissions: vec![],
+            writes: None,
             protocol: String::new(),
             session_key: session_key.map(String::from),
             recording: None,

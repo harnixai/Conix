@@ -553,6 +553,26 @@ fn station_problems(c: &mut Ctx, s: &Station, cyclic: bool) {
                 .collect::<Vec<_>>()
         })
         .collect();
+    // writes: the allow-list of where its tasks write in the project
+    let mut refs = refs;
+    for (i, w) in s.writes.iter().enumerate() {
+        if w.trim().is_empty() {
+            c.at(id, format!("writes[{i}]: a glob is empty"));
+        } else if w.split('/').any(|seg| seg.contains("**") && seg != "**") {
+            c.at(id, format!("writes[{i}]: {w}: `**` must be a whole path segment"));
+        }
+        if w.matches('[').count() != w.matches(']').count() {
+            c.at(id, format!("writes[{i}]: {w}: unbalanced brackets"));
+        }
+        for r in refs_in(w) {
+            let root = r.split(['.', '[']).next().unwrap_or("");
+            if !ROOTS.contains(&root) {
+                c.at(id, format!("writes[{i}]: reference {r}: unknown root {root:?}"));
+            } else {
+                refs.push(r.to_string());
+            }
+        }
+    }
     ref_problems(c, s, &refs);
 
     // when

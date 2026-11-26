@@ -161,6 +161,7 @@ async fn run_work(rn: Arc<Runner>, w: WorkItem, resume: bool) {
                 skill_digest,
                 rules,
                 permissions,
+                writes,
                 item,
                 protocol,
                 session_key,
@@ -180,6 +181,12 @@ async fn run_work(rn: Arc<Runner>, w: WorkItem, resume: bool) {
             match executor {
                 Executor::Program { step } => program_task(&rn, &key, &token, &step, item.as_ref()).await,
                 Executor::Session { .. } | Executor::Agent { .. } => {
+                    // A write scope no reference could be expanded for is a failed task, not an open door.
+                    if let Some(e) = writes.as_ref().and_then(|w| w.error.clone()) {
+                        fail(&rn, &key, &token, &e).await;
+                        rn.state.end(&key, &token);
+                        return;
+                    }
                     let main = session_key.as_deref() == Some(MAIN_SESSION_KEY);
                     let scene = match (scene, executor) {
                         (Some(s), _) => s,
@@ -199,6 +206,7 @@ async fn run_work(rn: Arc<Runner>, w: WorkItem, resume: bool) {
                         skill_digest,
                         rules,
                         permissions,
+                        writes,
                         protocol: protocol.unwrap_or_default(),
                         session_key,
                         recording,
@@ -314,6 +322,7 @@ mod tests {
             skill_digest: None,
             rules: vec![],
             permissions: vec![],
+            writes: None,
             item: None,
             output_schema: None,
             protocol: None,

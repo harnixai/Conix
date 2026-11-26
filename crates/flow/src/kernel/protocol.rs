@@ -146,6 +146,8 @@ pub struct TaskContext<'a> {
     pub guarded: &'a [String],
     /// What the task works under, references resolved.
     pub permissions: &'a [Granted],
+    /// The task's write allow-list (`Station.writes`), resolved.
+    pub writes: Option<&'a super::parts::WriteScope>,
     /// The run's pinned gates, for the station's `gate` exits.
     pub gates: &'a BTreeMap<String, GateDef>,
     /// How the output is handed in.
@@ -335,6 +337,18 @@ pub fn render(t: &TaskContext) -> String {
         }
     }
     s.push_str(&permissions_text(t.permissions, t.guarded, t.guard, t.root));
+    if let Some(w) = t.writes {
+        let list = if w.globs.is_empty() {
+            "nothing in the project".to_string()
+        } else {
+            w.globs.iter().map(|g| format!("`{g}`")).collect::<Vec<_>>().join(", ")
+        };
+        s.push_str(&format!(
+            "- Write scope: inside the project this task may only write {list}, besides the run's own directory. \
+             Write, Edit and NotebookEdit anywhere else in the project are refused. Shell commands are not \
+             checked, but stay in the scope all the same.\n"
+        ));
+    }
     if let Some(dir) = t.output_dir {
         s.push_str(&format!(
             "- Deliverables — what the task produces for people to read — go in `{dir}`, the run's \
@@ -498,6 +512,7 @@ mod tests {
             item: Some(&M1),
             guarded,
             permissions: granted,
+            writes: None,
             gates,
             delivery,
             executor: None,
