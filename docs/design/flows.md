@@ -470,6 +470,37 @@ commands:
 - 插件带的流程包、受管流程不变；插件包里的流程包同样有 `/flow:<包>` 地址。
 - 每一项在 `3rds/INDEX.md` 的分叉记录里记一行；只在 Conix 里有的（地址、分诊、授权）标"in Conix"。
 
+### 7.12 导出与导入
+
+一个流程包可以导出成一个文件、装进另一个项目。包文件是 zip，`<包>-<版本>.zip`（版本取 `bundle.yaml`，没写是 `0.0.0`），
+放的就是包目录原样，外加根上一份导出时生成的 `MANIFEST.yaml`：
+
+```yaml
+format: 1
+bundle: {name, version, title, description}
+conix: {version: "0.1.10", build: "0.1.10-2026112502", exported_at: "2026-11-25T08:00:00Z"}   # 导出它的 Conix
+requires: {conix: ">=0.1.10", flow_definition_format: 1, flow_api: 1}
+files: [{path, sha256, size}, …]
+```
+
+- **不带身份**：没有用户名、主机名、路径。`requires.conix` 取 `bundle.yaml` 里可选的 `requires: {conix: ">=x.y.z"}`
+  （只认这一种写法，写别的拒绝），没写就是导出它的那个版本。
+- **不进包的**：`skills/*/local.md`（用户自己的补充）、点开头的文件、`__pycache__`、符号链接（遇到就报错）。
+  项目的、插件的、内置的包都能导出，内置的 `xforge` 也是。
+- **导入先核对再动手**：包在暂存目录（`.conix/state/conix/` 下）里解开，逐项核对后才装。拒绝：`format` 不认识；
+  文件与 MANIFEST 对不上（缺的、多的、SHA-256 或大小不符）；绝对路径、`..`、反斜杠、隐藏文件、`local.md`、符号链接；
+  超过 512 个文件、总共 10 MiB、单个 2 MiB。不兼容也拒绝：运行的 Conix 低于 `requires.conix`，或定义格式、流程库接口比这个构建新
+  （`DEFINITION_FORMAT`、`FLOW_API_VERSION`）。最后用流程库校验整个包（每个流程、每个件、`commands` 列的文件），有问题就拒绝。
+- **装**：`<项目>/.conix/flows/<包>/`。已有同名的拒绝，`--force` 才覆盖：旧的先整个移到
+  `.conix/state/conix/flow-backups/<包>-<时刻>/`，旧的 `skills/*/local.md` 带到新的里。报告包名、版本、导出它的 Conix 版本、
+  流程与命令；遮住了同名的插件或内置的包时提醒；包里有 `command` 门禁时提醒它们只在受信任的项目里跑。
+- **`export`、`import` 是包的保留名**（`bundle::RESERVED_BUNDLES`）：`/flow:export`、`/flow:import` 因此不会与哪个包的地址混，
+  地址路由在查包之前先接下它们。
+- **入口只给人，不给模型**：命令行 `conix flow export <包> [-o 文件] [--project 目录]`、`conix flow import <文件> [--force]
+  [--project 目录]`、`conix flow inspect <文件>`（打印 MANIFEST 与核对结果）不需要实例，项目的与内置的包直接读（插件的要在实例里导）；
+  输入框里 `/flow:export <包> [文件]`、`/flow:import <文件> [--force]` 发 `ExportFlow` / `ImportFlow` 给实例（文件相对项目根，
+  导出不写文件就放项目根），导入后实例重列流程，流程标签随之更新。打包与核对在 `crates/host/src/flows/package.rs`，命令行与实例共用。
+
 ## 8. 落点
 
 | 内容 | 位置 |
@@ -496,6 +527,7 @@ commands:
 | `flow.git`、基线、`writes` 执法 | `runner/git.rs`、`runner/script.rs`、`kernel/run.rs`（`base_commit`）、`crates/host/src/flows/policy.rs`（写入执法） |
 | 工作项（`foreach` 脚本、`after`、`task_exit`） | `kernel/work.rs`、`kernel/def.rs`、`kernel/txn.rs`、`runner/dispatch.rs` |
 | 流程地址与本地路由、补全 | `crates/model/src/flows.rs`、`crates/model/src/composer.rs`（interaction §4.5） |
+| 流程包的导出与导入（zip、`MANIFEST.yaml`、核对、`/flow:export`、`conix flow …`） | `crates/host/src/flows/package.rs`、`crates/conix/src/flow_cli.rs`、`crates/flow/src/bundle.rs`（`requires`、`RESERVED_BUNDLES`）、`crates/model/src/flow_addr.rs`（路由）、`port::Command::{ExportFlow, ImportFlow}` |
 | 内置的 xforge | `examples/xforge/`（项目与流程包）、`crates/host/build.rs`、`crates/host/src/flows/builtin.rs`；`crates/flow/tests/xforge.rs`、`crates/conix/tests/live_xforge.rs` |
 
 ## 9. 往回迁

@@ -87,6 +87,10 @@ release: [carol]
   流程升级时还在。要改得更多，把整个包拷进项目的 `.conix/flows/`，项目里的就整包代替内置的。
 - **包的字段**：`bundle.yaml` 写 `flows`（流程与选路的先后）、`start`（选路顺序、分诊用的 skill）、`pace`（`auto` 或 `step`）、
   `commands`（哪些子命令只读）。包里的流程名、命令名、站 id 不能重名，`help`、`status` 保留。包里的 `lib/` 放脚本与命令共用的 JS，只能 import 包内的文件。
+- **导出与导入**：`conix flow export <包> [-o 文件]` 把项目里的或内置的包打成 `<包>-<版本>.zip`，`conix flow import <文件>`
+  装进当前项目的 `.conix/flows/`（已有同名的要加 `--force`，旧的先备份，你写的 `local.md` 会带过去），`conix flow inspect <文件>`
+  只看包里的 `MANIFEST.yaml` 并核对。实例里用 `/flow:export <包> [文件]`、`/flow:import <文件> [--force]`。包里有 `command` 门禁时，
+  它们只在受信任的项目里运行。`local.md` 不进包；`export`、`import` 不能当包名。
 - **内置的 `xforge`**：规格驱动的开发流程，`xforge/solid`（提案、设计、独立检查、按工作包实施、验证、归档）与 `xforge/quick`
   （提案、实施、验证、归档）。规格在 `conix/xforge/specs/`，站里的会话用 `xspec`、`xledger`、`xpkg` 三个命令记规格增量、
   台账、工作包，归档时增量并进规格。项目要准备的：`.conix/governance/verify.sh`（实施站的出口跑它：单测、lint），
