@@ -370,8 +370,8 @@ exit: [{kind: children, require: all}]   # all（缺省）| any | 正整数：�
 ```yaml
 - id: dual
   tasks:
-    - {id: impl,  executor: {kind: subflow, flow: xforge/impl,  workspace: worktree}}
-    - {id: tests, executor: {kind: subflow, flow: xforge/tests, workspace: worktree}}
+    - {id: impl,  executor: {kind: subflow, flow: xforge/dual-impl,  workspace: worktree}}
+    - {id: tests, executor: {kind: subflow, flow: xforge/dual-tests, workspace: worktree}}
   exit: [{kind: children}]
 ```
 
@@ -397,7 +397,9 @@ exit: [{kind: children, require: all}]   # all（缺省）| any | 正整数：�
 - **失败或取消的子运行**（或者父任务已经不等它了）：它的工作提交到它的分支，分支留着，worktree 删掉，记成 `kept`；父任务照旧失败。
 - **读隔离。** 子运行的会话读不到父运行的 worktree，也读不到同一站其他子运行的 worktree：一个合回去之后父运行的 worktree 里就有它的东西了，
   另一个读了就不再独立。派工器开会话时给宿主 `OpenSpec::deny_read`（绝对路径），宿主翻成 Agix 的 `Read(...)` deny 规则，进沙箱。
-  这份名单在开会话时算：`max_parallel` 让兄弟子运行晚起的，早开的会话名单里没有它。
+  这份名单在开会话时算：`max_parallel` 让兄弟子运行晚起的，早开的会话名单里没有它。不限 `max_parallel` 也一样：同一站的子运行是一个一个分叉的，
+  子运行的主会话在它建起来时就开了，先分叉的那一个的主会话名单里没有后分叉的兄弟（还没有），而会话站与子 Agent 站都在主会话里跑。
+  要两边都隔开，得等这一轮的分叉都做完再开子运行的会话，还没做。
 - **为什么走 git，不让子运行直接读父运行的目录。** 父运行的目录一直在变，读它就看得见兄弟合回来的东西；分叉提交是定下来、不会再变的规格侧，
   两边看到的一模一样，事后也查得到它们是从哪个提交出发的。合回去也走 git，冲突是 git 判的，不是谁覆盖了谁。
 - **重启之后**：派工器从父运行的记录里把没做完的分叉（任务已认领、还没有子运行）与合回（任务在等、子运行已结束、worktree 还没处理）

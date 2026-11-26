@@ -24,7 +24,7 @@ review:
 - **基线**：关着的那条基线，它的命令仍能读，**写增量的子命令报"这个项目没开接口基线"**，它的门禁回 `pass`、`summary` 写
   "不欠（governance.interface=false）"。`lib/governance.js` 的 `governance(flow)` 从 `flow.settings` 取，所有脚本与命令都用这一个；
   运行之外调命令（`/flow:xforge:xspec list`）读的是文件此刻的内容。
-- **`review.separate`**：三条路径的每个 `confirm`（检查通过、验收、major 的范围定了）都写 `separate: "${settings.review.separate}"`。
+- **`review.separate`**：每条路径的每个 `confirm`（检查通过、验收、major 与 dual 的范围定了、dual 的规格侧定了与两路对上了）都写 `separate: "${settings.review.separate}"`。
   `true` 时这次运行里交付过、做过任务或发起运行的人不能确认（flows.md §4.1 的 `not: [author]`），要别人批；缺省 `false`，
   因为一个人用时作者就是批准人，强制了就走不通。
 
@@ -102,7 +102,7 @@ elements:
 
 | 命令 | 子命令（**粗体**只读） |
 |---|---|
-| `xspec` | **list** [能力]、**get** <编号>、**delta**、**check**、**pending**、init <能力> <前缀> "<标题>"、add <能力> "<标题>" "<正文>"、modify <编号> "<正文>" [--title T]、remove <编号>、revert <编号>、archive |
+| `xspec` | **list** [能力]、**get** <编号>、**delta**、**check**、**pending**、**seal**、init <能力> <前缀> "<标题>"、add <能力> "<标题>" "<正文>"、modify <编号> "<正文>" [--title T]、remove <编号>、revert <编号>、archive |
 | `xarch` | **modules**、**list** [模块]、**get** <编号>、**delta**、**check**、**pending**、module <模块> "<标题>" --paths a,b、add <模块> <种类> <名字> "<签名>" "<说明>" [--stable]、modify <编号> [--signature S] [--description D] [--breaking]、promote <编号>、deprecate <编号>、remove <编号>、revert <编号>、archive |
 | `xledger` | **list** [种类]、add <种类> "<内容>" --ref a,b、set <种类> <编号> <结论> ["<说明>"]、reply <原则> complies\|violates\|n-a "<说明>" |
 | `xpkg` | **list**、**verify-menu**、plan <编号> "<标题>" --paths a,b --criteria "一;二" [--after p1,p2] [--verify <名字>[:参数=值,…]]…、done <编号> "<做了什么>" --files a,b --evidence "C1=…;C2=…"、blocked <编号> "<卡在哪>" |
@@ -113,6 +113,7 @@ elements:
 - `xarch modify` 一个 `stable` 元素必须带 `--breaking`（不带就报错，告诉它要么改成兼容的、要么声明破坏）；`remove` 只能删基线里已经
   `deprecated` 的元素；新元素缺省 `experimental`，`--stable` 是补登记已经在用的接口。
 - `xledger set/reply` 按 §2.3 的规矩查 `by`，不合就报错说谁能给。
+- `xspec seal`：这次运行目录里每个文件（`children/`、`_run/` 除外）→ 字节的 sha256，作为返回值，不写文件。dual 的 `seal` 站用（§5.1）。
 - `xpkg plan --verify` 可以写几次，每次一项，当场按 §1 的菜单核对：名字在菜单里、参数一个不多一个不少、值整串匹配；
   不合就报错（说菜单里有什么、该怎么写），什么都不写。`xpkg verify-menu` 列出菜单（只读，运行之外也能调）。
 
@@ -141,10 +142,13 @@ elements:
 | `verification` | script | `verification.md` 的「覆盖」里新增、修改的每条需求（和接口增量里新增、修改的元素）一行，有结论、有带 `# <编号>` 的测试；有「连贯性」一节 |
 | `archived` | script | 规格增量并进了基线 |
 | `interfaces-archived` | script | 接口增量并进了基线 |
+| `spec-unchanged` | script（dual 的子运行） | 子运行手里那份规格侧（`${parent.output_dir}`）里封存过的每个文件与 `inputs.spec_side` 的摘要一样；不是 dual 的子运行是 `error` |
+| `blackbox` | command，`plan`（dual 的 join） | 跑 verify 菜单里名叫 `blackbox` 的一项，退出码 0 才过；菜单里没有它、或它带参数，是 `error` |
 
 ## 5. 流程
 
-`bundle.yaml`：`flows: [quick, solid, major]`，`start: {route: [quick, solid, major], triage: triage}`，`pace: auto`。
+`bundle.yaml`：`flows: [quick, solid, major, dual, dual-impl, dual-tests]`，`start: {route: [quick, solid, major], triage: triage}`，
+`pace: auto`，`requires: {conix: ">=0.1.11"}`。按风险选路只在前三条里选；双路开发 `dual` 点名起（§5.1）。
 三条流程的 `inputs` 一样：`title`（必填）、`risk`（**没有缺省**：没给就分诊）、`impact`（数组，取值 interface / security /
 data-migration / infra，缺省空）；各自的 `risk` schema 就是 eligibility：quick 只收 low，solid 收 low、medium，major 都收。
 
@@ -165,8 +169,57 @@ data-migration / infra，缺省空）；各自的 `risk` schema 就是 eligibili
 skill：`triage`（判风险与影响面、选路）、`propose`、`clarify`、`design`、`check`、`apply`、`verify`；`archive` 是命令步骤，没有 skill。
 模板：`proposal.md`、`design.md`、`verification.md` 按 §4 的小节。
 
+### 5.1 双路开发：`dual`
+
+规格侧写一次、人批准；然后两个子运行各在自己的 worktree 里、从同一个分叉提交出发（flows.md §6.5）：一个照规格设计并实现，
+一个只照规格设计一个黑盒测试项目、写测试；合起来用测试跑实现。两路互相看不到，所以测试是规格的另一份独立读法，不是照实现写的。
+代价是两份设计、两次检查。它不在 `start.route` 里：值不值由人定，分诊可以向用户建议（高风险、行为能写成 WHEN / THEN 的），
+点名起 `flow_start {flow: "xforge/dual"}`。输入与 major 一样。项目的 verify 菜单要有一项 `blackbox`（黑盒测试放哪、怎么跑，不带参数）：
+两路都照它认测试的目录——测试那一路只写那里，实现那一路不碰那里，合回去才不冲突。
+
+| 站 | 执行 | 写入范围 | 出口 |
+|---|---|---|---|
+| propose 提案 | 会话 | 运行目录 | 同 major，另加 interface-compat（没有父运行的设计站，破坏性的接口改动在这里就要有决定） |
+| clarify 澄清 | 会话 | 运行目录 | 同 major |
+| check 规格侧检查 | 子 Agent，只看不改（`spec-check`：两个互不相见的人照字面会不会做出不一样的东西） | 不能写 | output、ledgers-settled、constitution-reply、confirm reviewer「规格侧定了」，绑提案、规格增量、接口增量、`questions` 台账 |
+| seal 封存规格侧 | 命令步骤 `xspec seal` | — | output：运行目录每个文件的摘要 |
+| fork 分两路 | 两个任务：`{kind: subflow, flow: dual-impl \| dual-tests, workspace: worktree, inputs: {title, spec_side: ${stations.seal.output.files}}}` | — | `children: all` |
+| join 合起来 | 会话（`join`） | 运行目录 | output、blackbox、ledgers-settled、confirm owner「两路对上了」 |
+| verify 验证 | 会话 | 运行目录 | 同 major |
+| archive 归档 | 两个命令步骤 | — | 同 major；运行的归档另留 `children/**`、台账与增量 |
+
+两个子运行 `dual-impl`、`dual-tests` 的站一样：design（会话，写自己目录里的 `design.md` 与工作包）→ check（子 Agent，`dual-check`）→
+apply（每包一个子 Agent，任务级 package-check、package-tests；站 packages-done、unclaimed、unit-tests）。每一站都有 spec-unchanged。
+测试那一路的设计用模板 `test-design.md`：同样七节，讲的是测试放哪、每条 WHEN / THEN 怎么落成用例、只经哪些公开接口。
+子运行无人值守：检查留下没结的发现自动打回设计（`on_unmet`，最多两次），之后等人。`result` 有 schema：
+`{side, summary, packages: 设计划的包（编号、路径）, done: 每包的交付（都要 done）}`，不合，父任务失败。
+
+- **共享的是规格侧**：父运行目录在分叉时的一份，在子运行的 worktree 里，`${parent.output_dir}`（skill 里写它，开会话时换成路径）。
+  子运行自己的目录是它下面的 `children/fork/<impl|tests>/`。两路的 `xspec delta`、`xarch delta` 看的是自己的目录（空的），skill 叫它们直接读
+  规格侧的文件；基线照旧用 `xspec list/get`、`xarch list`。
+- **子运行不改规格侧**：站的 `writes` 只放自己的目录（与包的路径），会话写不到规格侧；门禁 spec-unchanged 再兜一道
+  （Bash 之类绕过写入范围的）。它不用 `flow.git.changed` 判：运行目录在制品目录里，git 不管（`xforge/runs/` 被忽略），
+  `git.changed` 也把制品目录排除在外，子运行改了规格侧 git 看不见。所以父运行分叉前封存（`seal` 站，`xspec seal`），摘要放在运行的记录里
+  （seal 站的输出、子运行的输入 `spec_side`）：放成规格侧旁边的文件，子运行改规格侧时顺手就能改掉它。只核对封存过的文件：
+  分叉之后父运行目录多出来的（join 记的台账，打回后的新一轮会带进来）不算。
+- **只做子运行**：包没有"只能由别的流程起"的写法（`flows` 列的都能点名起）。最省事又挡得住的是输入：`spec_side` 必填、没有缺省，
+  单独起时输入就不合；硬给一个，第一站的 spec-unchanged 也因为没有父运行报 `error`。
+- **读隔离**：子运行的会话读不到父运行与兄弟的 worktree（flows.md §6.5）。项目里已有的源码两路都读得到：测试那一路的 skill 要它只照
+  规格的 WHEN / THEN 与接口基线、增量里的签名写，不读被测模块的实现，测试只经公开接口、每个用例带 `# <编号>`。
+  **已知的缺口**：禁读的名单在开会话时算，两个子运行一个一个分叉，先分叉的那一路的主会话（它的各站都在里面跑）名单里没有后分叉的兄弟，
+  读得到对方的 worktree；后分叉的那一路两边都读不到（flows.md §6.5）。哪一路先分叉不固定。
+- **合起来**：两路交付了就由派工器合进这次运行的分支（冲突父任务失败，flows.md §6.5）。join 站的会话照 `blackbox` 一项跑黑盒测试，
+  每个没过的（一个根因一条）`xledger add findings`，写明建议错在实现、测试还是规格，`flow_propose` 建议打回。门禁 blackbox 与
+  ledgers-settled 不过，这一站就等人；不自动打回：错在哪一边要人定。
+- **打回**：join 的 `rework_to` 是 `[fork, propose]`。打回 `fork` 有两种粒度：整站（`/rework fork`）两路都重新分叉；只打回一个任务
+  （对话里让主 Agent `flow_rework {to: fork, tasks: [impl]}`）只重做那一路，另一路的子运行与结果留着。都是新一轮、新的分叉提交，
+  而这时父运行的分支上已经有上一轮两路合回来的东西：重做的那一路看得见另一路上一轮的工作（实现看得见测试，反之亦然），
+  两路不再互相独立——skill 要它照规格修，不照对面凑。新的子运行自己的目录是空的，上一轮为什么打回在父运行的 `ledgers/findings.yaml`。
+  错在规格侧的打回 `propose`：规格侧重写、重批、重新封存，两路都重来。
+
 ## 6. 演示项目
 
 `examples/xforge/`：Python 小库 `textkit`；`xforge/specs/textkit.md` 是规格基线，`xforge/interfaces/textkit.yaml` 是接口基线（已有的
-`slugify`、`word_count` 登记为 stable），`.conix/governance/xforge.yaml` 两条基线都开，verify 菜单有 `unit`、`test:file=…`、`compile`。`crates/flow/tests/xforge*.rs` 不调模型地
-查这个包，`crates/conix/tests/live_xforge.rs` 用真实模型走 solid。
+`slugify`、`word_count` 登记为 stable），`.conix/governance/xforge.yaml` 两条基线都开，verify 菜单有 `unit`、`test:file=…`、`compile`、
+`blackbox`（`tests_blackbox/`，已有几条照规格写的黑盒测试）。`crates/flow/tests/xforge*.rs` 不调模型地查这个包（`xforge_dual.rs`
+用真实的派工器把一次 dual 从提案走到归档，会话由测试代演），`crates/conix/tests/live_xforge.rs` 用真实模型走 solid。

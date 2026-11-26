@@ -42,12 +42,31 @@ conix            # 起实例并接入
 规格、接口、增量、台账、工作包都由包的命令写（`flow_command`）：策略 `by-commands` 不让模型直接改这些文件；各站只能写运行目录，
 实施的每个包只能写它的路径。
 
+## 双路开发
+
+`xforge/dual` 不在按风险选的路里，点名起：`/flow:xforge:dual truncate --risk high`。规格侧写一次、人批准，然后分成两个子运行，
+各在自己的 worktree 里、从同一个提交出发，互相看不到：`xforge/dual-impl` 照规格设计并实现，`xforge/dual-tests` 只照规格（WHEN / THEN、
+接口登记的签名）写黑盒测试。两路合回运行的分支后，用黑盒测试跑实现。
+
+| 站 | 做什么 | 把关 |
+|---|---|---|
+| 提案、澄清 | 同 major | 同 major；破坏兼容的接口改动在提案就要有接受了的决定 |
+| 规格侧检查 | 子 Agent 找两个人照字面会读出两种意思的地方 | 台账、原则；人确认「规格侧定了」，绑住提案与两份增量 |
+| 封存 | 命令步骤 `xspec seal`：规格侧每个文件的摘要，交给两个子运行 | — |
+| 分两路 | 两个子运行：设计 → 独立检查 → 按工作包实施，各自无人值守 | 每站核对规格侧没被改（spec-unchanged）；包的门禁同 solid |
+| 合起来 | 跑 verify 菜单的 `blackbox`，没过的记成发现、写明错在实现还是测试，建议打回哪一路 | 黑盒测试都过、台账结清；人确认 |
+| 验证、归档 | 同 major | 同 major |
+
+黑盒测试放在 `tests_blackbox/`：`.conix/governance/xforge.yaml` 的 verify 菜单里 `blackbox` 一项跑它，两路都照这一项认测试的目录
+（测试那一路只写那里，实现那一路不碰）。里面已经有几条照规格写的、只经公开接口调用的测试。合起来没过时，`/rework fork <理由>`
+两路都重新分叉；只想重做一路，在对话里让主 Agent `flow_rework {to: fork, tasks: [impl]}`。重做的那一路看得见另一路上一轮合回来的东西。
+
 ## 目录
 
 ```
 .conix/                     脚手架（进 git）
   conix.yaml                flows.artifacts_dir: xforge —— 制品目录叫 xforge
-  flows/xforge/             流程包：bundle.yaml、quick/solid/major.yaml、skills/、gates/、scripts/、lib/、policies/、templates/、commands/
+  flows/xforge/             流程包：bundle.yaml、quick/solid/major.yaml、dual/dual-impl/dual-tests.yaml、skills/、gates/、scripts/、lib/、policies/、templates/、commands/
   governance/               xforge.yaml（开哪几条基线、确认要不要职责分离、工作包能选的 verify 菜单；前两项运行启动时钉住）、constitution.yaml（项目原则）、verify.sh（项目的验证）
   roles.yaml                确认的角色（reviewer、owner）
 xforge/                     制品目录，也就是 xforge 包的数据
@@ -55,7 +74,8 @@ xforge/                     制品目录，也就是 xforge 包的数据
   interfaces/textkit.yaml   接口基线（进 git）
   archive/<日期序号>-<标题>/  每次变更的归档：提案、设计、验证、增量、台账、工作包、record.json（进 git）
   runs/<运行>/              运行中的目录（不进 git）
-src/  tests/                被改的代码
+src/  tests/                被改的代码与单测
+tests_blackbox/             黑盒测试（verify 菜单的 blackbox；双路开发的测试那一路写在这里）
 ```
 
 在别的项目里用内置的 xforge：准备 `.conix/governance/verify.sh`（可选 `constitution.yaml`、`xforge.yaml`），规格在 `conix/xforge/specs/`

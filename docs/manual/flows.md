@@ -97,6 +97,10 @@ release: [carol]
   （提案、实施、验证、归档）。规格在 `conix/xforge/specs/`，站里的会话用 `xspec`、`xledger`、`xpkg` 三个命令记规格增量、
   台账、工作包，归档时增量并进规格。项目要准备的：`.conix/governance/verify.sh`（实施站的出口跑它：单测、lint），
   可选的 `.conix/governance/constitution.yaml`（设计逐条对照的原则）。完整的例子是仓库里的 `examples/xforge`。
+- **双路开发 `xforge/dual`**：规格侧（提案、规格与接口增量）写一次、检查、你批准；之后分成两个子运行，各在自己的 worktree 里，
+  一个实现、一个只照规格写黑盒测试，互相看不到；两路合回运行的分支后用黑盒测试跑实现，没过的由会话判错在哪一边，你决定打回哪一路
+  （`/rework fork` 两路都重做，或在对话里让主 Agent 只打回其中一个任务）。不按风险自动选，点名起：`/flow:xforge:dual <主题> --risk high`。
+  要在 `.conix/governance/xforge.yaml` 的 verify 菜单里声明一项 `blackbox`（黑盒测试放哪、怎么跑），没有它合起来那一站就报错。
 
 ## 启动与推进一个流程包
 
