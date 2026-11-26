@@ -52,6 +52,8 @@ jsonschema  = { version = "0.49", default-features = false }
 # 与 Agix 用的同一个版本：读插件 plugin.toml 里 Conix 自己的段、算 zip 的 SHA-256。
 toml        = "0.8"
 sha2        = "0.10"
+# 与 Agix 用的同一个版本：流程包（zip）的导出与导入。
+zip         = { version = "2", default-features = false, features = ["deflate"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 
 [workspace.lints.rust]

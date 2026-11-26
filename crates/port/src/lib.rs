@@ -27,8 +27,8 @@ pub use command::{
 pub use common::{Millis, Usage};
 pub use event::{CompactOutcome, ConnState, Event, NoticeLevel};
 pub use flow::{
-    DefState, FlowDetail, FlowOrigin, FlowSummary, RunOp, RunStatus, RunSummary, RunView,
-    StationStatus, StationTask, StationView,
+    DefState, FlowDetail, FlowExported, FlowImported, FlowOrigin, FlowPackageInfo, FlowSummary,
+    RunOp, RunStatus, RunSummary, RunView, StationStatus, StationTask, StationView,
 };
 pub use ids::{
     InstanceName, JobId, MessageId, PromptId, RunId, SessionId, StationId, TaskId, ToolId,

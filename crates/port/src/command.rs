@@ -171,6 +171,19 @@ pub enum Command {
         op: RunOp,
     },
 
+    /// 把一个流程包（项目的、插件的或内置的）导出成包文件。`file` 省略 = 写在项目根下，名字是 `<包>-<版本>.zip`；给了相对路径就相对项目根。
+    ExportFlow {
+        bundle: String,
+        #[serde(default)]
+        file: Option<String>,
+    },
+    /// 把包文件装进项目的 `.conix/flows/`；已有同名的，`force` 才覆盖（旧的先备份）。
+    ImportFlow {
+        file: String,
+        #[serde(default)]
+        force: bool,
+    },
+
     // 作业
     ListJobs,
     SaveJob {
@@ -277,6 +290,8 @@ impl Command {
             Command::GetRun { .. } => "get_run",
             Command::StartRun { .. } => "start_run",
             Command::RunOp { .. } => "run_op",
+            Command::ExportFlow { .. } => "export_flow",
+            Command::ImportFlow { .. } => "import_flow",
             Command::ListJobs => "list_jobs",
             Command::SaveJob { .. } => "save_job",
             Command::DeleteJob { .. } => "delete_job",
@@ -396,6 +411,8 @@ pub enum Reply {
     Flow(Box<FlowDetail>),
     Runs(Vec<RunSummary>),
     Run(Box<RunView>),
+    FlowExported(crate::FlowExported),
+    FlowImported(crate::FlowImported),
     RunStarted(RunSummary),
     Jobs(Vec<Job>),
     Job(Job),

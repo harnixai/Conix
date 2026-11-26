@@ -72,6 +72,11 @@ pub struct BundleRequires {
 /// address (`/flow:export`) is told apart from a bundle by.
 pub const RESERVED: [&str; 2] = ["export", "import"];
 
+/// Whether a name may be a bundle's: `[a-z][a-z0-9-]*`, not a reserved one.
+pub fn is_bundle_name(s: &str) -> bool {
+    is_name(s) && !RESERVED.contains(&s)
+}
+
 /// A requirement `>=x.y.z`, as the version it names. Only this form: a bundle says the oldest
 /// host it runs on, nothing cleverer to disagree about.
 pub fn parse_requirement(s: &str) -> Result<(u64, u64, u64), String> {
