@@ -77,6 +77,15 @@
     交付出处、用量与耗时。租约、token、日志、上下文不进。
   - 取消的运行不归档，留在 `runs/` 里；`archive.when: always` 时也归档，`record.json` 的状态是 `cancelled`。
   - `workspace: worktree` 的运行在它的 worktree 里归档，跟代码一起合回去。
+  - **事后核对**：`record.json` 带 `format` 和 `files: [{path, sha256, size}]`，列出归档目录里除它自己以外的每个文件
+    （相对路径、`/` 分隔、排序，格式同导出包的 `MANIFEST.yaml`）；运行账本记下 `archive: {dir, record_sha256}`
+    （`dir` 相对项目，`record_sha256` 是写完时 `record.json` 的摘要）。账本模型写不了，所以 `record.json` 连同 `files`
+    被改写也看得出来。**不做哈希链**：归档提交进 git，历史加账本里这一个摘要，批过的制品之后被改就看得见，
+    链只会多出一套要维护的东西。
+  - `conix flow verify <归档目录>`（计划中的命令，调 `harnix_flow::archive::verify`）报告：`missing`（列了没有）、
+    `extra`（有了没列）、`changed`（摘要或大小不同）；门禁证据与确认绑定的摘要对着归档里的文件重算，不符的列出；
+    `record` 是 `matches` / `differs` / `no_ledger`（账本里没有这次归档，如旧的）。没有 `files` 的旧归档只报
+    `unlisted`、仍核对证据摘要——这是核对不了，不算失败。
 - 权威的运行账本仍是 `.conix/state/conix/flow-runs/`（带租约与 token，模型写不了）；`_run/` 与 `record.json` 都是它的投影。
 - 模型能写 `conix/runs/<运行>/`，不能写 `_run/`；`conix/<包>/` 只经包的命令与归档写。
 
