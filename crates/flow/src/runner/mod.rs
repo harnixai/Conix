@@ -45,6 +45,8 @@ mod main;
 mod project;
 #[cfg(feature = "script")]
 pub(crate) mod script;
+#[cfg(feature = "script")]
+pub(crate) mod scriptenv;
 mod session;
 mod state;
 mod tools;

@@ -78,6 +78,9 @@ pub struct CreateIn {
 pub struct Prepared {
     pub id: Option<String>,
     pub worktree: Option<WorktreeRec>,
+    /// The commit the workspace stands at (`RunRecord::base_commit`), when the host looked: git is
+    /// the runner's, so the kernel cannot say it. A worktree's own base is taken when this is none.
+    pub base_commit: Option<String>,
 }
 
 /// Where a new run works and how it came to be, checked.
@@ -88,6 +91,7 @@ struct Place {
     trigger: Trigger,
     shown_in: Option<String>,
     worktree: Option<WorktreeRec>,
+    base_commit: Option<String>,
 }
 
 impl Place {
@@ -98,13 +102,14 @@ impl Place {
         rec.trigger = self.trigger.clone();
         rec.shown_in = self.shown_in.clone();
         rec.worktree = self.worktree.clone();
+        rec.base_commit = self.base_commit.clone().or_else(|| self.worktree.as_ref().map(|w| w.base.clone()));
     }
 }
 
 /// A start's project, workspace, output directory and trigger, as the run will hold them: the
 /// root absolute (kept as given, but for trailing `/`s), a workspace in the project only with one
 /// (the start's, else the flow's, else the project itself).
-fn placement(input: &CreateIn, by: &Actor, def: &FlowDef, worktree: Option<WorktreeRec>) -> Result<Place> {
+fn placement(input: &CreateIn, by: &Actor, def: &FlowDef, worktree: Option<WorktreeRec>, base_commit: Option<String>) -> Result<Place> {
     let project_root = project_root_of(input)?;
     let workspace = Workspace::chosen(input.workspace, def.workspace, project_root.as_deref());
     if workspace.in_project() && project_root.is_none() {
@@ -117,6 +122,7 @@ fn placement(input: &CreateIn, by: &Actor, def: &FlowDef, worktree: Option<Workt
         trigger: input.trigger.clone().unwrap_or_else(|| Trigger::manual(by.clone())),
         shown_in: input.shown_in.clone().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()),
         worktree: worktree.filter(|_| workspace == Workspace::Worktree),
+        base_commit: base_commit.filter(|_| workspace.in_project()),
     })
 }
 
@@ -552,7 +558,7 @@ impl Engine {
             .ok_or_else(|| FlowError::NotFound(format!("flow {}", input.flow)))?;
         check_def(&def, packs.as_ref())?;
         let inputs = apply_inputs(&def, &input.inputs).map_err(FlowError::Invalid)?;
-        let place = placement(&input, &by, &def, prepared.worktree.clone())?;
+        let place = placement(&input, &by, &def, prepared.worktree.clone(), prepared.base_commit.clone())?;
         transact!(self, by.clone(), |t| {
             let id = match &prepared.id {
                 Some(id) => id.clone(),

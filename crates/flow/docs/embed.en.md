@@ -576,3 +576,20 @@ Migration: a host that used the kernel from `harnix-ext-flow` keeps `harnix_ext_
 re-exports the whole library); one that depends on the library directly writes `harnix_flow::X`.
 Run state written before these changes is not read: `show_in_space` and the bare session ids are
 gone, and a store directory without `FORMAT` is refused — clear it, or migrate it by hand.
+
+## Bundle JavaScript: imports and `flow.*` (in Conix)
+
+- Scripts (`scripts/*.js`) and commands (`commands/*.js`) of a bundle may `import` other files of the same bundle by
+  relative path (`../lib/specs.js`); `lib/` is the intended place. Module names are bundle-relative paths. A bare
+  specifier (`fs`), a path leaving the bundle, or any import in a flow outside a bundle is an error. The files a run's
+  scripts and commands import (followed to the end) are pinned with it (`Pinned::libs`); the loader reads only those.
+  Gate trials resolve imports from the packs.
+- `flow.*` shares names with Agix's `agix.*`: `flow.yaml.{parse,stringify,parseFrontmatter,stringifyFrontmatter}`,
+  `flow.glob.{test,filter}` (pure, as `agix.glob`; `flow.glob(pattern)` still lists files; no `{a,b}` or `[abc]`),
+  `flow.path.*` (as `path.posix`), `flow.sha256` / `flow.hash.sha256` (strings only), `flow.json.validate(schema, value)`.
+  `flow.schema.validate(value, schema)` is the older form.
+- `flow.git.base()` (the run's `RunRecord::base_commit`, also `${base_commit}`), `flow.git.head()`,
+  `flow.git.changed({since?})` (committed since, staged, unstaged and untracked; sorted; without the artifacts
+  directory and the data directory); `flow.runs.list({bundle?, active?})` and `flow.runs.get(id)` (a snapshot of the
+  project's runs: `{id, flow, bundle, subject, status, inputs, output_dir, data_dir, stations: {id: status}}`).
+- `Prepared` gained `base_commit` (build it with `..Default::default()`).

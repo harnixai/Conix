@@ -51,7 +51,7 @@ libc        = "0.2"
 # `check: text` gates (Conix, docs/design/flows.md §2.1).
 regex       = "1"
 # The script gates' runtime (feature `script`; Conix, docs/design/flows.md §2.3).
-rquickjs    = { version = "0.12", default-features = false, features = ["std"], optional = true }
+rquickjs    = { version = "0.12", default-features = false, features = ["std", "loader"], optional = true }
 # The runner's tasks, tracked and told to stop.
 tokio-util  = { version = "0.7", features = ["rt"], optional = true }
 # A session read as a stream of frames.

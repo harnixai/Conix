@@ -326,6 +326,70 @@ pub fn file(dir: &Path, rel: &str) -> Option<String> {
     std::fs::read_to_string(parts.iter().fold(dir.to_path_buf(), |p, s| p.join(s))).ok()
 }
 
+// ── imports between a bundle's scripts ───────────────────────────────────────
+
+/// The module a script's `import` names, as a path in the bundle: `spec` is relative (`./`, `../`)
+/// and taken from the directory of `from`, itself a path in the bundle (`scripts/spec-delta.js`).
+/// Never a bare name (`fs`: there is no package to find it in) and never out of the bundle.
+pub fn resolve_import(from: &str, spec: &str) -> Result<String, String> {
+    if !(spec.starts_with("./") || spec.starts_with("../")) {
+        return Err(format!(
+            "cannot import {spec:?}: only the bundle's own files are imported, by a relative path (`./x.js`, `../lib/x.js`)"
+        ));
+    }
+    let mut at: Vec<&str> = from.split('/').collect();
+    at.pop();
+    for seg in spec.split('/') {
+        match seg {
+            "" | "." => {}
+            ".." => {
+                if at.pop().is_none() {
+                    return Err(format!("cannot import {spec:?} from {from}: it leaves the bundle"));
+                }
+            }
+            s => at.push(s),
+        }
+    }
+    if at.is_empty() || !at.iter().all(|p| segment(p)) {
+        return Err(format!("cannot import {spec:?} from {from}: not a file of the bundle"));
+    }
+    Ok(at.join("/"))
+}
+
+/// The specifiers a module's text imports (`import … from "x"`, `import "x"`, `export … from "x"`).
+/// A scan, not a parse: a quoted `from "x"` in a comment is found too, which only costs a file looked
+/// for and not found.
+pub fn imports_of(source: &str) -> Vec<String> {
+    use std::sync::OnceLock;
+    static RE: OnceLock<regex::Regex> = OnceLock::new();
+    let re = RE.get_or_init(|| {
+        regex::Regex::new(r#"(?:\b(?:import|export)\b[^;"'`]*?\bfrom\s*|\bimport\s*)["']([^"'\n]+)["']"#).expect("the import pattern")
+    });
+    re.captures_iter(source).map(|c| c[1].to_string()).collect()
+}
+
+/// What `roots` (path in the bundle → source) import, followed to the end: path → source, the
+/// roots themselves left out. `read` gives a bundle file by its path. What cannot be read or
+/// resolved is left for the loader to say when the script runs.
+pub fn import_closure(roots: &[(&str, &str)], read: &dyn Fn(&str) -> Option<String>) -> std::collections::BTreeMap<String, String> {
+    let mut found = std::collections::BTreeMap::new();
+    let known: BTreeSet<&str> = roots.iter().map(|(p, _)| *p).collect();
+    let mut todo: Vec<(String, String)> = roots.iter().map(|(p, s)| (p.to_string(), s.to_string())).collect();
+    while let Some((from, text)) = todo.pop() {
+        for spec in imports_of(&text) {
+            let Ok(path) = resolve_import(&from, &spec) else { continue };
+            if known.contains(path.as_str()) || found.contains_key(&path) {
+                continue;
+            }
+            if let Some(src) = read(&path) {
+                todo.push((path.clone(), src.clone()));
+                found.insert(path, src);
+            }
+        }
+    }
+    found
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

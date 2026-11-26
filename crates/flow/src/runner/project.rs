@@ -82,7 +82,11 @@ pub(crate) async fn start(rn: &Arc<Runner>, mut input: CreateIn, by: Actor) -> c
         input.workspace = Some(workspace);
         if workspace == Workspace::Worktree && def.is_some() {
             let (id, w) = super::worktree::make(engine, root, &input.flow).await?;
-            prepared = Prepared { id: Some(id), worktree: Some(w) };
+            prepared = Prepared { base_commit: Some(w.base.clone()), id: Some(id), worktree: Some(w) };
+        } else if workspace.in_project() {
+            // Where the run works is the project itself: what its `HEAD` is now.
+            let dir = std::path::PathBuf::from(root);
+            prepared.base_commit = tokio::task::spawn_blocking(move || super::git::head(&dir)).await.ok().flatten();
         }
     }
     let claimed = match prepare(engine, &mut input, prepared.worktree.as_ref()) {

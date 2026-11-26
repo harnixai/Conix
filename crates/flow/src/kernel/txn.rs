@@ -262,6 +262,7 @@ impl<'e> Txn<'e> {
                             child.output_dir = up.output_dir.clone();
                             child.data_dir = up.data_dir.clone();
                             child.worktree = up.worktree.clone();
+                            child.base_commit = up.base_commit.clone();
                             Ok(child)
                         }
                     }
@@ -364,6 +365,7 @@ pub(crate) fn new_record(
         output_dir: None,
         data_dir: None,
         worktree: None,
+        base_commit: None,
         governed: false,
         def,
     }

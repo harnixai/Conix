@@ -17,6 +17,7 @@ use rquickjs::{Ctx, Function, Module, Object, Value as JsValue};
 use serde_json::Value;
 
 use super::files::{parse, OutOfBounds, Reader};
+use super::scriptenv::Env;
 use crate::kernel::host::GateResult;
 use crate::kernel::parts::ReadAs;
 
@@ -35,7 +36,95 @@ const PRELUDE: &str = r#"(() => {
   delete globalThis.__flow;
   const j = (s) => (s == null ? null : JSON.parse(s));
   const read = (as) => (p) => j(n.read(String(p), as));
+  // Same names and meaning as Agix's `agix.*` (docs/agix_js.md), so a piece of logic moves between a
+  // bundle and a plugin by changing the host object. Errors carry a `code` as Agix's do.
+  const coded = (code, f) => (...a) => {
+    try { return f(...a); } catch (e) {
+      if (e && typeof e === "object" && !e.code) { try { e.code = code; } catch (_) {} }
+      throw e;
+    }
+  };
+  const str = (v, what) => { if (typeof v !== "string") throw new TypeError(what + " is a string"); return v; };
+  const norm = (p) => {
+    str(p, "a path");
+    if (p === "") return ".";
+    const abs = p.startsWith("/"), trail = p.endsWith("/"), out = [];
+    for (const s of p.split("/")) {
+      if (s === "" || s === ".") continue;
+      if (s === "..") { if (out.length && out[out.length - 1] !== "..") out.pop(); else if (!abs) out.push(".."); }
+      else out.push(s);
+    }
+    const r = out.join("/");
+    if (!r) return abs ? "/" : trail ? "./" : ".";
+    return (abs ? "/" : "") + r + (trail ? "/" : "");
+  };
+  const base = (p, ext) => {
+    str(p, "a path");
+    let q = p; while (q.length > 1 && q.endsWith("/")) q = q.slice(0, -1);
+    let b = q === "/" ? "" : q.slice(q.lastIndexOf("/") + 1);
+    if (ext !== undefined && b !== ext && b.endsWith(ext)) b = b.slice(0, -ext.length);
+    return b;
+  };
+  const pathApi = Object.freeze({
+    normalize: norm,
+    join: (...parts) => { parts.forEach((x) => str(x, "a path")); const k = parts.filter((x) => x !== "").join("/"); return k === "" ? "." : norm(k); },
+    isAbsolute: (p) => str(p, "a path").startsWith("/"),
+    dirname: (p) => {
+      str(p, "a path");
+      if (p === "") return ".";
+      const abs = p[0] === "/"; let end = -1, matched = true;
+      for (let i = p.length - 1; i >= 1; --i) {
+        if (p[i] === "/") { if (!matched) { end = i; break; } } else matched = false;
+      }
+      if (end === -1) return abs ? "/" : ".";
+      if (abs && end === 1) return "//";
+      return p.slice(0, end);
+    },
+    basename: base,
+    extname: (p) => { const b = base(p); const i = b.lastIndexOf("."); return i <= 0 || b === ".." ? "" : b.slice(i); },
+    relative: coded("path.relative", (from, to) => {
+      const a = norm(str(from, "a path")), b = norm(str(to, "a path"));
+      if (a.startsWith("/") !== b.startsWith("/")) throw new Error("path.relative: one path is absolute and the other is not");
+      const seg = (x) => x.split("/").filter((s) => s !== "" && s !== ".");
+      const fa = seg(a), fb = seg(b);
+      let i = 0; while (i < fa.length && i < fb.length && fa[i] === fb[i]) i++;
+      const up = fa.slice(i);
+      if (up.includes("..")) throw new Error("path.relative: the answer depends on the working directory");
+      return [...up.map(() => ".."), ...fb.slice(i)].join("/");
+    }),
+  });
+  const sha = (s) => n.sha256(str(s, "the input"));
+  const globTest = (pat, p) => { str(p, "a path"); return (Array.isArray(pat) ? pat : [pat]).some((x) => n.globTest(str(x, "a pattern"), p)); };
+  const glob = Object.freeze(Object.assign((p) => JSON.parse(n.glob(String(p))), {
+    test: coded("glob.pattern", globTest),
+    filter: coded("glob.pattern", (pat, paths) => paths.filter((p) => globTest(pat, p))),
+  }));
+  const yaml = Object.freeze({
+    parse: coded("yaml.syntax", (t) => JSON.parse(n.yamlParse(str(t, "the text")))),
+    stringify: coded("yaml.unrepresentable", (v) => n.yamlStringify(JSON.stringify(v === undefined ? null : v))),
+    parseFrontmatter: coded("yaml.syntax", (t) => JSON.parse(n.frontmatter(str(t, "the text")))),
+    stringifyFrontmatter: coded("yaml.unrepresentable", (data, body) =>
+      data == null ? String(body) : "---\n" + n.yamlStringify(JSON.stringify(data)) + "---\n" + String(body)),
+  });
+  const git = Object.freeze({
+    base: () => { const s = n.gitBase(); return s == null ? null : s; },
+    head: () => { const s = n.gitHead(); return s == null ? null : s; },
+    changed: (o) => JSON.parse(n.gitChanged(o && o.since != null ? String(o.since) : "")),
+  });
+  const runs = Object.freeze({
+    list: (o) => JSON.parse(n.runsList(JSON.stringify(o || {}))),
+    get: (id) => j(n.runsGet(String(id))),
+  });
   return Object.freeze({
+    git,
+    runs,
+    yaml,
+    path: pathApi,
+    sha256: sha,
+    hash: Object.freeze({ sha256: sha }),
+    json: Object.freeze({
+      validate: coded("json.schema", (schema, value) => JSON.parse(n.jsonValidate(JSON.stringify(schema), JSON.stringify(value === undefined ? null : value)))),
+    }),
     read: Object.freeze({
       text: (p) => { const s = n.text(String(p)); return s == null ? null : s; },
       json: read("json"),
@@ -43,7 +132,7 @@ const PRELUDE: &str = r#"(() => {
       jsonl: read("jsonl"),
       frontmatter: read("frontmatter"),
     }),
-    glob: (p) => JSON.parse(n.glob(String(p))),
+    glob,
     stat: (p) => j(n.stat(String(p))),
     schema: Object.freeze({
       validate: (value, schema) => JSON.parse(n.validate(JSON.stringify(value === undefined ? null : value), JSON.stringify(schema))),
@@ -78,14 +167,14 @@ pub(crate) struct Trace {
 }
 
 /// Run `source` (an ES module whose default export is `function (input, flow)`) on `input`.
-pub(crate) async fn run(source: String, input: Value, reader: Arc<Reader>, timeout: Duration) -> (GateResult, Trace) {
+pub(crate) async fn run(source: String, input: Value, reader: Arc<Reader>, env: Env, timeout: Duration) -> (GateResult, Trace) {
     let trace = Arc::new(Mutex::new(Trace::default()));
     let t = trace.clone();
     let deadline = Instant::now() + timeout;
     let r = reader.clone();
     let joined = tokio::time::timeout(
         timeout + ABANDON_AFTER,
-        tokio::task::spawn_blocking(move || blocking(&source, &input, r, t, deadline, timeout)),
+        tokio::task::spawn_blocking(move || blocking(&source, &input, r, env, t, deadline, timeout)),
     )
     .await;
     let mut out = match joined {
@@ -108,6 +197,7 @@ fn blocking(
     source: &str,
     input: &Value,
     reader: Arc<Reader>,
+    env: Env,
     trace: Arc<Mutex<Trace>>,
     deadline: Instant,
     timeout: Duration,
@@ -118,6 +208,7 @@ fn blocking(
     };
     runtime.set_memory_limit(MEMORY_LIMIT);
     runtime.set_interrupt_handler(Some(Box::new(move || Instant::now() >= deadline)));
+    env.modules.attach(&runtime);
     let context = match rquickjs::Context::full(&runtime) {
         Ok(c) => c,
         Err(e) => return GateResult::errored(format!("no script context: {e}")),
@@ -130,11 +221,11 @@ fn blocking(
                 GateResult::errored(format!("the script failed: {}", message(&ctx, e)))
             }
         };
-        let flow = match install(&ctx, reader, trace) {
+        let flow = match install_with(&ctx, reader, trace, None, &env) {
             Ok(f) => f,
             Err(e) => return fail(e),
         };
-        let main: Function = match evaluate(&ctx, source) {
+        let main: Function = match evaluate(&ctx, source, &env.modules.entry) {
             Ok(f) => f,
             Err(e) => return fail(e),
         };
@@ -175,15 +266,43 @@ fn blocking(
 }
 
 /// Declare and evaluate the module, and hand back its default export.
-fn evaluate<'js>(ctx: &Ctx<'js>, source: &str) -> rquickjs::Result<Function<'js>> {
-    let (module, done) = Module::declare(ctx.clone(), "gate.js", source)?.eval()?;
+fn evaluate<'js>(ctx: &Ctx<'js>, source: &str, name: &str) -> rquickjs::Result<Function<'js>> {
+    let (module, done) = Module::declare(ctx.clone(), name, source)?.eval()?;
     done.finish::<()>()?;
     module.get::<_, Function>("default")
+}
+
+/// `{data, body}` of a text that may open with a `---` front matter (`agix.yaml.parseFrontmatter`):
+/// no front matter is `data: null` and the whole text as the body.
+fn split_frontmatter(text: &str) -> Result<Value, String> {
+    let t = text.strip_prefix('\u{feff}').unwrap_or(text);
+    let line = |l: &str| l.trim_end_matches(['\r', '\n']) == "---";
+    let mut lines = t.split_inclusive('\n');
+    if !lines.next().is_some_and(line) {
+        return Ok(serde_json::json!({"data": null, "body": text}));
+    }
+    let start = t.find('\n').map_or(t.len(), |i| i + 1);
+    let mut at = start;
+    for l in lines {
+        if line(l) {
+            let data = match parse(&t[start..at], ReadAs::Yaml)? {
+                Value::Null => Value::Object(Default::default()),
+                v @ Value::Object(_) => v,
+                _ => return Err("the front matter is not a mapping".into()),
+            };
+            return Ok(serde_json::json!({"data": data, "body": &t[at + l.len()..]}));
+        }
+        at += l.len();
+    }
+    Err("the front matter is not closed with `---`".into())
 }
 
 /// What is wrong with a script's text as a module (its syntax); empty when it may be saved.
 pub(crate) fn problems(source: &str) -> Vec<String> {
     let Ok(runtime) = rquickjs::Runtime::new() else { return vec![] };
+    // Declaring a module loads what it imports; whether those files exist is the loader's to say
+    // when it runs (a run pins them), so here any import is given an empty module.
+    runtime.set_loader(super::scriptenv::AnyImport, super::scriptenv::AnyImport);
     let Ok(context) = rquickjs::Context::full(&runtime) else { return vec![] };
     context.with(|ctx| match Module::declare(ctx.clone(), "gate.js", source) {
         Ok(_) => {
@@ -216,11 +335,7 @@ fn message(ctx: &Ctx<'_>, e: rquickjs::Error) -> String {
     e.to_string()
 }
 
-fn install<'js>(ctx: &Ctx<'js>, reader: Arc<Reader>, trace: Arc<Mutex<Trace>>) -> rquickjs::Result<JsValue<'js>> {
-    install_with(ctx, reader, trace, None)
-}
-
-fn install_with<'js>(ctx: &Ctx<'js>, reader: Arc<Reader>, trace: Arc<Mutex<Trace>>, writer: Option<Arc<Writer>>) -> rquickjs::Result<JsValue<'js>> {
+fn install_with<'js>(ctx: &Ctx<'js>, reader: Arc<Reader>, trace: Arc<Mutex<Trace>>, writer: Option<Arc<Writer>>, env: &Env) -> rquickjs::Result<JsValue<'js>> {
     let n = Object::new(ctx.clone())?;
     if let Some(w) = writer {
         let thrown = |ctx: &Ctx<'_>, e: String| rquickjs::Exception::throw_message(ctx, &e);
@@ -321,6 +436,65 @@ fn install_with<'js>(ctx: &Ctx<'js>, reader: Arc<Reader>, trace: Arc<Mutex<Trace
             .collect();
         Ok(serde_json::json!({"ok": errors.is_empty(), "errors": errors}).to_string())
     })?)?;
+    n.set("sha256", Function::new(ctx.clone(), |text: String| {
+        use sha2::{Digest, Sha256};
+        Sha256::digest(text.as_bytes()).iter().map(|b| format!("{b:02x}")).collect::<String>()
+    })?)?;
+    n.set("globTest", Function::new(ctx.clone(), |pattern: String, path: String| crate::kernel::parts::glob(&pattern, &path, true))?)?;
+    n.set("yamlParse", Function::new(ctx.clone(), |ctx: Ctx<'_>, text: String| -> rquickjs::Result<String> {
+        parse(&text, ReadAs::Yaml).map(|v| v.to_string()).map_err(|e| rquickjs::Exception::throw_message(&ctx, &e))
+    })?)?;
+    n.set("yamlStringify", Function::new(ctx.clone(), |ctx: Ctx<'_>, json: String| -> rquickjs::Result<String> {
+        let v: Value = serde_json::from_str(&json).unwrap_or(Value::Null);
+        serde_yaml::to_string(&v).map_err(|e| rquickjs::Exception::throw_message(&ctx, &e.to_string()))
+    })?)?;
+    n.set("frontmatter", Function::new(ctx.clone(), |ctx: Ctx<'_>, text: String| -> rquickjs::Result<String> {
+        split_frontmatter(&text).map(|v| v.to_string()).map_err(|e| rquickjs::Exception::throw_message(&ctx, &e))
+    })?)?;
+    // The agix shape of a verdict: `{valid, errors: [{instancePath, schemaPath, message}]}`.
+    n.set("jsonValidate", Function::new(ctx.clone(), |ctx: Ctx<'_>, schema: String, value: String| -> rquickjs::Result<String> {
+        let value: Value = serde_json::from_str(&value).unwrap_or(Value::Null);
+        let schema: Value = serde_json::from_str(&schema)
+            .map_err(|e| rquickjs::Exception::throw_message(&ctx, &format!("the schema is not JSON: {e}")))?;
+        let v = jsonschema::validator_for(&schema)
+            .map_err(|e| rquickjs::Exception::throw_message(&ctx, &format!("the schema does not compile: {e}")))?;
+        let errors: Vec<Value> = v
+            .iter_errors(&value)
+            .take(100)
+            .map(|e| serde_json::json!({"instancePath": e.instance_path().to_string(), "schemaPath": e.schema_path().to_string(), "message": e.to_string()}))
+            .collect();
+        Ok(serde_json::json!({"valid": errors.is_empty(), "errors": errors}).to_string())
+    })?)?;
+    {
+        let git = env.git.clone();
+        n.set("gitBase", Function::new(ctx.clone(), move || git.as_ref().and_then(|g| g.base.clone()))?)?;
+    }
+    {
+        let git = env.git.clone();
+        n.set("gitHead", Function::new(ctx.clone(), move || git.as_ref().and_then(|g| g.head()))?)?;
+    }
+    {
+        let git = env.git.clone();
+        n.set("gitChanged", Function::new(ctx.clone(), move |ctx: Ctx<'_>, since: String| -> rquickjs::Result<String> {
+            let Some(g) = &git else {
+                return Err(rquickjs::Exception::throw_message(&ctx, "flow.git: this script has no git workspace"));
+            };
+            let since = (!since.is_empty()).then_some(since);
+            g.changed(since.as_deref()).map(|v| serde_json::json!(v).to_string()).map_err(|e| rquickjs::Exception::throw_message(&ctx, &e))
+        })?)?;
+    }
+    {
+        let env = env.clone();
+        n.set("runsList", Function::new(ctx.clone(), move |opts: String| {
+            let o: Value = serde_json::from_str(&opts).unwrap_or(Value::Null);
+            let active = o.get("active").and_then(Value::as_bool).unwrap_or(false);
+            Value::Array(env.runs_list(o.get("bundle").and_then(Value::as_str), active)).to_string()
+        })?)?;
+    }
+    {
+        let env = env.clone();
+        n.set("runsGet", Function::new(ctx.clone(), move |id: String| env.runs_get(&id).map(|v| v.to_string()))?)?;
+    }
     {
         let trace = trace.clone();
         n.set("log", Function::new(ctx.clone(), move |line: String| {
@@ -424,13 +598,13 @@ pub(crate) struct CommandOutcome {
 /// Run a bundle's command: `source` an ES module whose default export is `function (input, flow)`,
 /// `flow` as a gate script's plus `write`, `append`, `remove` and `print`. What it returns (a string,
 /// or a value shown as JSON) follows what it printed; a throw is a failure.
-pub(crate) async fn command(source: String, input: Value, reader: Arc<Reader>, writer: Arc<Writer>, timeout: Duration) -> CommandOutcome {
+pub(crate) async fn command(source: String, input: Value, reader: Arc<Reader>, writer: Arc<Writer>, env: Env, timeout: Duration) -> CommandOutcome {
     let trace = Arc::new(Mutex::new(Trace::default()));
     let (t, w) = (trace.clone(), writer.clone());
     let deadline = Instant::now() + timeout;
     let joined = tokio::time::timeout(
         timeout + ABANDON_AFTER,
-        tokio::task::spawn_blocking(move || run_command(&source, &input, reader, w, t, deadline, timeout)),
+        tokio::task::spawn_blocking(move || run_command(&source, &input, reader, w, env, t, deadline, timeout)),
     )
     .await;
     let result = match joined {
@@ -461,11 +635,13 @@ pub(crate) async fn command(source: String, input: Value, reader: Arc<Reader>, w
     CommandOutcome { ok, text: text.trim_end().to_string(), written }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_command(
     source: &str,
     input: &Value,
     reader: Arc<Reader>,
     writer: Arc<Writer>,
+    env: Env,
     trace: Arc<Mutex<Trace>>,
     deadline: Instant,
     timeout: Duration,
@@ -473,6 +649,7 @@ fn run_command(
     let runtime = rquickjs::Runtime::new().map_err(|e| format!("no script runtime: {e}"))?;
     runtime.set_memory_limit(MEMORY_LIMIT);
     runtime.set_interrupt_handler(Some(Box::new(move || Instant::now() >= deadline)));
+    env.modules.attach(&runtime);
     let context = rquickjs::Context::full(&runtime).map_err(|e| format!("no script context: {e}"))?;
     context.with(|ctx| {
         let fail = |e: rquickjs::Error| {
@@ -482,8 +659,8 @@ fn run_command(
                 message(&ctx, e)
             }
         };
-        let flow = install_with(&ctx, reader, trace, Some(writer)).map_err(fail)?;
-        let main: Function = evaluate(&ctx, source).map_err(fail)?;
+        let flow = install_with(&ctx, reader, trace, Some(writer), &env).map_err(fail)?;
+        let main: Function = evaluate(&ctx, source, &env.modules.entry).map_err(fail)?;
         let input = ctx.json_parse(input.to_string()).map_err(fail)?;
         let got: JsValue = main.call((input, flow)).map_err(fail)?;
         let got = match got.as_promise() {
@@ -514,7 +691,7 @@ mod tests {
             std::fs::write(d.path().join(p), t).unwrap();
         }
         let reader = Arc::new(Reader::new(d.path()).unwrap());
-        run(source.into(), json!({"params": {"kinds": ["risk"]}}), reader, Duration::from_secs(timeout)).await
+        run(source.into(), json!({"params": {"kinds": ["risk"]}}), reader, Env::bare(), Duration::from_secs(timeout)).await
     }
 
     #[tokio::test]
@@ -571,7 +748,7 @@ export default function (input, flow) {
 
     #[tokio::test]
     async fn a_script_has_no_way_out() {
-        // No imports (no loader), no host functions beyond `flow`.
+        // No import outside a bundle, no host functions beyond `flow`.
         let (r, _) = judge("import fs from 'fs'; export default function () { return { verdict: 'pass' }; }", &[], 5).await;
         assert_eq!(r.verdict, GateVerdict::Error);
         let src = "export default function () { return { verdict: typeof require === 'undefined' && typeof fetch === 'undefined' && typeof __flow === 'undefined' ? 'pass' : 'fail' }; }";

@@ -792,6 +792,8 @@ impl Cx<'_> {
             (None, None, Some(root)) => std::path::PathBuf::from(root),
             (None, None, None) => return Err("nothing to judge: give `files` (a sample), or work in a project".into()),
         };
+        #[cfg(feature = "script")]
+        let env = crate::runner::scriptenv::Env::for_trial(self.rn.engine(), packs, gate.script.as_deref(), script.as_deref(), ws.clone());
         let trial = crate::runner::gate::Trial {
             gate,
             script,
@@ -802,6 +804,9 @@ impl Cx<'_> {
             output_dir: str_of(input, "output_dir").map(String::from),
             data_dir: str_of(input, "data_dir").map(String::from),
             no_commands,
+            #[cfg(feature = "script")]
+            #[cfg(feature = "script")]
+            env,
         };
         let tried = self.rn.try_gate(trial).await;
         drop(sample);
