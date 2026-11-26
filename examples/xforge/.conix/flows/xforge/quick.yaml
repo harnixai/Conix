@@ -1,13 +1,17 @@
 name: quick
 title: 快速变更
-description: 低风险的小变更：提案（连同工作包）、直接实施、验证、归档。
+description: 低风险的小改动：提案（顺手划好工作包）、按工作包实施、验证、归档。
 inputs:
   title:
     schema: {type: string, minLength: 1}
     description: 变更的短标题，也是归档的名字
   risk:
     schema: {enum: [low]}
-    default: low
+    description: 风险：low 小而局部、好回退；medium 常规改动；high 跨模块、动接口或数据、难回退。这条流程只收 low
+  impact:
+    schema: {type: array, uniqueItems: true, items: {enum: [interface, security, data-migration, infra]}}
+    default: []
+    description: 影响面：动了对外接口 interface，动了鉴权与数据安全 security，要迁移数据 data-migration，动了部署与基础设施 infra
 policies: [by-commands]
 archive:
   name: "${date}${seq}-${inputs.title}"
@@ -16,8 +20,9 @@ stations:
     title: 提案
     executor: {kind: session}
     skill: propose
+    writes: ["${output_dir}/**"]
     deliverables:
-      - {path: proposal.md, template: proposal.md, description: 提案：为什么、改什么、不改什么}
+      - {path: proposal.md, template: proposal.md, description: 提案：背景、目标、非目标、改什么、影响面、为什么选这条流程}
     output:
       type: object
       required: [summary, packages]
@@ -27,24 +32,43 @@ stations:
           type: array
           minItems: 1
           maxItems: 2
-          items: {type: object, required: [id, title], properties: {id: {type: string}, title: {type: string}}}
+          items:
+            type: object
+            required: [id, title, paths]
+            properties:
+              id: {type: string}
+              title: {type: string}
+              paths: {type: array, minItems: 1, items: {type: string}}
+              after: {type: array, items: {type: string}}
     exit:
       - {kind: output}
       - {kind: gate, gate: proposal-sections}
+      - {kind: gate, gate: impact}
       - {kind: gate, gate: spec-delta-shape}
       - {kind: gate, gate: spec-delta}
+      - {kind: gate, gate: interface-delta}
       - {kind: gate, gate: packages-planned-quick}
     on_unmet: {rework_to: propose, max: 2}
 
   - id: apply
     title: 实施
+    foreach: "${stations.propose.output.packages}"
+    max_parallel: 1
     executor: {kind: session}
     skill: apply
-    output: {type: object, required: [summary], properties: {summary: {type: string}}}
+    retry: {max: 2}
+    writes: ["${item.paths}"]
+    output:
+      type: object
+      required: [package, status, summary]
+      properties: {package: {type: string}, status: {enum: [done, blocked]}, summary: {type: string}}
+    task_exit:
+      - {kind: gate, gate: package-check}
     exit:
       - {kind: output}
       - {kind: gate, gate: packages-done}
-      - {kind: gate, gate: unclaimed}
+      # 没人认领的改动是工作包没划全：快速变更的包是提案划的。
+      - {kind: gate, gate: unclaimed, rework_to: propose}
       - {kind: gate, gate: unit-tests}
     on_unmet: {rework_to: apply, max: 2}
     rework_to: [propose]
@@ -53,21 +77,24 @@ stations:
     title: 验证
     executor: {kind: session}
     skill: verify
+    writes: ["${output_dir}/**"]
     deliverables:
-      - {path: verification.md, template: verification.md, description: 验证记录：每条需求怎么验证的、结论}
+      - {path: verification.md, template: verification.md, description: 验证记录：覆盖（每条需求、每个元素的结论与测试）、连贯性}
     output: {type: object, required: [summary], properties: {summary: {type: string}}}
     exit:
       - {kind: output}
       - {kind: gate, gate: verification}
+      - {kind: gate, gate: unit-tests}
       - {kind: confirm, who: owner, label: 验收}
     rework_to: [apply, propose]
 
   - id: archive
     title: 归档
-    executor: {kind: session}
-    skill: archive
-    output: {type: object, required: [summary], properties: {summary: {type: string}}}
+    tasks:
+      - {id: specs, executor: {kind: command, command: xspec, args: [archive]}}
+      - {id: interfaces, executor: {kind: command, command: xarch, args: [archive]}}
+    output: {type: object}
     exit:
       - {kind: output}
       - {kind: gate, gate: archived}
-    on_unmet: {rework_to: archive, max: 2}
+      - {kind: gate, gate: interfaces-archived}

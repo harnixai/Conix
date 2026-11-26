@@ -1,14 +1,16 @@
 name: by-commands
 title: 结构化的数据由命令写
-description: 规格、归档、规格增量、台账、工作包都由 xspec / xledger / xpkg 写，模型不直接改这些文件。
+description: 规格与接口基线、归档、规格与接口增量、台账、工作包都由 xspec / xarch / xledger / xpkg 写，模型不直接改这些文件。
 permissions:
   - effect: deny
     tools: [Write, Edit, NotebookEdit]
     paths:
       - "${data_dir}/specs/**"
+      - "${data_dir}/interfaces/**"
       - "${data_dir}/archive/**"
       - "${output_dir}/spec-delta.yaml"
+      - "${output_dir}/interface-delta.yaml"
       - "${output_dir}/ledgers/**"
       - "${output_dir}/work-packages.yaml"
       - "${output_dir}/packages.paths"
-    message: 这份数据由流程的命令写（xspec、xledger、xpkg），用 flow_command
+    message: 这份数据由流程的命令写（xspec、xarch、xledger、xpkg），用 flow_command

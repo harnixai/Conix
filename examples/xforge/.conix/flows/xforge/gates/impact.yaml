@@ -1,0 +1,10 @@
+name: impact
+title: 提案的影响面与启动时说的一致
+description: >-
+  proposal.md 的「## 影响面」：启动时 inputs.impact 列了的每一项（interface / security / data-migration / infra，
+  或写成 接口 / 安全 / 数据迁移 / 基础设施）都写到、各说一句影响什么；impact 为空时写"无"。写到了没列的那几项只提醒。
+kind: script
+script: impact
+params:
+  proposal: "${output_dir}/proposal.md"
+  impact: "${inputs.impact}"

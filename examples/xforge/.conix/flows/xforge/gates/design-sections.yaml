@@ -1,7 +1,9 @@
 name: design-sections
-title: 设计的四节都写了
-kind: check
-check: text
-file: "${output_dir}/design.md"
-matches: ["(?m)^## 做法", "(?m)^## 取舍", "(?m)^## 原则对照", "(?m)^## 工作包"]
-not_matches: ["TODO", "TBD"]
+title: 设计的七节都写了
+description: >-
+  design.md 有「做法」「集成点」「失败模式」「迁移与回滚」「被否决的方案」「原则对照」「工作包」七节，每节有正文（模板里的注释不算），
+  没有 TODO、TBD；「被否决的方案」至少一条 `- 方案：为什么不选`。
+kind: script
+script: design-sections
+params:
+  design: "${output_dir}/design.md"
