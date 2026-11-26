@@ -805,13 +805,13 @@ impl Cx<'_> {
             .into_iter()
             .filter(|m| inline.is_none() || !m.starts_with("there is no script"))
             .collect();
-        if let (Some(src), Some(name)) = (&inline, &gate.script) {
+        if let (Some(src), Some(name)) = (&inline, gate.script_part()) {
             problems.extend(part_problems(PartKind::Script, name, src, packs).into_iter().map(|m| format!("script {name}: {m}")));
         }
         if !problems.is_empty() {
             return Ok(json!({"problems": problems, "tried": false}));
         }
-        let script = inline.or_else(|| gate.script.as_ref().and_then(|n| packs.part(PartKind::Script, n)).map(|(t, _)| t));
+        let script = inline.or_else(|| gate.script_part().and_then(|n| packs.part(PartKind::Script, n)).map(|(t, _)| t));
         let trusted = match project {
             Some(root) => self.rn.hear(root).await,
             None => false,
@@ -833,7 +833,7 @@ impl Cx<'_> {
             (None, None, None) => return Err("nothing to judge: give `files` (a sample), or work in a project".into()),
         };
         #[cfg(feature = "script")]
-        let env = crate::runner::scriptenv::Env::for_trial(self.rn.engine(), packs, gate.script.as_deref(), script.as_deref(), ws.clone());
+        let env = crate::runner::scriptenv::Env::for_trial(self.rn.engine(), packs, gate.script_part().map(String::as_str), script.as_deref(), ws.clone());
         let trial = crate::runner::gate::Trial {
             gate,
             script,

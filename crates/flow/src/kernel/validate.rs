@@ -1240,8 +1240,10 @@ pub fn part_problems(kind: PartKind, name: &str, text: &str, packs: &dyn Packs) 
                 named(&g.name, &mut out);
                 let mut g = g;
                 // A bundle's gate runs the bundle's script (in Conix: docs/design/layout.md §2).
-                if let (Some((b, _)), Some(sc)) = (crate::bundle::split(name), g.script.as_mut()) {
-                    *sc = crate::bundle::in_bundle(b, sc);
+                if let Some((b, _)) = crate::bundle::split(name) {
+                    for sc in g.script.iter_mut().chain(g.plan.iter_mut()) {
+                        *sc = crate::bundle::in_bundle(b, sc);
+                    }
                 }
                 out.extend(gate_problems(&g, packs));
             }
@@ -1271,7 +1273,7 @@ fn gate_problems(g: &GateDef, packs: &dyn Packs) -> Vec<String> {
     // Which fields go with which kind (and, for `check`, with which checker): one that is set on
     // a gate it does not go with is a mistake the author should hear about, not a silent no-op.
     let tool_fields = g.tool.is_some() || !g.args.is_null() || !g.assert.is_empty();
-    let command_only = g.command.is_some() || g.cwd.is_some() || !g.env.is_empty() || g.result.is_some();
+    let command_only = g.command.is_some() || g.plan.is_some() || g.cwd.is_some() || !g.env.is_empty() || g.result.is_some();
     let check_fields = g.check.is_some()
         || !g.paths.is_empty()
         || g.non_empty.is_some()
@@ -1282,14 +1284,16 @@ fn gate_problems(g: &GateDef, packs: &dyn Packs) -> Vec<String> {
         || !g.matches.is_empty()
         || !g.not_matches.is_empty()
         || !g.value.is_null();
-    let script_fields = g.script.is_some() || g.function.is_some() || !g.params.is_null();
+    // A plan is a script too: it is given `params` as a script gate's script is.
+    let planned = g.kind == GateKind::Command && g.plan.is_some();
+    let script_fields = g.script.is_some() || g.function.is_some() || (!g.params.is_null() && !planned);
     let others = |out: &mut Vec<String>, kind: &str, tool: bool, command: bool, check: bool, script: bool, timeout: bool| {
         let mut extra = vec![];
         if tool && tool_fields {
             extra.push("tool, args and assert go with a tool gate");
         }
         if command && command_only {
-            extra.push("command, cwd, env and result go with a command gate");
+            extra.push("command, plan, cwd, env and result go with a command gate");
         }
         if check && check_fields {
             extra.push("check and its fields go with a check gate");
@@ -1331,8 +1335,21 @@ fn gate_problems(g: &GateDef, packs: &dyn Packs) -> Vec<String> {
             if !catalog.command_gates {
                 out.push("command gates are not turned on in this application".to_string());
             }
-            if g.command.as_deref().is_none_or(|c| c.trim().is_empty()) {
-                out.push("a command gate needs its command".to_string());
+            match (&g.command, &g.plan) {
+                (Some(_), Some(_)) => out.push("a command gate runs its command or its plan, not both".to_string()),
+                (None, Some(p)) => {
+                    if packs.part(PartKind::Script, p).is_none() {
+                        out.push(format!("there is no script {p} (scripts/{p}.js) for the plan"));
+                    }
+                    // Each run of a plan says where it runs, and passes by its exit status.
+                    if g.cwd.is_some() || g.result.is_some() {
+                        out.push("a plan's runs give their own cwd and pass by their exit status: no cwd or result".to_string());
+                    }
+                }
+                (c, None) if c.as_deref().is_none_or(|c| c.trim().is_empty()) => {
+                    out.push("a command gate needs its command (or a plan)".to_string())
+                }
+                _ => {}
             }
             if g.timeout_seconds.is_some_and(|t| t == 0 || t > MAX_GATE_SECONDS) {
                 out.push(format!("timeout_seconds must be between 1 and {MAX_GATE_SECONDS}"));

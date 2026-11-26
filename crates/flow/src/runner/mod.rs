@@ -43,6 +43,8 @@ pub(crate) mod gate;
 mod git;
 mod hooks;
 mod main;
+#[cfg(feature = "script")]
+mod plan;
 mod project;
 #[cfg(feature = "script")]
 pub(crate) mod script;

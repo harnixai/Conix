@@ -869,6 +869,12 @@ pub struct GateDef {
     /// the environment — `FLOW_RUN`, `FLOW_STATION`, `FLOW_WORKSPACE`, `FLOW_CONTEXT` (JSON).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub command: Option<String>,
+    /// `command`: instead of `command`, a script part (`scripts/<name>.js`) that plans what to
+    /// run: it returns a gate result, or `{runs: [{name, argv, cwd?, timeout_seconds?}], summary?}`,
+    /// each run then started by its `argv` with no shell. The script picks from what people
+    /// declared; what models wrote never reaches a command line.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plan: Option<String>,
     /// `command`: where it runs; the run's workspace when absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,
@@ -922,7 +928,7 @@ pub struct GateDef {
     /// `script`: instead of a script, the application's own code by this name (`Gates`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub function: Option<String>,
-    /// `script`: what the script is given as `input.params` (references resolved).
+    /// `script`, `command` with `plan`: what the script is given as `input.params` (references resolved).
     #[serde(default, skip_serializing_if = "Value::is_null")]
     #[cfg_attr(feature = "ts", ts(type = "unknown"))]
     pub params: Value,
@@ -951,6 +957,16 @@ impl GateDef {
         match self.kind {
             GateKind::Host => Some(&self.name),
             GateKind::Script => self.function.as_deref(),
+            _ => None,
+        }
+    }
+
+    /// The script part the library runs for this gate: a `script` gate's script, a `command`
+    /// gate's plan.
+    pub fn script_part(&self) -> Option<&String> {
+        match self.kind {
+            GateKind::Script => self.script.as_ref(),
+            GateKind::Command => self.plan.as_ref(),
             _ => None,
         }
     }
@@ -1098,7 +1114,7 @@ pub fn pin(def: &FlowDef, packs: &dyn super::host::Packs) -> Pinned {
         for e in s.exit.iter().chain(s.task_exit.iter()) {
             if let super::def::ExitCond::Gate { gate, .. } = e {
                 if let Some(g) = packs.gate(gate) {
-                    if let Some(name) = g.script.as_ref().filter(|_| g.kind == GateKind::Script) {
+                    if let Some(name) = g.script_part() {
                         if let Some((text, _)) = packs.part(PartKind::Script, name) {
                             out.scripts.insert(name.clone(), text);
                         }
