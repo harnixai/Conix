@@ -256,8 +256,7 @@ async fn the_builtin_xforge_runs_a_change_from_proposal_to_archive_with_its_own_
         "spec-delta.yaml",
         "interface-delta.yaml",
         "work-packages.yaml",
-        "ledgers/decisions.yaml",
-        "ledgers/findings.yaml",
+        // 决定与发现可以一条都没有（台账就不存在）；检查一定逐条答了原则。
         "ledgers/constitution.yaml",
     ] {
         assert!(Path::new(&out).join(f).is_file(), "{out}/{f}");
