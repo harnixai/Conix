@@ -111,8 +111,9 @@ impl World {
 #[tokio::test]
 async fn the_governance_switch_closes_the_writing_subcommands_and_owes_nothing() {
     let w = world().await;
-    let (run, _) = w.start("t").await;
+    let (on, _) = w.start("开着时起的").await;
     w.governance("governance:\n  spec: false\n  interface: true\n");
+    let (run, _) = w.start("t").await;
     for args in [&["add", "textkit", "t", SHAPED][..], &["modify", "TK-R2", WT], &["remove", "TK-R1"], &["revert", "TK-R1"], &["archive"], &["init", "x", "XX", "标题"]] {
         let e = w.err(&run, args).await;
         assert!(e.contains("这个项目没开规格基线") && e.contains(".conix/governance/xforge.yaml"), "{args:?}: {e}");
@@ -122,11 +123,15 @@ async fn the_governance_switch_closes_the_writing_subcommands_and_owes_nothing()
     assert!(w.ok(&run, &["get", "TK-R1"]).await.contains("slugify"));
     assert!(w.ok(&run, &["check"]).await.contains("不欠"));
     assert!(std::fs::read_to_string(w.root.join("xforge/specs/textkit.md")).unwrap() == w.specs());
-    // On again (and with no file at all): it writes.
+    // The switch is pinned when a run starts: the run started before it was turned off writes, and
+    // this one stays off with the file turned on again.
+    assert!(w.ok(&on, &["add", "textkit", "截断", SHAPED]).await.contains("TK-R3"));
     w.governance("governance:\n  spec: true\n");
-    assert!(w.ok(&run, &["add", "textkit", "截断", SHAPED]).await.contains("TK-R3"));
+    assert!(w.err(&run, &["modify", "TK-R2", WT]).await.contains("这个项目没开规格基线"));
+    // A run started with no file at all has the defaults: it writes.
     std::fs::remove_file(w.root.join(".conix/governance/xforge.yaml")).unwrap();
-    assert!(w.ok(&run, &["modify", "TK-R2", WT]).await.contains("TK-R2"));
+    let (fresh, _) = w.start("没有文件").await;
+    assert!(w.ok(&fresh, &["modify", "TK-R2", WT]).await.contains("TK-R2"));
     let _ = &w.project;
 }
 

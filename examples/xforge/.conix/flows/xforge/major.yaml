@@ -47,7 +47,7 @@ stations:
       - {kind: output}
       - {kind: gate, gate: ledgers-settled}
       # 批的是澄清的答复：设计还要让提案跟上增量，绑住提案就改不动它了。
-      - {kind: confirm, who: owner, label: 范围定了, binds: ["${output_dir}/ledgers/questions.yaml"]}
+      - {kind: confirm, who: owner, label: 范围定了, separate: "${settings.review.separate}", binds: ["${output_dir}/ledgers/questions.yaml"]}
     rework_to: [propose]
 
   - id: design
@@ -106,7 +106,7 @@ stations:
       - {kind: output}
       - {kind: gate, gate: ledgers-settled}
       - {kind: gate, gate: constitution-reply}
-      - {kind: confirm, who: reviewer, label: 检查通过}
+      - {kind: confirm, who: reviewer, label: 检查通过, separate: "${settings.review.separate}"}
     rework_to: [design, clarify, propose]
 
   - id: apply
@@ -144,7 +144,7 @@ stations:
       - {kind: output}
       - {kind: gate, gate: verification}
       - {kind: gate, gate: unit-tests}
-      - {kind: confirm, who: owner, label: 验收}
+      - {kind: confirm, who: owner, label: 验收, separate: "${settings.review.separate}"}
     rework_to: [apply, design]
 
   - id: archive

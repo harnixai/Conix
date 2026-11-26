@@ -50,7 +50,10 @@ fn write_bundle(dir: &Path) {
             std::fs::copy(src.join(sub).join(f), out.join(sub).join(f)).unwrap_or_else(|e| panic!("{BUNDLE}/{sub}/{f}: {e}"));
         }
     }
-    std::fs::write(out.join("bundle.yaml"), "name: xforge\ncommands:\n  xarch: {read_only: [modules, list, get, delta, check, pending, help]}\n").unwrap();
+    // The real bundle's settings: the governance file is read through them.
+    let real = harnix_flow::bundle::BundleMeta::parse(&std::fs::read_to_string(src.join("bundle.yaml")).unwrap()).unwrap();
+    let settings = serde_yaml::to_string(&json!({"settings": real.settings.unwrap()})).unwrap();
+    std::fs::write(out.join("bundle.yaml"), format!("name: xforge\ncommands:\n  xarch: {{read_only: [modules, list, get, delta, check, pending, help]}}\n{settings}")).unwrap();
     std::fs::write(
         out.join("work.yaml"),
         "name: work\nstations:\n  - id: write\n    executor: {kind: session}\n    skill: write\n    output: {type: object}\n    exit: [{kind: output}, {kind: gate, gate: interface-delta}]\n",
@@ -287,8 +290,11 @@ async fn a_stable_element_is_modified_only_with_breaking_and_a_deprecated_one_no
 #[tokio::test]
 async fn with_the_interface_baseline_off_the_writes_say_so_and_archive_has_nothing_to_do() {
     let r = rig().await;
-    let run = r.start("没开接口基线").await;
+    let on = r.start("开着时起的").await;
+    // The switch is read when a run starts: the run started before it was turned off keeps writing.
     std::fs::write(r.root.join(".conix/governance/xforge.yaml"), GOV_OFF).unwrap();
+    let run = r.start("没开接口基线").await;
+    assert!(r.ok(&on, &["add", "textkit", "fn", "truncate", "truncate(text: str, n: int) -> str", "截断"]).await.contains("truncate"));
     for args in [
         &["module", "m", "t", "--paths", "a"][..],
         &["add", "textkit", "fn", "x", "x()", "x"],

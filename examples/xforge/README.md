@@ -48,7 +48,7 @@ conix            # 起实例并接入
 .conix/                     脚手架（进 git）
   conix.yaml                flows.artifacts_dir: xforge —— 制品目录叫 xforge
   flows/xforge/             流程包：bundle.yaml、quick/solid/major.yaml、skills/、gates/、scripts/、lib/、policies/、templates/、commands/
-  governance/               xforge.yaml（开哪几条基线）、constitution.yaml（项目原则）、verify.sh（项目的验证）
+  governance/               xforge.yaml（开哪几条基线、确认要不要职责分离；运行启动时钉住）、constitution.yaml（项目原则）、verify.sh（项目的验证）
   roles.yaml                确认的角色（reviewer、owner）
 xforge/                     制品目录，也就是 xforge 包的数据
   specs/textkit.md          规格基线（进 git）

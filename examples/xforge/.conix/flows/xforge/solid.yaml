@@ -89,7 +89,7 @@ stations:
       - {kind: output}
       - {kind: gate, gate: ledgers-settled}
       - {kind: gate, gate: constitution-reply}
-      - {kind: confirm, who: reviewer, label: 检查通过}
+      - {kind: confirm, who: reviewer, label: 检查通过, separate: "${settings.review.separate}"}
     rework_to: [design, propose]
 
   - id: apply
@@ -127,7 +127,7 @@ stations:
       - {kind: output}
       - {kind: gate, gate: verification}
       - {kind: gate, gate: unit-tests}
-      - {kind: confirm, who: owner, label: 验收}
+      - {kind: confirm, who: owner, label: 验收, separate: "${settings.review.separate}"}
     rework_to: [apply, design]
 
   - id: archive

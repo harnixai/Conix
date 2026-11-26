@@ -13,10 +13,20 @@ XForge 自己的状态机（`xflow`）、receipt 链、往 `.claude/` 的投影�
 governance:
   spec: true          # 规格基线：缺省 true
   interface: false    # 接口基线：缺省 false
+review:
+  separate: false     # 职责分离：缺省 false，作者也能批
 ```
 
-没有这个文件按缺省。关着的那条基线，它的命令仍能读，**写增量的子命令报"这个项目没开接口基线"**，它的门禁回
-`pass`、`summary` 写"不欠（governance.interface=false）"。`lib/governance.js` 的 `governance(flow)` 读它，所有脚本与命令都用这一个。
+它是包的设置（`bundle.yaml` 的 `settings`，flows.md §7.1），缺省写在 `bundle.yaml` 里。**运行启动时读一次、钉进运行**：
+运行里改这个文件不改这次的规则，只管之后启动的运行。为什么：开关决定欠不欠一条基线、谁能批，做到一半换了，前面的站是按旧规则
+做的、却按新规则判。要新规则就取消重开。没有这个文件按缺省；写坏了（不是 YAML、`separate: yes` 这类类型不对）启动就拒。
+
+- **基线**：关着的那条基线，它的命令仍能读，**写增量的子命令报"这个项目没开接口基线"**，它的门禁回 `pass`、`summary` 写
+  "不欠（governance.interface=false）"。`lib/governance.js` 的 `governance(flow)` 从 `flow.settings` 取，所有脚本与命令都用这一个；
+  运行之外调命令（`/flow:xforge:xspec list`）读的是文件此刻的内容。
+- **`review.separate`**：三条路径的每个 `confirm`（检查通过、验收、major 的范围定了）都写 `separate: "${settings.review.separate}"`。
+  `true` 时这次运行里交付过、做过任务或发起运行的人不能确认（flows.md §4.1 的 `not: [author]`），要别人批；缺省 `false`，
+  因为一个人用时作者就是批准人，强制了就走不通。
 
 项目的其他治理文件照旧：`.conix/governance/constitution.yaml`（原则）、`.conix/governance/verify.sh`（项目的验证，人写）。
 

@@ -1,4 +1,7 @@
 # xforge 流程包的治理开关（docs/design/xforge.md §1）：哪几条基线由这个项目治理。
+# 运行启动时读一次、钉进运行：改了只管之后启动的运行，在跑的照旧。
 governance:
   spec: true        # 规格基线：xforge/specs/
   interface: true   # 接口基线：xforge/interfaces/
+review:
+  separate: false   # 作者也能批；团队要分开（交付过的人不能确认）就改 true
