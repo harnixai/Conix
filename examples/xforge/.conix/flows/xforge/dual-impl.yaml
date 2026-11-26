@@ -1,0 +1,110 @@
+name: dual-impl
+title: 双路开发：实现
+description: >-
+  xforge/dual 的实现那一路，只做它的子运行：在自己的 worktree 里照分叉时的规格侧设计、独立检查、按工作包实施。
+  不改规格侧；看不到测试那一路。
+# 不单独起：spec_side 没有缺省，单独起时输入就不合；硬给一个，第一站的 spec-unchanged 也报"没有父运行"。
+# 包没有"只做子运行"的写法（bundle.yaml 的 flows 列的都能点名起），这是最省事又挡得住的一处。
+inputs:
+  title:
+    schema: {type: string, minLength: 1}
+    description: 变更的短标题（父运行的）
+  spec_side:
+    schema: {type: object, minProperties: 1, additionalProperties: {type: string}}
+    description: 父运行分叉前封存的规格侧摘要（xspec seal：文件 → sha256）。只由 xforge/dual 的 fork 站给，别处不要起这条流程
+policies: [by-commands]
+result:
+  from:
+    side: impl
+    summary: "${stations.design.output.summary}"
+    packages: "${stations.design.output.packages}"
+    done: "${stations.apply.output}"
+  schema:
+    type: object
+    required: [side, summary, packages, done]
+    properties:
+      side: {const: impl}
+      summary: {type: string}
+      packages:
+        type: array
+        minItems: 1
+        items: {type: object, required: [id, paths], properties: {id: {type: string}, paths: {type: array, items: {type: string}}}}
+      done:
+        type: array
+        minItems: 1
+        items: {type: object, required: [package, status], properties: {package: {type: string}, status: {const: done}, summary: {type: string}}}
+stations:
+  - id: design
+    title: 设计
+    executor: {kind: session}
+    skill: impl-design
+    writes: ["${output_dir}/**"]
+    deliverables:
+      - {path: design.md, template: design.md, description: 设计：做法、集成点、失败模式、迁移与回滚、被否决的方案、原则对照、工作包}
+    output:
+      type: object
+      required: [summary, packages]
+      properties:
+        summary: {type: string}
+        packages:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [id, title, paths]
+            properties:
+              id: {type: string}
+              title: {type: string}
+              paths: {type: array, minItems: 1, items: {type: string}}
+              after: {type: array, items: {type: string}}
+    exit:
+      - {kind: output}
+      - {kind: gate, gate: spec-unchanged}
+      - {kind: gate, gate: design-sections}
+      - {kind: gate, gate: constitution}
+      - {kind: gate, gate: packages-planned}
+      - {kind: gate, gate: ledgers-settled}
+    on_unmet: {rework_to: design, max: 2}
+
+  # 无人值守：检查留下没结的发现就打回设计，最多两次；之后等人。
+  - id: check
+    title: 独立检查
+    executor: {kind: agent}
+    skill: dual-check
+    policies: [review-only]
+    output:
+      type: object
+      required: [summary, ready]
+      properties: {summary: {type: string}, ready: {type: boolean}}
+    exit:
+      - {kind: output}
+      - {kind: gate, gate: spec-unchanged}
+      - {kind: gate, gate: ledgers-settled}
+      # 原则没答全是检查自己的活，不该把设计打回去。
+      - {kind: gate, gate: constitution-reply, rework_to: check}
+    on_unmet: {rework_to: design, max: 2}
+    rework_to: [design]
+
+  - id: apply
+    title: 实施
+    foreach: "${stations.design.output.packages}"
+    max_parallel: 1
+    executor: {kind: agent}
+    skill: impl-apply
+    retry: {max: 2}
+    writes: ["${item.paths}"]
+    output:
+      type: object
+      required: [package, status, summary]
+      properties: {package: {type: string}, status: {enum: [done, blocked]}, summary: {type: string}}
+    task_exit:
+      - {kind: gate, gate: package-check}
+      - {kind: gate, gate: package-tests}
+    exit:
+      - {kind: output}
+      - {kind: gate, gate: spec-unchanged}
+      - {kind: gate, gate: packages-done}
+      - {kind: gate, gate: unclaimed, rework_to: design}
+      - {kind: gate, gate: unit-tests}
+    on_unmet: {rework_to: apply, max: 2}
+    rework_to: [design]

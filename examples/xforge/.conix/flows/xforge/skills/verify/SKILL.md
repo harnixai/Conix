@@ -4,6 +4,8 @@ description: 对照规格与接口增量逐项验证，如实写验证记录。
 ---
 
 读 `proposal.md`、`xspec delta`、`xarch delta`、`xpkg list`（每个包的结果与证据），有设计就读 `design.md`。
+双路开发（xforge/dual）里设计与工作包在两路各自的目录：`${output_dir}/children/fork/impl/`、`${output_dir}/children/fork/tests/`
+（`design.md`、`work-packages.yaml`），黑盒测试是测试那一路写的；合起来那一站的结论在 `xledger list findings`。
 
 **覆盖**：增量里新增、修改的每条需求与每个元素各一行，清单从 `xspec delta`、`xarch delta` 取，不凭记忆列：
 `- TK-R3 通过：tests/test_textkit.py#test_truncate，<怎么验证的、看到了什么>`。结论只用"通过""未通过""未验证"之一。

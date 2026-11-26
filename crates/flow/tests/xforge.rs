@@ -56,7 +56,7 @@ fn stations(p: &DirPacks, flow: &str) -> Vec<String> {
 fn the_three_paths_and_every_part_they_name_hold_together() {
     let p = packs();
     let meta: BundleMeta = serde_yaml::from_str(&p.bundle_file("xforge", "bundle.yaml").unwrap()).unwrap();
-    assert_eq!(meta.flows, ["quick", "solid", "major"]);
+    assert_eq!(meta.flows, ["quick", "solid", "major", "dual", "dual-impl", "dual-tests"]);
     assert_eq!(meta.start.route, ["quick", "solid", "major"]);
     assert_eq!(meta.start.triage.as_deref(), Some("triage"));
     assert_eq!(meta.pace, Some(Pace::Auto));

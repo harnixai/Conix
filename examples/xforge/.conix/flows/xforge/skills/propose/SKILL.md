@@ -26,6 +26,9 @@ description: 把想法收敛成有边界的目标：写提案，把对规格与�
 - 改 `xarch modify <编号> [--signature S] [--description D]`，改 stable 的必须 `--breaking`；不再用的先 `xarch deprecate <编号>`，
   `remove` 只删已经 deprecated 的；升成 stable `xarch promote <编号>`；记错了 `xarch revert <编号>`。记完 `xarch check`。
 - 改了 stable 的元素，启动时的 impact 必须有 interface；没有就照上面换路时带上，或停下告诉用户。
+- 双路开发（xforge/dual）没有设计站：改了 stable 的元素，这一站就记接受了的决定（门禁 interface-compat 查）：
+  `xledger add decisions "<为什么非破坏不可、调用方怎么办>" --ref <元素编号>`，再 `xledger set decisions <D#> accepted "<说明>"`。
+  需求要写到两个互不相见的人照字面能做出对得上的东西：边界、出错时的表现都写进 WHEN / THEN。
 
 **快速变更没有设计站**：这一站顺手划工作包，`xpkg plan <编号> "<标题>" --paths a,b --criteria "判据一;判据二" [--after p1] [--verify <名字>[:参数=值]]`，验证名字从 `xpkg verify-menu` 里选（没有合适的就不写）。
 路径盖住它会改的每个文件，测试也算；判据是能验证的完成条件。交出的 `packages` 就是划的这些：`{id, title, paths, after}`，与 plan 一致。
