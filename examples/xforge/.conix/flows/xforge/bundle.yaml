@@ -1,5 +1,16 @@
 name: xforge
 title: XForge 开发流程
-description: 规格驱动的变更：提案与规格增量、设计与工作包、独立检查、按工作包实施、验证、归档。solid 是完整路径，quick 是低风险的小变更。
-version: 0.1.0
-commands: [xspec, xledger, xpkg]
+description: >-
+  规格驱动的变更：提案与规格、接口增量，设计与工作包，独立检查，按工作包实施，验证，归档并进基线。
+  按风险选路：quick 是低风险的小改动，solid 是常规变更，major 是高风险或跨系统的变更（先澄清）。
+version: 0.2.0
+flows: [quick, solid, major]
+start:
+  route: [quick, solid, major]
+  triage: triage
+pace: auto
+commands:
+  xspec: {read_only: [list, get, delta, check, pending, help]}
+  xarch: {read_only: [modules, list, get, delta, check, pending, help]}
+  xledger: {read_only: [list, help]}
+  xpkg: {read_only: [list, help]}

@@ -1,7 +1,14 @@
 name: proposal-sections
-title: 提案的三节都写了
+title: 提案的六节都写了
+description: proposal.md 有「背景」「目标」「非目标」「改什么」「影响面」「为什么选这条流程」六节，没有 TODO、TBD。
 kind: check
 check: text
 file: "${output_dir}/proposal.md"
-matches: ["(?m)^## 为什么", "(?m)^## 改什么", "(?m)^## 不改什么"]
+matches:
+  - "(?m)^## 背景\\s*$"
+  - "(?m)^## 目标\\s*$"
+  - "(?m)^## 非目标\\s*$"
+  - "(?m)^## 改什么\\s*$"
+  - "(?m)^## 影响面\\s*$"
+  - "(?m)^## 为什么选这条流程\\s*$"
 not_matches: ["TODO", "TBD"]

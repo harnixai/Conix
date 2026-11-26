@@ -1,0 +1,158 @@
+name: major
+title: 重大变更
+description: 高风险或跨系统的变更：提案、澄清（人答会改变范围的问题）、设计、独立检查、按工作包实施、验证、归档。
+inputs:
+  title:
+    schema: {type: string, minLength: 1}
+    description: 变更的短标题，也是归档的名字
+  risk:
+    schema: {enum: [low, medium, high]}
+    description: 风险：low 小而局部、好回退；medium 常规改动；high 跨模块、动接口或数据、难回退。这条流程都收
+  impact:
+    schema: {type: array, uniqueItems: true, items: {enum: [interface, security, data-migration, infra]}}
+    default: []
+    description: 影响面：动了对外接口 interface，动了鉴权与数据安全 security，要迁移数据 data-migration，动了部署与基础设施 infra
+policies: [by-commands]
+archive:
+  name: "${date}${seq}-${inputs.title}"
+stations:
+  - id: propose
+    title: 提案
+    executor: {kind: session}
+    skill: propose
+    writes: ["${output_dir}/**"]
+    deliverables:
+      - {path: proposal.md, template: proposal.md, description: 提案：背景、目标、非目标、改什么、影响面、为什么选这条流程}
+    output: {type: object, required: [summary], properties: {summary: {type: string}}}
+    exit:
+      - {kind: output}
+      - {kind: gate, gate: proposal-sections}
+      - {kind: gate, gate: impact}
+      - {kind: gate, gate: spec-delta-shape}
+      - {kind: gate, gate: spec-delta}
+      - {kind: gate, gate: interface-delta}
+    on_unmet: {rework_to: propose, max: 2}
+
+  # 不自动打回：问题要人答，答完人重跑这一站的出口（/xforge:clarify），再确认。
+  - id: clarify
+    title: 澄清
+    executor: {kind: session}
+    skill: clarify
+    writes: ["${output_dir}/**"]
+    output:
+      type: object
+      required: [summary]
+      properties: {summary: {type: string}, questions: {type: integer, minimum: 0}}
+    exit:
+      - {kind: output}
+      - {kind: gate, gate: ledgers-settled}
+      - {kind: confirm, who: owner, label: 范围定了}
+    rework_to: [propose]
+
+  - id: design
+    title: 设计
+    executor: {kind: session}
+    skill: design
+    writes: ["${output_dir}/**"]
+    deliverables:
+      - {path: design.md, template: design.md, description: 设计：做法、集成点、失败模式、迁移与回滚、被否决的方案、原则对照、工作包}
+    output:
+      type: object
+      required: [summary, packages]
+      properties:
+        summary: {type: string}
+        packages:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [id, title, paths]
+            properties:
+              id: {type: string}
+              title: {type: string}
+              paths: {type: array, minItems: 1, items: {type: string}}
+              after: {type: array, items: {type: string}}
+    exit:
+      - {kind: output}
+      - {kind: gate, gate: design-sections}
+      - {kind: gate, gate: constitution}
+      # 增量在设计站不过，多半是基线在这期间变了（别的运行归档了）：那是提案的活。
+      - {kind: gate, gate: spec-delta, rework_to: propose}
+      - {kind: gate, gate: interface-delta, rework_to: propose}
+      - {kind: gate, gate: interface-compat}
+      - {kind: gate, gate: packages-planned}
+      - {kind: gate, gate: ledgers-settled}
+    on_unmet: {rework_to: design, max: 2}
+    rework_to: [clarify, propose]
+
+  # 不自动打回：台账里 open 的发现根在哪一站，由人照检查的建议定。
+  - id: check
+    title: 独立检查
+    executor: {kind: agent}
+    skill: check
+    policies: [review-only]
+    output:
+      type: object
+      required: [summary, ready]
+      properties:
+        summary: {type: string}
+        ready: {type: boolean}
+        rework:
+          type: object
+          required: [to, reason]
+          properties: {to: {enum: [design, clarify, propose]}, reason: {type: string}}
+    exit:
+      - {kind: output}
+      - {kind: gate, gate: ledgers-settled}
+      - {kind: gate, gate: constitution-reply}
+      - {kind: confirm, who: reviewer, label: 检查通过}
+    rework_to: [design, clarify, propose]
+
+  - id: apply
+    title: 实施
+    foreach: "${stations.design.output.packages}"
+    max_parallel: 1
+    executor: {kind: agent}
+    skill: apply
+    retry: {max: 2}
+    writes: ["${item.paths}"]
+    output:
+      type: object
+      required: [package, status, summary]
+      properties: {package: {type: string}, status: {enum: [done, blocked]}, summary: {type: string}}
+    task_exit:
+      - {kind: gate, gate: package-check}
+    exit:
+      - {kind: output}
+      - {kind: gate, gate: packages-done}
+      # 没人认领的改动是工作包没划全：回设计补包或扩路径。
+      - {kind: gate, gate: unclaimed, rework_to: design}
+      - {kind: gate, gate: unit-tests}
+    on_unmet: {rework_to: apply, max: 2}
+    rework_to: [design]
+
+  - id: verify
+    title: 验证
+    executor: {kind: session}
+    skill: verify
+    writes: ["${output_dir}/**"]
+    deliverables:
+      - {path: verification.md, template: verification.md, description: 验证记录：覆盖（每条需求、每个元素的结论与测试）、连贯性}
+    output: {type: object, required: [summary], properties: {summary: {type: string}}}
+    exit:
+      - {kind: output}
+      - {kind: gate, gate: verification}
+      - {kind: gate, gate: unit-tests}
+      - {kind: confirm, who: owner, label: 验收}
+    rework_to: [apply, design]
+
+  - id: archive
+    title: 归档
+    tasks:
+      - {id: specs, executor: {kind: command, command: xspec, args: [archive]}}
+      - {id: interfaces, executor: {kind: command, command: xarch, args: [archive]}}
+    output: {type: object}
+    exit:
+      - {kind: output}
+      - {kind: gate, gate: archived}
+      - {kind: gate, gate: interfaces-archived}

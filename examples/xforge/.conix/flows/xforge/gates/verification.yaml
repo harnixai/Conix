@@ -1,11 +1,13 @@
 name: verification
-title: 每条需求都验证过、有测试
+title: 每条需求、每个元素都验证过、有测试
 description: >-
-  对 spec-delta.yaml 里 added 与 modified 的每个编号：verification.md 里有一行同时写着编号和结论（通过 / 未通过 / 未验证），
-  结论不能是未通过；项目里要有一个测试文件带注释 `# <编号>`。
+  verification.md 的「## 覆盖」一节里：规格增量 added 与 modified 的每个编号、接口增量 added 与 modified 的每个元素各一行，
+  写着结论（通过 / 未通过 / 未验证），结论不能是未通过；项目里要有一个测试文件带注释 `# <编号>`。另有「## 连贯性」一节、不是空的。
+  关着的基线不查它的增量（.conix/governance/xforge.yaml）。
 kind: script
 script: verification
 params:
-  delta: "${output_dir}/spec-delta.yaml"
+  spec_delta: "${output_dir}/spec-delta.yaml"
+  interface_delta: "${output_dir}/interface-delta.yaml"
   verification: "${output_dir}/verification.md"
   tests: "**/*test*.*"
