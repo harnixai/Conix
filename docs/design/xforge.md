@@ -64,8 +64,8 @@ elements:
 
 ### 2.4 归档
 
-`archive` 站用命令步骤跑 `xspec archive`：先核对，再把规格增量并进 `specs/`、接口增量并进 `interfaces/`（开了接口基线时），
-同一次调用；随后运行结束，流程库把运行目录留下的制品归档进 `${data_dir}/archive/<日期序号>-<标题>/`（已有）。
+`archive` 站是两个命令步骤：`xspec archive` 把规格增量并进 `specs/`，`xarch archive` 把接口增量并进 `interfaces/`（没开接口基线时
+回"没有要并的"）；各自先核对、对不上就不并，两者都过才出站。随后运行结束，流程库把运行目录留下的制品归档进 `${data_dir}/archive/<日期序号>-<标题>/`（已有）。
 
 ## 3. 命令
 
@@ -74,7 +74,7 @@ elements:
 | 命令 | 子命令（**粗体**只读） |
 |---|---|
 | `xspec` | **list** [能力]、**get** <编号>、**delta**、**check**、**pending**、init <能力> <前缀> "<标题>"、add <能力> "<标题>" "<正文>"、modify <编号> "<正文>" [--title T]、remove <编号>、revert <编号>、archive |
-| `xarch` | **modules**、**list** [模块]、**get** <编号>、**delta**、**check**、**pending**、module <模块> "<标题>" --paths a,b、add <模块> <种类> <名字> "<签名>" "<说明>" [--stable]、modify <编号> [--signature S] [--description D] [--breaking]、promote <编号>、deprecate <编号>、remove <编号>、revert <编号> |
+| `xarch` | **modules**、**list** [模块]、**get** <编号>、**delta**、**check**、**pending**、module <模块> "<标题>" --paths a,b、add <模块> <种类> <名字> "<签名>" "<说明>" [--stable]、modify <编号> [--signature S] [--description D] [--breaking]、promote <编号>、deprecate <编号>、remove <编号>、revert <编号>、archive |
 | `xledger` | **list** [种类]、add <种类> "<内容>" --ref a,b、set <种类> <编号> <结论> ["<说明>"]、reply <原则> complies\|violates\|n-a "<说明>" |
 | `xpkg` | **list**、plan <编号> "<标题>" --paths a,b --criteria "一;二" [--after p1,p2] [--verify "<怎么验证>"]、done <编号> "<做了什么>" --files a,b --evidence "C1=…;C2=…"、blocked <编号> "<卡在哪>" |
 
@@ -107,7 +107,8 @@ elements:
 | `unclaimed` | script | `flow.git.changed()`（基线提交以来，含没提交的）里的每个改动都在某个包的路径里 |
 | `unit-tests` | command | 跑 `.conix/governance/verify.sh` |
 | `verification` | script | `verification.md` 的「覆盖」里新增、修改的每条需求（和接口增量里新增、修改的元素）一行，有结论、有带 `# <编号>` 的测试；有「连贯性」一节 |
-| `archived` | script | 规格与接口增量都并进了基线 |
+| `archived` | script | 规格增量并进了基线 |
+| `interfaces-archived` | script | 接口增量并进了基线 |
 
 ## 5. 流程
 
@@ -123,11 +124,11 @@ data-migration / infra，缺省空）；各自的 `risk` schema 就是 eligibili
 | check 独立检查 | | ✓ | ✓ | 子 Agent，只看不改 | 不能写 | output、ledgers-settled、constitution-reply、confirm reviewer |
 | apply 实施 | ✓ | ✓ | ✓ | 每包一个任务（quick 会话，solid/major 子 Agent），按 `after` 排 | `${item.paths}` | 任务级 package-check；站 packages-done、unclaimed、unit-tests |
 | verify 验证 | ✓ | ✓ | ✓ | 会话 | 运行目录 | output、verification、unit-tests、confirm owner |
-| archive 归档 | ✓ | ✓ | ✓ | 命令步骤 `xspec archive` | — | output、archived |
+| archive 归档 | ✓ | ✓ | ✓ | 两个命令步骤：`xspec archive`、`xarch archive` | — | output、archived、interfaces-archived |
 
 回退点：每站的 `rework_to` 列出能退到的站；门禁的 `rework_to` 指向问题通常出在哪（如 design 站的 `spec-delta` 不过退回 propose）；
 检查站发现问题根在提案时用 `flow_propose` 建议退回提案（子 Agent 写进结果、由主 Agent 提）。确认缺省 `min: 1`，作者也能批；
-`binds` 缺省绑本站及之前的制品，批完再改就过不了下一站。
+`binds` 缺省绑本站及之前的制品，批完再改就过不了下一站；major 的澄清只绑 `questions` 台账（设计还要改提案）。
 
 skill：`triage`（判风险与影响面、选路）、`propose`、`clarify`、`design`、`check`、`apply`、`verify`；`archive` 是命令步骤，没有 skill。
 模板：`proposal.md`、`design.md`、`verification.md` 按 §4 的小节。

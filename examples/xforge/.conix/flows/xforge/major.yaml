@@ -46,7 +46,8 @@ stations:
     exit:
       - {kind: output}
       - {kind: gate, gate: ledgers-settled}
-      - {kind: confirm, who: owner, label: 范围定了}
+      # 批的是澄清的答复：设计还要让提案跟上增量，绑住提案就改不动它了。
+      - {kind: confirm, who: owner, label: 范围定了, binds: ["${output_dir}/ledgers/questions.yaml"]}
     rework_to: [propose]
 
   - id: design
