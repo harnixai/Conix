@@ -91,6 +91,8 @@ release: [carol]
   装进当前项目的 `.conix/flows/`（已有同名的要加 `--force`，旧的先备份，你写的 `local.md` 会带过去），`conix flow inspect <文件>`
   只看包里的 `MANIFEST.yaml` 并核对。实例里用 `/flow:export <包> [文件]`、`/flow:import <文件> [--force]`。包里有 `command` 门禁时，
   它们只在受信任的项目里运行。`local.md` 不进包；`export`、`import` 不能当包名。
+- **核对归档**：`conix flow verify <归档目录>` 看一份归档在写下之后有没有被改过：文件对着 `record.json` 的清单，
+  门禁证据与确认绑定的摘要重算，`record.json` 再对着这台机器上的运行账本。有问题就列出来，退出码非 0。
 - **内置的 `xforge`**：规格驱动的开发流程，`xforge/solid`（提案、设计、独立检查、按工作包实施、验证、归档）与 `xforge/quick`
   （提案、实施、验证、归档）。规格在 `conix/xforge/specs/`，站里的会话用 `xspec`、`xledger`、`xpkg` 三个命令记规格增量、
   台账、工作包，归档时增量并进规格。项目要准备的：`.conix/governance/verify.sh`（实施站的出口跑它：单测、lint），

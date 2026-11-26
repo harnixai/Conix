@@ -82,7 +82,7 @@
     （`dir` 相对项目，`record_sha256` 是写完时 `record.json` 的摘要）。账本模型写不了，所以 `record.json` 连同 `files`
     被改写也看得出来。**不做哈希链**：归档提交进 git，历史加账本里这一个摘要，批过的制品之后被改就看得见，
     链只会多出一套要维护的东西。
-  - `conix flow verify <归档目录>`（计划中的命令，调 `harnix_flow::archive::verify`）报告：`missing`（列了没有）、
+  - `conix flow verify <归档目录> [--project 目录]`（不要实例，直接读项目的运行账本，调 `harnix_flow::archive::verify`）报告：`missing`（列了没有）、
     `extra`（有了没列）、`changed`（摘要或大小不同）；门禁证据与确认绑定的摘要对着归档里的文件重算，不符的列出；
     `record` 是 `matches` / `differs` / `no_ledger`（账本里没有这次归档，如旧的）。没有 `files` 的旧归档只报
     `unlisted`、仍核对证据摘要——这是核对不了，不算失败。
