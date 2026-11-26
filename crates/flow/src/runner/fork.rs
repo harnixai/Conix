@@ -100,14 +100,22 @@ async fn fork(engine: &Engine, rec: &RunRecord, station: &str, task: &str, flow:
 
 /// In a child's new worktree `cw`: the parent's output directory as of now, where the fork commit
 /// did not carry it (git ignores it: a directory of runs) — never its process directory — and the
-/// child's own output directory in it.
+/// child's own output directory in it, empty.
 fn place(rec: &RunRecord, w: &WorktreeRec, cw: &WorktreeRec, station: &str, task: &str) -> std::io::Result<()> {
     let Some(out) = &rec.output_dir else { return Ok(()) };
     let Some(there) = mapped(out, Path::new(&w.path), Path::new(&cw.path)) else { return Ok(()) };
     if Path::new(out).is_dir() {
         copy_tree(Path::new(out), &there, &[PROCESS_DIR], false)?;
     }
-    std::fs::create_dir_all(child_output_dir(&there, station, task))
+    // After a rework the task's child of an earlier round left its directory in the parent's (merged
+    // or copied back), and so in this copy: a new child that started with it would take what it
+    // planned and recorded for its own (a work package done that this child never did). Its work is
+    // in the tree all the same, and its directory stays in the parent's until this child's replaces it.
+    let own = child_output_dir(&there, station, task);
+    if own.is_dir() {
+        std::fs::remove_dir_all(&own)?;
+    }
+    std::fs::create_dir_all(own)
 }
 
 /// The files under `from` copied to the same places under `to`: links left out, and the names in
@@ -293,7 +301,7 @@ mod tests {
         {id: spec, executor: {kind: external}, output: {type: object}, exit: [{kind: output}]}, \
         {id: dual, tasks: [{id: impl, executor: {kind: subflow, flow: c, workspace: worktree}}, \
                            {id: tests, executor: {kind: subflow, flow: c, workspace: worktree}}], exit: [{kind: children}]}, \
-        {id: join, exit: [{kind: confirm}]}]}";
+        {id: join, exit: [{kind: confirm}], rework_to: [dual]}]}";
     /// The same with no word on where it works: a start decides.
     const OPEN: &str = "{name: o, stations: [\
         {id: spec, executor: {kind: external}, output: {type: object}, exit: [{kind: output}]}, \
@@ -480,6 +488,61 @@ mod tests {
         assert_eq!(git_out(p, &["rev-parse", "main"]), main, "the project's own branch still untouched");
         // A child's worktree is not a person's to decide.
         assert!(super::super::worktree::end(&e, &one, WorktreeEnd::Merged, by()).await.is_err());
+    }
+
+    /// Sent back for one of its tasks, the station forks again for that one alone: a new fork commit
+    /// with both children's work merged, the new child's own directory empty though the parent's
+    /// holds what its predecessor left there, the other task's result kept.
+    #[tokio::test]
+    async fn a_task_sent_back_forks_again_from_a_new_commit_and_starts_in_an_empty_directory() {
+        if !have_git() {
+            return;
+        }
+        let r = repo();
+        let p = r.path();
+        let (e, rn) = setup(p);
+        let run = started(&rn, "p", p, None).await;
+        let rec = e.record(&run).await.unwrap();
+        let (wt, out) = (PathBuf::from(&rec.worktree.unwrap().path), PathBuf::from(rec.output_dir.unwrap()));
+        forked(&e, &rn, &run, &wt, &out).await;
+        let rec = e.record(&run).await.unwrap();
+        let first = rec.stations["dual"].fork.clone().unwrap();
+        let (one, two) = (child_of(&rec, "dual", "impl"), child_of(&rec, "dual", "tests"));
+        for (child, file) in [(&one, "src.txt"), (&two, "tests.txt")] {
+            let c = e.record(child).await.unwrap();
+            std::fs::write(Path::new(&c.worktree.unwrap().path).join(file), "round one\n").unwrap();
+            std::fs::write(Path::new(&c.output_dir.unwrap()).join("plan.yaml"), "done: true\n").unwrap();
+            delivered(&e, &rn, child).await;
+        }
+        assert!(out.join("children/dual/impl/plan.yaml").is_file());
+
+        let work = e.rework(&run, "dual", Some(vec!["impl".into()]), "the implementation is wrong", by()).await.unwrap().work;
+        let forks: Vec<_> = work.into_iter().filter(|w| matches!(w, WorkItem::Fork { .. })).collect();
+        assert_eq!(forks.len(), 1, "{forks:?}");
+        for w in forks {
+            if let WorkItem::Fork { run, station, task, token, .. } = w {
+                assert_eq!(task, "impl");
+                run_fork(&rn, run, station, task, token).await;
+            }
+        }
+        let rec = e.record(&run).await.unwrap();
+        let again = rec.stations["dual"].fork.clone().unwrap();
+        assert_eq!(again.round, first.round + 1);
+        assert_ne!(again.commit, first.commit);
+        assert_eq!(task_of(&rec, "dual", "tests").0, TaskStatus::Submitted, "the other's result kept");
+        let three = child_of(&rec, "dual", "impl");
+        assert_ne!(three, one);
+        let c = e.record(&three).await.unwrap();
+        let cw = PathBuf::from(&c.worktree.clone().unwrap().path);
+        assert_eq!(c.base_commit.as_deref(), Some(again.commit.as_str()));
+        // Both of the first round's merged in: the new one sees what it is to redo, and its sibling's.
+        assert!(cw.join("src.txt").is_file() && cw.join("tests.txt").is_file());
+        let own = PathBuf::from(c.output_dir.unwrap());
+        assert!(own.is_dir());
+        assert_eq!(std::fs::read_dir(&own).unwrap().count(), 0, "not its predecessor's plan");
+        let theirs = PathBuf::from(c.worktree.unwrap().fork.unwrap().parent_output_dir.unwrap());
+        assert!(theirs.join("children/dual/tests/plan.yaml").is_file());
+        assert!(out.join("children/dual/impl/plan.yaml").is_file(), "the parent's own copy untouched until the new one merges");
     }
 
     #[tokio::test]

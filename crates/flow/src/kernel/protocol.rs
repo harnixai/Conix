@@ -112,6 +112,16 @@ pub fn skill_with_output_dir(text: &str, output_dir: Option<&str>) -> String {
     }
 }
 
+/// A child's skill with `${parent.output_dir}` put in (`refs::parent_output_dir`): where the spec
+/// side its parent forked is. Only this path of the parent: a child in a worktree of its own reads
+/// that copy, never its parent's directory. A run of no parent leaves it as written.
+pub fn skill_with_parent_output_dir(text: &str, parent_output_dir: Option<&str>) -> String {
+    match parent_output_dir {
+        Some(dir) => text.replace("${parent.output_dir}", dir),
+        None => text.to_string(),
+    }
+}
+
 /// The whole first message a session task's session is sent: the protocol layer, the rules it
 /// works under (`rules`: name and text), then the skill's body under its name (`skill`: name and
 /// SKILL.md text).
@@ -664,6 +674,9 @@ stations:
     fn a_skill_may_name_the_output_directory() {
         assert_eq!(skill_with_output_dir("Write ${output_dir}/report.md.", Some("/p/flows/x-01")), "Write /p/flows/x-01/report.md.");
         assert_eq!(skill_with_output_dir("Write ${output_dir}/r.md, not ${run}.", None), "Write ${output_dir}/r.md, not ${run}.");
+        let both = skill_with_output_dir("Read ${parent.output_dir}/spec-delta.yaml, write ${output_dir}/design.md.", Some("/w/c/o"));
+        assert_eq!(skill_with_parent_output_dir(&both, Some("/w/c/p")), "Read /w/c/p/spec-delta.yaml, write /w/c/o/design.md.");
+        assert_eq!(skill_with_parent_output_dir("Read ${parent.output_dir}/a.", None), "Read ${parent.output_dir}/a.");
     }
 
     #[test]

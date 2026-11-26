@@ -25,7 +25,7 @@ use super::turns::{carry, wait_turn, HostSession, Turns, Waited};
 use super::Runner;
 use crate::kernel::host::{Delivery, Placement};
 use crate::kernel::parts::asked_tools;
-use crate::kernel::protocol::{skill_with_output_dir, task_message};
+use crate::kernel::protocol::{skill_with_output_dir, skill_with_parent_output_dir, task_message};
 use crate::kernel::run::{RunRecord, StationStatus, TaskStatus};
 
 /// What a session is opened with and keeps for good.
@@ -356,7 +356,8 @@ async fn with_session(rn: &Arc<Runner>, job: &SessionJob) {
         message: (!resume).then(|| {
             let packs = engine.packs_for(rec.project_root.as_deref());
             super::project::place_templates(&rec, packs.as_ref(), &key.station);
-            task_message_of(job, packs.as_ref(), rec.output_dir.as_deref(), rec.data_dir.as_deref())
+            let parent_out = crate::kernel::refs::parent_output_dir(&rec);
+            task_message_of(job, packs.as_ref(), rec.output_dir.as_deref(), rec.data_dir.as_deref(), parent_out.as_deref())
         }),
         resumed_running: resume && running,
     };
@@ -369,9 +370,15 @@ async fn with_session(rn: &Arc<Runner>, job: &SessionJob) {
     }
 }
 
-/// The protocol layer, the rules, then the skill (`${output_dir}` in it put in), from the packs
-/// of the run's project.
-fn task_message_of(job: &SessionJob, packs: &dyn crate::kernel::host::Packs, output_dir: Option<&str>, data_dir: Option<&str>) -> String {
+/// The protocol layer, the rules, then the skill (`${output_dir}`, `${data_dir}` and a child's
+/// `${parent.output_dir}` in it put in), from the packs of the run's project.
+fn task_message_of(
+    job: &SessionJob,
+    packs: &dyn crate::kernel::host::Packs,
+    output_dir: Option<&str>,
+    data_dir: Option<&str>,
+    parent_output_dir: Option<&str>,
+) -> String {
     let mut rules = vec![];
     for (name, pinned) in &job.rules {
         match packs.rule(name) {
@@ -391,7 +398,7 @@ fn task_message_of(job: &SessionJob, packs: &dyn crate::kernel::host::Packs, out
                 if job.skill_digest.as_ref().is_some_and(|d| *d != digest) {
                     tracing::warn!(skill = name, "the skill changed since the station was entered");
                 }
-                let body = skill_with_output_dir(&body, output_dir);
+                let body = skill_with_parent_output_dir(&skill_with_output_dir(&body, output_dir), parent_output_dir);
                 skill = Some((name.clone(), match data_dir {
                     Some(d) => body.replace("${data_dir}", d),
                     None => body,

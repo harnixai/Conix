@@ -90,11 +90,16 @@ pub fn context_in(run: &RunRecord, item: Option<&Value>, task: Option<&str>, wor
 /// the fork; otherwise the one it shares. `null` for a run of no parent.
 fn parent_of(run: &RunRecord) -> Value {
     let Some(p) = &run.parent else { return Value::Null };
-    let out = match run.worktree.as_ref().and_then(|w| w.fork.as_ref()) {
+    json!({"run": p.run, "output_dir": parent_output_dir(run)})
+}
+
+/// `${parent.output_dir}` of a child run (see [`parent_of`]); `None` for a run of no parent.
+pub fn parent_output_dir(run: &RunRecord) -> Option<String> {
+    run.parent.as_ref()?;
+    match run.worktree.as_ref().and_then(|w| w.fork.as_ref()) {
         Some(f) => f.parent_output_dir.clone(),
         None => run.output_dir.clone(),
-    };
-    json!({"run": p.run, "output_dir": out})
+    }
 }
 
 /// Select a path from a value; `None` if nothing is there.
