@@ -383,6 +383,18 @@ pub fn render(t: &TaskContext) -> String {
              confirm or force a station.\n",
         ),
     }
+    // The points are the definition's: a proposal to go anywhere else is refused, so the session
+    // is told where it may send the run back before it tries.
+    let points = st.rework_points();
+    if points.is_empty() {
+        s.push_str("- This station names no station to go back to: a rework cannot be asked for from here.\n");
+    } else {
+        s.push_str(&format!(
+            "- A rework from here may go back to {} only. When what is wrong was made in an earlier \
+             station, ask to go back there rather than patching it here.\n",
+            points.iter().map(|p| format!("`{p}`")).collect::<Vec<_>>().join(", ")
+        ));
+    }
     s
 }
 
@@ -508,6 +520,20 @@ mod tests {
             commands: &[],
             reworked: None,
         }
+    }
+
+    #[test]
+    fn a_session_is_told_where_a_rework_from_its_station_may_go() {
+        let def = FlowDef::parse(
+            "name: d\nstations: [{id: c, needs: [], executor: {kind: session, scene: harnix}, rework_to: [a], on_unmet: {rework_to: b, max: 1}, exit: [{kind: gate, gate: g, rework_to: c}]}, {id: a}, {id: b}]",
+        )
+        .unwrap();
+        let gates = BTreeMap::new();
+        let t = render(&ctx(&def, &[], &gates, &[], Delivery::FlowSubmit));
+        assert!(t.contains("may go back to `a`, `b`, `c` only") && t.contains("made in an earlier station"), "{t}");
+        let def = FlowDef::parse("name: d\nstations: [{id: a, executor: {kind: session, scene: harnix}}]").unwrap();
+        let t = render(&ctx(&def, &[], &gates, &[], Delivery::StructuredOutput));
+        assert!(t.contains("names no station to go back to"), "{t}");
     }
 
     #[test]

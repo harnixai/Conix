@@ -38,6 +38,10 @@ fn record(id: &str, flow: &str, subject: &str, rev: u64, at: u64) -> RunRecord {
         shown_in: None,
         worktree: None,
         governed: false,
+        pace: Default::default(),
+        routed: None,
+        switched: vec![],
+        proposals: vec![],
         def,
     }
 }

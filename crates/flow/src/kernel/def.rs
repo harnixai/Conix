@@ -80,10 +80,40 @@ pub struct FlowDef {
     /// A bundle's flow is archived when this is absent too.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub archive: Option<ArchiveDef>,
+    /// How a run of it goes from station to station: `auto` (the default) enters each as soon as
+    /// it can, `step` holds every station on entry for a person to release. A bundle's flow takes
+    /// its bundle's `pace` when it says none; a start may say otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pace: Option<Pace>,
     /// The bundle the flow was read from: set when it is read (`crate::bundle`), not written.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bundle: Option<String>,
     pub stations: Vec<Station>,
+}
+
+/// How a run goes from station to station.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "snake_case")]
+pub enum Pace {
+    /// Each station is entered as soon as its needs are done.
+    #[default]
+    Auto,
+    /// Each station is held on entry, as `hold: true` holds one: a person releases it.
+    Step,
+}
+
+impl Pace {
+    pub fn is_auto(&self) -> bool {
+        *self == Self::Auto
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Step => "step",
+        }
+    }
 }
 
 /// What a run leaves in its bundle's archive (in Conix: docs/design/layout.md §3).
@@ -514,11 +544,15 @@ pub enum ExitCond {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         label: Option<String>,
     },
-    /// A gate of the pack (`gates/<name>.yaml`) passes.
+    /// A gate of the pack (`gates/<name>.yaml`) passes. `rework_to`: where an automatic rework
+    /// goes when this gate fails, over the station's `on_unmet.rework_to` (it counts against
+    /// `on_unmet.max` all the same).
     Gate {
         gate: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         label: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        rework_to: Option<String>,
     },
     /// Someone confirms. `who` is an opaque label handed to the authorizer (a role, in Conix).
     /// `via: mcp` asks an outside approval system through MCP tools instead of a person here;
@@ -701,7 +735,7 @@ impl ExitCond {
     pub fn label(&self) -> String {
         let (label, made) = match self {
             Self::Output { label } => (label, "output".to_string()),
-            Self::Gate { label, gate } => (label, format!("gate {gate}")),
+            Self::Gate { label, gate, .. } => (label, format!("gate {gate}")),
             Self::Confirm { label, who, .. } => (
                 label,
                 who.as_ref()
@@ -819,6 +853,22 @@ impl Station {
             Work::Tasks(ts) => ts.into_iter().find(|t| t.id == task),
             Work::Foreach { task: t, .. } => Some(t),
         }
+    }
+
+    /// Every station a rework from here may name: its `rework_to`, its `on_unmet.rework_to`, and
+    /// its gates' `rework_to`, each once, in that order.
+    pub fn rework_points(&self) -> Vec<String> {
+        let mut out: Vec<String> = vec![];
+        let gates = self.exit.iter().filter_map(|e| match e {
+            ExitCond::Gate { rework_to: Some(r), .. } => Some(r),
+            _ => None,
+        });
+        for r in self.rework_to.iter().chain(self.on_unmet.as_ref().map(|u| &u.rework_to)).chain(gates) {
+            if !out.contains(r) {
+                out.push(r.clone());
+            }
+        }
+        out
     }
 
     /// The `who` label of the first `confirm` exit, if any.

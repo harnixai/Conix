@@ -10,6 +10,7 @@ pub mod layout;
 pub mod output;
 pub mod protocol;
 pub mod refs;
+pub mod route;
 pub mod run;
 pub mod schema;
 pub(crate) mod txn;

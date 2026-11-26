@@ -189,6 +189,9 @@ pub fn validate(def: &FlowDef, packs: &dyn Packs) -> Vec<Problem> {
             }
         }
     }
+    for m in super::route::bundle_problems(def, c.packs) {
+        c.flow(m);
+    }
     if def.workspace == Some(super::run::Workspace::Scratch) {
         c.flow("workspace: a flow's tasks work in the project or a worktree of it (project | worktree)".to_string());
     }
@@ -592,6 +595,23 @@ fn station_problems(c: &mut Ctx, s: &Station, cyclic: bool) {
     if let Some(u) = &s.on_unmet {
         if u.max == 0 {
             c.at(id, "on_unmet.max must be at least 1");
+        }
+    }
+    gate_rework_problems(c, s);
+}
+
+/// A gate's own rework point is one of the station's: it, its `rework_to`, its `on_unmet`'s —
+/// and only an automatic rework goes there, so the station must rework automatically.
+fn gate_rework_problems(c: &mut Ctx, s: &Station) {
+    for e in &s.exit {
+        let ExitCond::Gate { gate, rework_to: Some(r), .. } = e else { continue };
+        match &s.on_unmet {
+            None => c.at(&s.id, format!("gate {gate}: rework_to {r} needs on_unmet on the station (it says where an automatic rework goes)")),
+            Some(u) if *r != s.id && *r != u.rework_to && !s.rework_to.contains(r) => c.at(
+                &s.id,
+                format!("gate {gate}: rework_to {r} is not one of the station's rework points (the station itself, its rework_to, its on_unmet.rework_to)"),
+            ),
+            Some(_) => {}
         }
     }
 }

@@ -9,7 +9,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::def::FlowDef;
+use super::def::{FlowDef, Pace};
 use super::parts::Pinned;
 
 /// Whoever did something. The kernel records it and never interprets it.
@@ -698,6 +698,111 @@ pub struct RunRecord {
     /// Started from a governed flow (`Packs::governed`): it cannot be forced past a station.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub governed: bool,
+    /// How it goes from station to station: `step` holds every station on entry.
+    #[serde(default, skip_serializing_if = "Pace::is_auto")]
+    pub pace: Pace,
+    /// How its flow was chosen, when it was started by name (a child run's is its parent's word).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub routed: Option<RoutedRec>,
+    /// Each switch to another flow of its bundle, oldest first (`Engine::switch`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub switched: Vec<SwitchRec>,
+    /// What its stations' sessions proposed (a rework, a cancel) for a person to decide, oldest
+    /// first (`Engine::propose`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub proposals: Vec<ProposalRec>,
+}
+
+/// How a run's flow was chosen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "snake_case")]
+pub enum RoutedBy {
+    /// The start named the flow.
+    Named,
+    /// The start named its bundle, and the bundle's `start.route` took the first flow that
+    /// accepts the inputs.
+    Route,
+    /// As `route`, with inputs a model judged by the bundle's `start.triage` skill.
+    Triage,
+}
+
+/// How a run's flow was chosen, and why.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct RoutedRec {
+    pub by: RoutedBy,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+/// A run switched to another flow of its bundle before its first station passed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct SwitchRec {
+    pub from: String,
+    pub to: String,
+    pub by: Actor,
+    pub at: u64,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "snake_case")]
+pub enum ProposalKind {
+    Rework,
+    Cancel,
+}
+
+impl ProposalKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Rework => "rework",
+            Self::Cancel => "cancel",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "snake_case")]
+pub enum ProposalStatus {
+    /// Waiting for a person.
+    Open,
+    /// Done as proposed: the rework went to `to` (or the run was cancelled).
+    Accepted,
+    /// Not taken: a person said no, or the station moved on without it.
+    Dismissed,
+}
+
+/// What a station's session proposed for a person to decide.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct ProposalRec {
+    /// `p1`, `p2`, … within the run.
+    pub id: String,
+    pub station: String,
+    pub round: u32,
+    pub task: String,
+    pub kind: ProposalKind,
+    /// With `rework`: the station to go back to, one of the proposing station's rework points.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub to: Option<String>,
+    pub reason: String,
+    pub by: Actor,
+    pub at: u64,
+    pub status: ProposalStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub decided_by: Option<Actor>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub decided_at: Option<u64>,
+}
+
+impl ProposalRec {
+    pub fn is_open(&self) -> bool {
+        self.status == ProposalStatus::Open
+    }
 }
 
 /// A run's worktree of its project (`docs/glossary.md`, 项目任务): outside the project, in the
@@ -1209,6 +1314,9 @@ pub struct RunView {
     /// What the run is doing (`RunRecord::phase`, xops-03 §3).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub phase: Option<Phase>,
+    /// The proposals still waiting for a person (every one, decided or not, is in the record).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub proposals: Vec<ProposalRec>,
 }
 
 impl RunView {

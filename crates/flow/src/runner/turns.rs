@@ -719,7 +719,7 @@ mod tests {
                 "stations": {"a": {"status": "unmet", "round": 1}}
             }))
             .unwrap();
-            RunView { record: rec, unmet: [("a".to_string(), checks)].into(), phase: None }
+            RunView { record: rec, unmet: [("a".to_string(), checks)].into(), phase: None, proposals: vec![] }
         };
         let check = |kind: &str, detail: &str| CheckRec {
             cond: Some(0),
