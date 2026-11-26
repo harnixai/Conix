@@ -141,6 +141,14 @@ skill 写这一站怎么做好：读什么、按什么思路做，交付物的�
 - 结构化的数据（增量、台账、清单）交给包的命令：`commands/<名>.js` 是 `export default function (input, flow)`，`input.args` 是参数，
   `flow` 比脚本门禁的多 `write`、`append`、`remove`、`print`，只写得了运行的目录和 `${data_dir}`。站里的会话用
   `flow_command {command, args}` 调；策略可以拒模型直接写这些文件，命令照样能写。
+- 一个包里的几条流程是同一件事的几条路径。`flows: [quick, solid, major]` 定顺序；只给包名启动时，取 `start.route`（缺省就是
+  `flows`）里第一条 `inputs` 的 schema 接受这份输入的流程——所以 schema 就写清每条路径收什么（`risk: {schema: {enum: [low]}}`）。
+  输入定不了路时，`start.triage: <skill>` 指定模型照哪个 skill 判。第一站还开着、另一条流程也从这一站开始时，运行可以换路
+  （`flow_switch`）。
+- `pace: step`（写在 `bundle.yaml`、流程或启动时）让每一站进站都搁置，人一站一站放行。
+- 门禁可以写自己的回退点：`{kind: gate, gate: spec-delta, rework_to: propose}`，这道门不过时打回到这里而不是 `on_unmet.rework_to`，
+  次数仍算在 `on_unmet.max` 里；它只能是这一站、它的 `rework_to` 或 `on_unmet.rework_to`。站里的会话用 `flow_propose` 建议回退也只能
+  回到这些点，建议记在运行里，直到人接受或它不再相干。
 
 
 ### 串行：起草 → 人确认
@@ -211,6 +219,26 @@ stations:
     exit: [{kind: output}]
 ```
 
+包里的流程，列表可以由脚本给，干活也可以不用模型：
+
+```yaml
+  - id: build
+    foreach: {script: pending-packages}   # scripts/pending-packages.js 返回工作项
+    max_parallel: 2
+    executor: {kind: command, command: xpkg, args: [build, "${item.id}"]}
+    output: {type: object}
+    task_exit: [{kind: gate, gate: package-verify}]   # 每次交付都判，带着它的 ${item}
+    exit: [{kind: output}]
+```
+
+- `foreach: {script}`：进站时跑，脚本像门禁脚本一样只读，返回列表；抛错或不是列表，这一站没达标并说明原因。
+- 工作项写成 `{id, after: [<id>…]}`：它点名的几项做完（交了、收下了）才派它，`max_parallel` 里照样守着；`after` 指不到、
+  或者成环，这一站没达标；前面那项彻底失败，它也跟着失败。
+- `executor: {kind: command}` 不用模型，跑包声明的命令：返回值就是输出（不是对象时包成 `{result}`），抛错就是这次失败
+  （`retry` 管）；`input.by` 是 `{kind: station}`。
+- `task_exit`（只收门禁）在收下每个任务的交付之前判它。不过就退回：会话、子 Agent 收到发现、改了再交（同输出不合契约），
+  命令、程序这次失败。站自己的 `exit` 只看收下的交付。
+
 ### 规则、策略、门禁
 
 ```yaml
@@ -234,6 +262,11 @@ stations:
 ```
 
 `deny` 总是赢：流程级拒绝了的，站级放不开。所以通用的拒绝放在用得上的站上，放开的权限写在需要它的站上。
+
+**写入白名单 `writes`**：站（或 `foreach` 的任务）写了 `writes: [glob]`，它的 Write/Edit/NotebookEdit 在项目里只能写这些路径，
+其余的被拒，理由给模型看；运行目录（`_run/` 除外）永远可写。它不是 allow/deny 规则（`deny` 赢过 `allow`，白名单表达不了），所以单列；
+`deny` 照旧优先，项目外照 `guard`。`foreach` 里整条恰为数组引用（`writes: ["${item.paths}"]`）的按任务展开，每个工作包只能写自己的路径。
+**Bash 无法按路径检查，不受它约束**——要挡 shell 写文件，用 `deny` 加 `commands` 或不放行 Bash。
 
 包里配套的几样：
 

@@ -6,6 +6,7 @@ mod approvals;
 pub(crate) mod authorize;
 pub mod builtin;
 mod frames;
+mod goto;
 mod map;
 pub mod package;
 pub(crate) mod policy;
@@ -23,7 +24,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use harnix_flow::author::AuthorTools;
 use harnix_flow::dryrun::{Sandbox, SandboxConfig};
-use harnix_flow::runner::{CatalogPacks, Runner, RunnerConfig};
+use harnix_flow::runner::{CatalogPacks, CommandBy, CommandCall, Runner, RunnerConfig};
 use harnix_flow::{
     Actor, CreateIn, DirPacks, Engine, FileStore, MemPacks, Packs, ProjectLayout, RunQuery,
     RunStatus, Trigger,
@@ -300,10 +301,211 @@ impl Flows {
 
     pub(crate) async fn summaries(&self) -> Vec<port::FlowSummary> {
         let active = self.active_counts().await;
-        harnix_flow::wire::defs_list(self.packs().as_ref())
+        let packs = self.packs();
+        harnix_flow::wire::defs_list(packs.as_ref())
             .into_iter()
-            .map(|d| map::flow_summary(&d, active.get(&d.name).copied().unwrap_or(0)))
+            .map(|d| {
+                let mut s = map::flow_summary(&d, active.get(&d.name).copied().unwrap_or(0));
+                s.bundle = bundle_of(packs.as_ref(), &d.name);
+                s
+            })
             .collect()
+    }
+
+    /// 流程包的目录（`ListBundles`）：每个有 `bundle.yaml` 的包一项。不在包里的流程没有项，TUI 把流程名当包名。
+    pub(crate) fn bundles(&self) -> Vec<port::BundleInfo> {
+        let packs = self.packs();
+        let mut names: BTreeSet<String> = BTreeSet::new();
+        for flow in packs.flows() {
+            if let Some(b) = bundle_of(packs.as_ref(), &flow) {
+                names.insert(b);
+            }
+        }
+        names
+            .into_iter()
+            .map(|name| {
+                let meta = harnix_flow::bundle::meta_of(packs.as_ref(), &name).unwrap_or_default();
+                // 选路的顺序（`flows`，没写就按名字）；本地名是文件名的主干，包的主流程是库的 `MAIN_FLOW`。
+                let offered = harnix_flow::bundle::offered_stems(packs.as_ref(), &name);
+                let mut locals = meta.flow_order(&offered);
+                if offered.contains(harnix_flow::bundle::MAIN_FLOW)
+                    && !locals.iter().any(|l| l == harnix_flow::bundle::MAIN_FLOW)
+                {
+                    locals.push(harnix_flow::bundle::MAIN_FLOW.to_string());
+                }
+                let mut stations: Vec<port::StationId> = vec![];
+                for l in &locals {
+                    let full = harnix_flow::bundle::flow_name(&name, l);
+                    for s in packs
+                        .flow(&full)
+                        .map(|(d, _)| d.stations)
+                        .unwrap_or_default()
+                    {
+                        let id = port::StationId(s.id);
+                        if !stations.contains(&id) {
+                            stations.push(id);
+                        }
+                    }
+                }
+                port::BundleInfo {
+                    title: if meta.title.is_empty() {
+                        name.clone()
+                    } else {
+                        meta.title.clone()
+                    },
+                    flows: locals,
+                    commands: meta
+                        .commands
+                        .0
+                        .iter()
+                        .map(|(n, d)| port::CommandInfo {
+                            name: n.clone(),
+                            read_only: d.read_only.clone(),
+                            description: d.description.clone(),
+                        })
+                        .collect(),
+                    stations,
+                    triage: meta.start.triage.is_some(),
+                    pace: meta.pace.map(map::pace).unwrap_or_default(),
+                    name,
+                }
+            })
+            .collect()
+    }
+
+    /// 人跑包的命令（`/flow:<包>:<命令> …`）：写的子命令人在运行之外也能跑（模型不能，库按 `by` 拦）。
+    pub(crate) async fn flow_command(
+        &self,
+        bundle: &str,
+        command: &str,
+        args: Vec<String>,
+        run: Option<&str>,
+    ) -> Result<String, PortError> {
+        let by = Self::by();
+        let mut call = CommandCall::new(bundle, command, args, CommandBy::person(by.id));
+        call.run = run.map(str::to_string);
+        call.project_root = Some(PathBuf::from(&self.project));
+        self.runner
+            .run_command(call)
+            .await
+            .map(|r| r.shown())
+            .map_err(PortError::Failed)
+    }
+
+    /// 分诊的一轮：包的 `start.triage` skill 的正文、主题与已给的输入、各候选流程各收什么输入，
+    /// 以及判完怎么起（`flow_start` 带上判出的输入与理由）。写成给模型的英文，同 `flow_start` 自己的回答。
+    fn triage_turn(
+        &self,
+        bundle: &str,
+        skill: &str,
+        candidates: &[harnix_flow::kernel::route::RouteCandidate],
+        subject: &str,
+        inputs: &Value,
+    ) -> String {
+        let body = self
+            .packs()
+            .skill(skill)
+            .map(|(t, _)| harnix_flow::skill_body(&t))
+            .unwrap_or_default();
+        let flows: Vec<String> = candidates
+            .iter()
+            .map(|c| {
+                format!(
+                    "- {} {}: inputs {}",
+                    c.flow,
+                    if c.title.is_empty() {
+                        String::new()
+                    } else {
+                        format!("({})", c.title)
+                    },
+                    c.inputs
+                )
+            })
+            .collect();
+        format!(
+            "Start the flow bundle `{bundle}` for: {subject}\n\n\
+             The inputs given ({inputs}) do not decide which of its flows fits. Judge them as the triage skill \
+             below says (read what you need of the project), then call `flow_start` with flow `\"{bundle}\"`, \
+             `subject`, the `inputs` you judged and your `reason`.\n\n\
+             Flows:\n{}\n\nTriage skill ({skill}):\n{body}",
+            flows.join("\n")
+        )
+    }
+
+    /// 换路（`RunOp::Switch`）：`to` 是包里流程的本地名，库认完整名或文件名的主干。
+    pub(crate) async fn switch(
+        &self,
+        run: &str,
+        to: &str,
+        reason: Option<&str>,
+    ) -> Result<String, PortError> {
+        let bundle = self
+            .engine
+            .record(run)
+            .await
+            .map_err(flow_err)?
+            .def
+            .bundle
+            .ok_or_else(|| {
+                PortError::Failed(format!(
+                    "run {run} is in no bundle: no other flow to switch to"
+                ))
+            })?;
+        let full = harnix_flow::bundle::flow_name(&bundle, to);
+        let reason = reason.unwrap_or("switch from Conix");
+        let r = self
+            .engine
+            .switch(run, &full, reason, None, Self::by())
+            .await;
+        self.runner.settle(r).await.map_err(flow_err)?;
+        Ok(format!("switched the run to {full}"))
+    }
+
+    /// 站操作（[`goto`]）：回做了什么或在等什么。
+    pub(crate) async fn goto(
+        &self,
+        run: &str,
+        station: &str,
+        reason: Option<&str>,
+    ) -> Result<String, PortError> {
+        let view = self.engine.get(run).await.map_err(flow_err)?;
+        let by = Self::by();
+        let e = &self.engine;
+        let said = match goto::plan(&view, station).map_err(PortError::Failed)? {
+            goto::Plan::Say(text) => return Ok(text),
+            goto::Plan::Release => {
+                self.runner
+                    .settle(e.release(run, station, by).await)
+                    .await
+                    .map_err(flow_err)?;
+                format!("released station {station}")
+            }
+            goto::Plan::Retry(tasks) => {
+                for t in &tasks {
+                    self.runner
+                        .settle(e.retry(run, station, t, by.clone()).await)
+                        .await
+                        .map_err(flow_err)?;
+                }
+                format!("retried {} of station {station}", tasks.join(", "))
+            }
+            goto::Plan::RerunGates => {
+                self.runner
+                    .settle(e.rerun_gates(run, station, by).await)
+                    .await
+                    .map_err(flow_err)?;
+                format!("ran the gates of station {station} again")
+            }
+            goto::Plan::Rework => {
+                let reason = reason.unwrap_or("rework from Conix");
+                self.runner
+                    .settle(e.rework(run, station, None, reason, by).await)
+                    .await
+                    .map_err(flow_err)?;
+                format!("sent the run back to station {station}")
+            }
+        };
+        Ok(said)
     }
 
     /// 每个流程还没结束的运行有几个。
@@ -413,12 +615,27 @@ impl Flows {
         inputs: Value,
         trigger: Option<Trigger>,
     ) -> Result<port::RunSummary, PortError> {
+        self.start_run_paced(flow, subject, inputs, trigger, false)
+            .await
+    }
+
+    /// `step`：每一站进站都搁置，人用站操作一站站推（缺省的步调由流程与包定，这里只能要求步进）。
+    /// `flow` 是包名时库按包的 `start.route` 选流程。
+    pub(crate) async fn start_run_paced(
+        &self,
+        flow: &str,
+        subject: &str,
+        inputs: Value,
+        trigger: Option<Trigger>,
+        step: bool,
+    ) -> Result<port::RunSummary, PortError> {
         let input = CreateIn {
             flow: flow.to_string(),
             subject: subject.to_string(),
             inputs,
             project_root: Some(self.project.clone()),
             trigger,
+            pace: step.then_some(harnix_flow::kernel::def::Pace::Step),
             ..CreateIn::default()
         };
         let out = self
@@ -438,6 +655,15 @@ impl Flows {
         let by = Self::by();
         let e = &self.engine;
         let r = match &op {
+            RunOp::Goto { station, reason } => {
+                return self
+                    .goto(run, &station.0, reason.as_deref())
+                    .await
+                    .map(|_| ());
+            }
+            RunOp::Switch { to, reason } => {
+                return self.switch(run, to, reason.as_deref()).await.map(|_| ());
+            }
             RunOp::Pause => e.pause(run, by).await,
             RunOp::Resume => e.resume(run, by).await,
             RunOp::Cancel => e.cancel(run, "cancelled from Conix", by).await,
@@ -609,6 +835,16 @@ impl Flows {
     }
 }
 
+/// 流程所在的包：`<包>/<流程>`，或包的主流程（以包名出现、包里有 `bundle.yaml`）。
+fn bundle_of(packs: &dyn Packs, flow: &str) -> Option<String> {
+    match harnix_flow::bundle::split(flow) {
+        Some((b, _)) => Some(b.to_string()),
+        None => packs
+            .bundle_file(flow, harnix_flow::bundle::BUNDLE_FILE)
+            .map(|_| flow.to_string()),
+    }
+}
+
 pub(crate) fn flow_err(e: harnix_flow::FlowError) -> PortError {
     PortError::Failed(e.to_string())
 }
@@ -663,6 +899,29 @@ impl FlowPort for Flows {
     async fn command(&self, cmd: Command) -> Result<Reply, PortError> {
         match cmd {
             Command::ListFlows => Ok(Reply::Flows(self.summaries().await)),
+            Command::ListBundles => Ok(Reply::Bundles(self.bundles())),
+            Command::FlowCommand {
+                bundle,
+                command,
+                args,
+                run,
+            } => Ok(Reply::Text {
+                text: self
+                    .flow_command(&bundle, &command, args, run.as_ref().map(|r| r.0.as_str()))
+                    .await?,
+            }),
+            Command::RunOp {
+                run,
+                op: RunOp::Goto { station, reason },
+            } => Ok(Reply::Text {
+                text: self.goto(&run.0, &station.0, reason.as_deref()).await?,
+            }),
+            Command::RunOp {
+                run,
+                op: RunOp::Switch { to, reason },
+            } => Ok(Reply::Text {
+                text: self.switch(&run.0, &to, reason.as_deref()).await?,
+            }),
             Command::GetFlow { name } => Ok(Reply::Flow(Box::new(self.detail(&name).await?))),
             Command::ListRuns { flow } => {
                 // 库的列表摘要不带各站，站数要从运行记录算；读不到记录的退回列表摘要。
@@ -683,9 +942,38 @@ impl FlowPort for Flows {
                 flow,
                 subject,
                 inputs,
-            } => Ok(Reply::RunStarted(
-                self.start_run(&flow, &subject, inputs, None).await?,
-            )),
+                step,
+                session,
+            } => {
+                // 只给包、输入定不了路：不开运行，让主会话里的模型读项目、判输入，再 `flow_start`。
+                if let harnix_flow::kernel::route::Route::Triage {
+                    bundle,
+                    skill,
+                    candidates,
+                } = self
+                    .engine
+                    .route(&flow, &inputs, Some(&self.project))
+                    .map_err(flow_err)?
+                {
+                    let Some(session) = session else {
+                        return Err(PortError::Failed(format!(
+                            "the inputs do not decide which flow of {bundle} to start, and judging them is a model's: \
+                             start it from a chat, or name the flow ({bundle}/<flow>)"
+                        )));
+                    };
+                    let text = self.triage_turn(&bundle, &skill, &candidates, &subject, &inputs);
+                    let hub = self
+                        .hub
+                        .upgrade()
+                        .ok_or_else(|| PortError::Failed("the instance is stopping".into()))?;
+                    hub.submit_turn(&session.0, text).await?;
+                    return Ok(Reply::Triage { session });
+                }
+                Ok(Reply::RunStarted(
+                    self.start_run_paced(&flow, &subject, inputs, None, step)
+                        .await?,
+                ))
+            }
             Command::RunOp { run, op } => {
                 self.op(&run.0, op).await?;
                 Ok(Reply::Ok)

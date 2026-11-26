@@ -198,6 +198,113 @@ pub struct Granted {
     pub from: String,
 }
 
+/// The write allow-list a task works under (`Station.writes`), references resolved.
+///
+/// Its own value beside the permissions, not a permission among them: an allow-list cannot be
+/// said as allow/deny rules, because a `deny` beats an `allow` and "everything but these" would
+/// need a deny that the matching allow could not lift.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WriteScope {
+    /// Globs a write inside the project must match (a relative one is taken under the workspace).
+    pub globs: Vec<String>,
+    /// The run's own directory: always writable, but for its `_run/`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_dir: Option<String>,
+    /// Set when a reference could not be expanded at dispatch; the task fails with it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// The tools whose calls are writes of a file at the path they name.
+pub const WRITE_TOOLS: &[&str] = &["Write", "Edit", "MultiEdit", "NotebookEdit"];
+
+/// A station's `writes` with references resolved against `ctx`. An entry that is exactly one
+/// reference expands to the elements of the array it names (a string stays one entry): that is how
+/// each work package of a `foreach` gets only its own paths. Such elements are globs themselves,
+/// so they are not escaped (a reference inside a longer pattern is, as in a permission). Anything else the reference names
+/// is an `error`, and a pattern left empty matches nothing (fails closed, as an `allow` does).
+pub fn resolve_writes(writes: &[String], ctx: &Value, run_dir: Option<&str>) -> WriteScope {
+    let mut scope = WriteScope { run_dir: run_dir.map(String::from), ..Default::default() };
+    for w in writes {
+        let t = w.trim();
+        let whole = t.strip_prefix("${").and_then(|r| r.strip_suffix('}')).filter(|r| !r.contains("${"));
+        if let Some(r) = whole {
+            match super::refs::select(ctx, r.trim()) {
+                Some(Value::Array(items)) => {
+                    for it in items {
+                        match it {
+                            Value::String(s) if !s.is_empty() => scope.globs.push(s.clone()),
+                            other => {
+                                scope.error = Some(format!("writes entry {t}: an element is {other}, not a path string"));
+                            }
+                        }
+                    }
+                    continue;
+                }
+                Some(Value::String(s)) if !s.is_empty() => {
+                    scope.globs.push(s.clone());
+                    continue;
+                }
+                Some(Value::Null) | None | Some(Value::String(_)) => {}
+                Some(other) => {
+                    scope.error = Some(format!("writes entry {t}: the reference is {other}, not an array or a string"));
+                    continue;
+                }
+            }
+        }
+        let p = Permission { effect: Effect::Allow, tools: vec![], paths: vec![w.clone()], commands: vec![], args: BTreeMap::new(), message: String::new() };
+        scope.globs.extend(resolve_permission(&p, ctx).paths);
+    }
+    scope
+}
+
+/// Narrow a verdict by a write allow-list. Only an `allow` is narrowed: a `deny` stays, an `ask`
+/// is a person's. Only writes by [`WRITE_TOOLS`] to a path inside the project are: a path outside
+/// is `guard`'s (judged already), the project's reserved directories too, and the run's own
+/// directory is always the task's (but for `_run/`). A Bash call cannot be path-checked and is
+/// left alone.
+pub fn narrow_writes(scope: &WriteScope, v: Verdict, call: &Call, station: &str) -> Verdict {
+    if v.effect != Effect::Allow || !WRITE_TOOLS.contains(&call.tool) {
+        return v;
+    }
+    let Some(root) = call.root.map(|r| normalize(r, None)) else {
+        return v;
+    };
+    let run_dir = scope.run_dir.as_deref().map(|d| normalize(d, call.root));
+    let reserved: Vec<String> = call.reserved.iter().map(|r| normalize(r, call.root)).collect();
+    let agent_dirs: Vec<String> = call.agent_dirs.iter().map(|r| normalize(r, call.root)).collect();
+    let pats: Vec<String> = scope.globs.iter().map(|g| normalize(g, call.workspace)).collect();
+    let mut refused = vec![];
+    for path in call_paths(call) {
+        if !within(&path, &root) {
+            continue;
+        }
+        if reserved.iter().any(|r| within(&path, r)) && !agent_dirs.iter().any(|a| within(&path, a)) {
+            continue;
+        }
+        if let Some(d) = &run_dir {
+            if within(&path, d) && !within(&path, &format!("{}/_run", d.trim_end_matches('/'))) {
+                continue;
+            }
+        }
+        if !pats.iter().any(|p| glob(p, &path, true)) {
+            refused.push(path);
+        }
+    }
+    if refused.is_empty() {
+        return v;
+    }
+    let only = if scope.globs.is_empty() { "nothing in the project".to_string() } else { scope.globs.join(", ") };
+    Verdict {
+        effect: Effect::Deny,
+        reason: format!(
+            "station {station} of the flow may only write: {only} (and the run's own directory); {} is not among them. \
+             Write only there; if the task needs more, say so in your reply",
+            refused.join(", ")
+        ),
+    }
+}
+
 /// What a station's tasks work under, references unresolved, in order: the flow's policies, the
 /// flow's own permissions, the station's policies, the station's own. A policy the parts do not
 /// hold contributes nothing (validation reports it).
@@ -242,6 +349,14 @@ pub fn rules_of(def: &FlowDef, st: &Station) -> Vec<String> {
 pub fn asked_tools(def: &FlowDef, policies: &BTreeMap<String, PolicyDef>, guarded: &[String]) -> Vec<String> {
     let mut out: Vec<String> = guarded.to_vec();
     for st in &def.stations {
+        // A write allow-list is checked in the judgement, so those calls must reach it.
+        if !st.writes.is_empty() {
+            for t in WRITE_TOOLS {
+                if !out.iter().any(|o| o == t) {
+                    out.push((*t).to_string());
+                }
+            }
+        }
         for g in permissions_of(def, st, policies) {
             for t in &g.permission.tools {
                 if !out.contains(t) {
@@ -926,11 +1041,20 @@ pub struct Pinned {
     /// Command name → source, for a bundle's commands (in Conix; `flow_command`): pinned as scripts.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub commands: BTreeMap<String, String>,
+    /// Bundle-relative path (`lib/specs.js`) → source, for every file the pinned scripts and
+    /// commands import, followed to the end (in Conix): the loader reads only these, so a library
+    /// edited while the run goes on does not change how its gates judge.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub libs: BTreeMap<String, String>,
+    /// What `bundle.yaml` said of those commands when the run started (which subcommands only
+    /// read): pinned with them, so a run's commands are judged by the declaration they were pinned under.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub command_decls: BTreeMap<String, crate::bundle::CommandDecl>,
 }
 
 impl Pinned {
     pub fn is_empty(&self) -> bool {
-        self.policies.is_empty() && self.gates.is_empty() && self.scripts.is_empty() && self.commands.is_empty()
+        self.policies.is_empty() && self.gates.is_empty() && self.scripts.is_empty() && self.commands.is_empty() && self.libs.is_empty()
     }
 }
 
@@ -947,11 +1071,12 @@ pub fn uses(def: &FlowDef, kind: PartKind, name: &str) -> bool {
         PartKind::Gate => def.stations.iter().any(|s| {
             s.exit
                 .iter()
+                .chain(s.task_exit.iter())
                 .any(|e| matches!(e, super::def::ExitCond::Gate { gate, .. } if gate == name))
         }),
         PartKind::Hook => false,
-        // A gate names a script, a flow never does.
-        PartKind::Script => false,
+        // A gate names a script; a flow only for its items (`foreach: {script}`).
+        PartKind::Script => def.stations.iter().any(|s| s.foreach.as_ref().and_then(|f| f.script()) == Some(name)),
     }
 }
 
@@ -965,7 +1090,12 @@ pub fn pin(def: &FlowDef, packs: &dyn super::host::Packs) -> Pinned {
         }
     }
     for s in stations {
-        for e in &s.exit {
+        if let Some(name) = s.foreach.as_ref().and_then(|f| f.script()) {
+            if let Some((text, _)) = packs.part(PartKind::Script, name) {
+                out.scripts.insert(name.to_string(), text);
+            }
+        }
+        for e in s.exit.iter().chain(s.task_exit.iter()) {
             if let super::def::ExitCond::Gate { gate, .. } = e {
                 if let Some(g) = packs.gate(gate) {
                     if let Some(name) = g.script.as_ref().filter(|_| g.kind == GateKind::Script) {
@@ -985,11 +1115,24 @@ pub fn pin(def: &FlowDef, packs: &dyn super::host::Packs) -> Pinned {
             .and_then(|t| serde_yaml::from_str::<crate::bundle::BundleMeta>(&t).ok())
             .map(|m| m.commands)
             .unwrap_or_default();
-        for c in listed {
+        for (c, decl) in listed.0 {
             if let Some(src) = packs.bundle_file(b, &format!("commands/{c}.js")) {
-                out.commands.insert(c, src);
+                out.commands.insert(c.clone(), src);
+                out.command_decls.insert(c, decl);
             }
         }
+        // What those import: the bundle's own files, found by the paths the importers give.
+        let mut roots: Vec<(String, String)> = vec![];
+        for (name, src) in &out.scripts {
+            if let Some((_, local)) = crate::bundle::split(name) {
+                roots.push((format!("scripts/{local}.js"), src.clone()));
+            }
+        }
+        for (name, src) in &out.commands {
+            roots.push((format!("commands/{name}.js"), src.clone()));
+        }
+        let refs: Vec<(&str, &str)> = roots.iter().map(|(p, s)| (p.as_str(), s.as_str())).collect();
+        out.libs = crate::bundle::import_closure(&refs, &|p| packs.bundle_file(b, p));
     }
     out
 }
@@ -1108,6 +1251,59 @@ mod tests {
         assert_eq!(judge(&tmp, &g, &call("Write", Some(&t)), "s").effect, Effect::Allow);
         assert_eq!(normalize("a/./b//../c", Some("/r")), "/r/a/c");
         assert_eq!(normalize("/../x", None), "/x");
+    }
+
+    #[test]
+    fn writes_narrow_inside_the_project_only() {
+        let g = ["Write".to_string(), "Bash".to_string()];
+        let scope = WriteScope {
+            globs: vec!["src/a/**".into(), "/ws/r-1/docs/*.md".into()],
+            run_dir: Some("/ws/r-1/runs/x".into()),
+            error: None,
+        };
+        let deny = vec![perm("{effect: deny, tools: [Write], paths: ['**/secret.rs']}")];
+        let judged = |p: &[Granted], tool: &str, input: Value| {
+            let c = call(tool, Some(&input));
+            let v = judge_under(Guard::Auto, p, &g, &c, "s");
+            narrow_writes(&scope, v, &c, "s")
+        };
+        let w = |f: &str| json!({"file_path": f});
+        assert_eq!(judged(&[], "Write", w("src/a/x.rs")).effect, Effect::Allow);
+        assert_eq!(judged(&[], "Edit", w("docs/guide.md")).effect, Effect::Allow);
+        let v = judged(&[], "Write", w("src/b/x.rs"));
+        assert_eq!(v.effect, Effect::Deny);
+        assert!(v.reason.contains("may only write: src/a/**") && v.reason.contains("/ws/r-1/src/b/x.rs"), "{}", v.reason);
+        assert_eq!(judged(&[], "NotebookEdit", json!({"notebook_path": "n.ipynb"})).effect, Effect::Deny);
+        // The run's own directory is always writable, but for _run/.
+        assert_eq!(judged(&[], "Write", w("/ws/r-1/runs/x/out.md")).effect, Effect::Allow);
+        assert_eq!(judged(&[], "Write", w("/ws/r-1/runs/x/_run/state.json")).effect, Effect::Deny);
+        // An explicit deny keeps its own reason.
+        let v = judged(&deny, "Write", w("src/a/secret.rs"));
+        assert_eq!(v.effect, Effect::Deny);
+        assert!(v.reason.contains("does not allow Write"), "{}", v.reason);
+        // Outside the project is guard's, as before; reads and Bash are not narrowed.
+        let v = judged(&[], "Write", w("/home/u/x"));
+        assert!(v.reason.contains("outside the task's project"), "{}", v.reason);
+        assert_eq!(judged(&[], "Read", w("src/b/x.rs")).effect, Effect::Allow);
+        assert_eq!(judged(&[], "Bash", json!({"command": "echo > src/b/x"})).effect, Effect::Allow);
+        // An empty list leaves nothing writable in the project.
+        let input = w("a");
+        let c = call("Write", Some(&input));
+        let v = narrow_writes(&WriteScope::default(), Verdict { effect: Effect::Allow, reason: String::new() }, &c, "s");
+        assert_eq!(v.effect, Effect::Deny);
+    }
+
+    #[test]
+    fn writes_expand_an_array_reference_per_item() {
+        let ctx = json!({"item": {"paths": ["a/**", "b.rs"], "one": "c/*", "bad": 3, "mixed": ["x", 1]}, "workspace": "/ws"});
+        let r = |w: &[&str]| resolve_writes(&w.iter().map(|s| s.to_string()).collect::<Vec<_>>(), &ctx, Some("/ws/run"));
+        let ok = r(&["${item.paths}", "${item.one}", "${workspace}/docs/**"]);
+        assert_eq!(ok.globs, ["a/**", "b.rs", "c/*", "/ws/docs/**"]);
+        assert_eq!((ok.error, ok.run_dir.as_deref()), (None, Some("/ws/run")));
+        assert!(r(&["${item.bad}"]).error.unwrap().contains("not an array or a string"));
+        assert!(r(&["${item.mixed}"]).error.unwrap().contains("not a path string"));
+        // A reference that names nothing matches nothing.
+        assert_eq!(r(&["${item.nope}"]).globs, ["\u{0}"]);
     }
 
     #[test]

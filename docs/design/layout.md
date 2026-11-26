@@ -10,12 +10,13 @@
 <项目>/
 ├── .conix/                               脚手架：进 git
 │   ├── flows/<包>/                        一个流程包：自洽，整个目录拷走就能用
-│   │   ├── bundle.yaml                    包的说明（有它才是一个包）
+│   │   ├── bundle.yaml                    包的说明（有它才是一个包）：流程、选路、步进、命令
 │   │   ├── <流程>.yaml …                  一个或几个流程：同一件事的几条路径（比如 solid / quick）
 │   │   ├── skills/<名>/SKILL.md           local.md：用户在后面补的一节（§4）
 │   │   ├── gates/  scripts/  policies/  rules/  hooks/
+│   │   ├── lib/<名>.js                    包内共用的 JS：脚本与命令 import，不出包（flows.md §7.6）
 │   │   ├── templates/                     制品的骨架（站的 deliverables 引用）
-│   │   └── commands/<名>.js               包自己的命令（QuickJS），站里的会话经 flow_command 调
+│   │   └── commands/<名>.js               包自己的命令（QuickJS）：会话经 flow_command、人经 /… 命令、站经命令步骤调
 │   ├── flows/*.yaml、flows/skills/ …      旧的平铺布局：照旧能读（§5）
 │   ├── governance/                        项目的原则、治理文件：流程的门禁读它
 │   ├── roles.yaml  jobs.json  settings.json …
@@ -36,12 +37,29 @@
   读成这个包的；包里没有就是缺件，校验时报出来，不往别的包或内置的件里找。几条路径要共用的件放在同一个包里。
 - **名字**：包里的流程对外叫 `<包>/<文件名>`（`xforge/solid`）；文件叫 `flow.yaml` 时就叫包名（`brief`）。件也是
   `<包>/<名>`。流程文件里 `name:` 写文件名（`flow.yaml` 写包名）。
-- **`bundle.yaml`**：`name`（与目录名相同）、`title`、`description`、`version`。目录里有它才当一个包读；没有它的子目录
+- **`bundle.yaml`**：`name`（与目录名相同）、`title`、`description`、`version`，以及 `flows`（选路的顺序）、`start`（`route`、`triage`）、
+  `pace`、`commands`（`read_only` 声明）；字段见 flows.md §7.1。目录里有它才当一个包读；没有它的子目录
   （`skills/`、`gates/` …）是旧的平铺布局。
 - **来源与覆盖**：包可以随 Conix 内置、随插件来、或在项目的 `.conix/flows/` 里。项目里有**同名、带 `bundle.yaml`** 的包，
   整包代替其他来源的同名包；项目里同名目录**不带 `bundle.yaml`**，只是给它加 `local.md`（§4）。
+- **`lib/`**：包内共用的函数。脚本与命令用相对路径 `import`（`../lib/specs.js`），只认包内，不出包、没有 npm，随运行一起钉住。
+  门禁与命令共用一份判法放在这里。
+- **名字一个空间**：包里的流程名、命令名、站 id 不能重名，`help`、`status` 保留。地址里这三种名字共用一个位置，见下。
 - **命令**：`commands/<名>.js` 是包自己的命令。站里的会话用 `flow_command {command, args}` 调；命令读得到项目，只写得了
   这次运行的工作目录（`_run/` 除外）和包的数据目录 `conix/<包>/`。结构化的数据（规格增量、台账）由命令写，模型不手写。
+
+### 2.1 地址
+
+包里的东西用 `<包>:<名字>` 指：
+
+| 写法 | 在哪能用 | 指什么 |
+|---|---|---|
+| `<包>/<流程>`（`xforge/solid`） | 流程定义、`flow_start` | 一条流程；`flow.yaml` 叫包名 |
+| `<包>/<件>` | 流程定义里引用 | 包的件（skill、门禁、脚本、策略） |
+| `/flow:<包>[:<名字>]` | 全局的斜杠命令 | 名字是流程、站或命令，按包里的类别定 |
+| `/<包>:<名字>` | 流程上下文的斜杠命令 | 同上，运行就是当前对话所在的运行 |
+
+名字是哪一类由包里的名字空间定，规则见 interaction §4.5。
 
 ## 3. 运行与归档
 

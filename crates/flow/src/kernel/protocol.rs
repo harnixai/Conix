@@ -146,6 +146,8 @@ pub struct TaskContext<'a> {
     pub guarded: &'a [String],
     /// What the task works under, references resolved.
     pub permissions: &'a [Granted],
+    /// The task's write allow-list (`Station.writes`), resolved.
+    pub writes: Option<&'a super::parts::WriteScope>,
     /// The run's pinned gates, for the station's `gate` exits.
     pub gates: &'a BTreeMap<String, GateDef>,
     /// How the output is handed in.
@@ -334,7 +336,39 @@ pub fn render(t: &TaskContext) -> String {
             GateKind::Script | GateKind::Host => s.push_str(&format!("- Gate `{gate}`: {what}\n")),
         }
     }
+    let task_gates: Vec<String> = st
+        .task_exit
+        .iter()
+        .filter_map(|e| match e {
+            ExitCond::Gate { gate, .. } => Some(match t.gates.get(gate).filter(|g| !g.description.is_empty()) {
+                Some(g) => format!("`{gate}` ({})", g.description),
+                None => format!("`{gate}`"),
+            }),
+            _ => None,
+        })
+        .collect();
+    if !task_gates.is_empty() {
+        s.push_str(&format!(
+            "- What you hand in is taken only once it passes these checks of your own task: {}. They run \
+             when you hand in; until they answer, the hand-in waits. If one does not pass, it is not \
+             taken: what it found comes back to you — fix the work and hand in again, as for an output \
+             the contract refuses.\n",
+            task_gates.join("; ")
+        ));
+    }
     s.push_str(&permissions_text(t.permissions, t.guarded, t.guard, t.root));
+    if let Some(w) = t.writes {
+        let list = if w.globs.is_empty() {
+            "nothing in the project".to_string()
+        } else {
+            w.globs.iter().map(|g| format!("`{g}`")).collect::<Vec<_>>().join(", ")
+        };
+        s.push_str(&format!(
+            "- Write scope: inside the project this task may only write {list}, besides the run's own directory. \
+             Write, Edit and NotebookEdit anywhere else in the project are refused. Shell commands are not \
+             checked, but stay in the scope all the same.\n"
+        ));
+    }
     if let Some(dir) = t.output_dir {
         s.push_str(&format!(
             "- Deliverables — what the task produces for people to read — go in `{dir}`, the run's \
@@ -362,7 +396,7 @@ pub fn render(t: &TaskContext) -> String {
     if !t.commands.is_empty() {
         s.push_str(&format!(
             "- The flow's commands: {}. Run one with `flow_command {{command, args}}` (`args` a list of \
-             strings, as on a command line; `help` lists what it does). Structured data the flow keeps \
+             strings, as on a command line; `[\"help\"]` (or no `args`) answers its usage without running it). Structured data the flow keeps \
              (records, ledgers, deltas) is written with them, not by hand.\n",
             t.commands.iter().map(|c| format!("`{c}`")).collect::<Vec<_>>().join(", ")
         ));
@@ -382,6 +416,18 @@ pub fn render(t: &TaskContext) -> String {
              an earlier station done again, say so in your reply and a person decides. You cannot \
              confirm or force a station.\n",
         ),
+    }
+    // The points are the definition's: a proposal to go anywhere else is refused, so the session
+    // is told where it may send the run back before it tries.
+    let points = st.rework_points();
+    if points.is_empty() {
+        s.push_str("- This station names no station to go back to: a rework cannot be asked for from here.\n");
+    } else {
+        s.push_str(&format!(
+            "- A rework from here may go back to {} only. When what is wrong was made in an earlier \
+             station, ask to go back there rather than patching it here.\n",
+            points.iter().map(|p| format!("`{p}`")).collect::<Vec<_>>().join(", ")
+        ));
     }
     s
 }
@@ -498,6 +544,7 @@ mod tests {
             item: Some(&M1),
             guarded,
             permissions: granted,
+            writes: None,
             gates,
             delivery,
             executor: None,
@@ -508,6 +555,20 @@ mod tests {
             commands: &[],
             reworked: None,
         }
+    }
+
+    #[test]
+    fn a_session_is_told_where_a_rework_from_its_station_may_go() {
+        let def = FlowDef::parse(
+            "name: d\nstations: [{id: c, needs: [], executor: {kind: session, scene: harnix}, rework_to: [a], on_unmet: {rework_to: b, max: 1}, exit: [{kind: gate, gate: g, rework_to: c}]}, {id: a}, {id: b}]",
+        )
+        .unwrap();
+        let gates = BTreeMap::new();
+        let t = render(&ctx(&def, &[], &gates, &[], Delivery::FlowSubmit));
+        assert!(t.contains("may go back to `a`, `b`, `c` only") && t.contains("made in an earlier station"), "{t}");
+        let def = FlowDef::parse("name: d\nstations: [{id: a, executor: {kind: session, scene: harnix}}]").unwrap();
+        let t = render(&ctx(&def, &[], &gates, &[], Delivery::StructuredOutput));
+        assert!(t.contains("names no station to go back to"), "{t}");
     }
 
     #[test]

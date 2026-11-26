@@ -161,10 +161,28 @@ pub enum Command {
     GetRun {
         run: RunId,
     },
+    /// `flow` 可以是流程名、`<包>/<流程>`，或只有包名（实例按输入选路；输入定不了路又有分诊时，
+    /// 往 `session`（人敲命令时的对话）发一轮分诊，回 `Reply::Triage`）。`step` 为真是步进。
     StartRun {
         flow: String,
         subject: String,
         inputs: serde_json::Value,
+        #[serde(default)]
+        step: bool,
+        #[serde(default)]
+        session: Option<SessionId>,
+    },
+    /// 流程包的目录（补全与地址解析用）。
+    ListBundles,
+    /// 跑包的命令（`/flow:<包>:<命令> …`、流程上下文里 `/<包>:<命令> …`）。`run` 缺省时只有数据目录，
+    /// 要用运行目录的子命令报"要在运行里"。回 `Reply::Text`。
+    FlowCommand {
+        bundle: String,
+        command: String,
+        #[serde(default)]
+        args: Vec<String>,
+        #[serde(default)]
+        run: Option<RunId>,
     },
     RunOp {
         run: RunId,
@@ -290,6 +308,8 @@ impl Command {
             Command::GetRun { .. } => "get_run",
             Command::StartRun { .. } => "start_run",
             Command::RunOp { .. } => "run_op",
+            Command::ListBundles => "list_bundles",
+            Command::FlowCommand { .. } => "flow_command",
             Command::ExportFlow { .. } => "export_flow",
             Command::ImportFlow { .. } => "import_flow",
             Command::ListJobs => "list_jobs",
@@ -414,6 +434,15 @@ pub enum Reply {
     FlowExported(crate::FlowExported),
     FlowImported(crate::FlowImported),
     RunStarted(RunSummary),
+    /// `StartRun` 只给了包、输入定不了路：分诊在 `session` 里开始了，选了流程后模型自己再起运行。
+    Triage {
+        session: SessionId,
+    },
+    Bundles(Vec<crate::BundleInfo>),
+    /// 命令的文本输出，或站操作 / 换路做了什么：界面当本地输出显示，不进模型。
+    Text {
+        text: String,
+    },
     Jobs(Vec<Job>),
     Job(Job),
     JobHistory(Vec<JobEntry>),

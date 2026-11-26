@@ -80,10 +80,40 @@ pub struct FlowDef {
     /// A bundle's flow is archived when this is absent too.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub archive: Option<ArchiveDef>,
+    /// How a run of it goes from station to station: `auto` (the default) enters each as soon as
+    /// it can, `step` holds every station on entry for a person to release. A bundle's flow takes
+    /// its bundle's `pace` when it says none; a start may say otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pace: Option<Pace>,
     /// The bundle the flow was read from: set when it is read (`crate::bundle`), not written.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bundle: Option<String>,
     pub stations: Vec<Station>,
+}
+
+/// How a run goes from station to station.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "snake_case")]
+pub enum Pace {
+    /// Each station is entered as soon as its needs are done.
+    #[default]
+    Auto,
+    /// Each station is held on entry, as `hold: true` holds one: a person releases it.
+    Step,
+}
+
+impl Pace {
+    pub fn is_auto(&self) -> bool {
+        *self == Self::Auto
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Step => "step",
+        }
+    }
 }
 
 /// What a run leaves in its bundle's archive (in Conix: docs/design/layout.md §3).
@@ -282,9 +312,11 @@ pub struct Station {
     /// Several tasks, each with its own id.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tasks: Option<Vec<TaskSpec>>,
-    /// A reference to a list; one task per item.
+    /// The list of items, one task each: a reference (`${stations.<id>.output.<list>}`), or a
+    /// bundle's script that gives it (`{script: <name>}`), evaluated on entry. An item that is an
+    /// object may say `after: [<id>…]`: other items' `id`s whose tasks must be done first.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub foreach: Option<String>,
+    pub foreach: Option<Foreach>,
     /// With `foreach`: how many tasks may be in flight at once.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_parallel: Option<u32>,
@@ -301,6 +333,11 @@ pub struct Station {
     /// All must hold for the station to pass.
     #[serde(default)]
     pub exit: Vec<ExitCond>,
+    /// Gates each task's hand-in must pass before it is taken (only `gate` conditions), judged with
+    /// that task's context (`${item}`, `${task}`). One that does not pass sends the hand-in back to
+    /// the task to fix; the station's own `exit` is judged only over hand-ins taken.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub task_exit: Vec<ExitCond>,
     /// Stations (this one or an ancestor) a rework from here may go back to.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub rework_to: Vec<String>,
@@ -319,6 +356,13 @@ pub struct Station {
     /// Permissions this station works under besides the flow's.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub permissions: Vec<Permission>,
+    /// Where its tasks may write inside the project: globs (references allowed; a relative one
+    /// is taken under the workspace). An entry that is exactly a reference to an array
+    /// (`${item.paths}`) expands to its elements, per task. A Write/Edit/NotebookEdit to a project
+    /// path matching none is refused; the run's own directory is always writable. Bash is not
+    /// path-checked. Absent: no narrowing.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub writes: Vec<String>,
     /// The files it hands in (in Conix): told to its sessions, and checked on exit — each there, not
     /// empty, its template's mark gone.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -399,6 +443,14 @@ pub enum Executor {
     },
     /// The application's own code (`Programs`).
     Program { step: String },
+    /// A command of the run's bundle (`commands/<name>.js`), run by the flow with no model: what
+    /// it returns is the task's output (a value that is not an object as `{result: <value>}`), a
+    /// throw fails the attempt. `args` may hold references (`${item.id}`), resolved at dispatch.
+    Command {
+        command: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        args: Vec<String>,
+    },
     /// Waits to be claimed from outside: a person or an external agent. `who` is an opaque
     /// label handed to the authorizer.
     External {
@@ -420,6 +472,7 @@ impl Executor {
             Self::Session { .. } => "session",
             Self::Agent { .. } => "agent",
             Self::Program { .. } => "program",
+            Self::Command { .. } => "command",
             Self::External { .. } => "external",
             Self::Subflow { .. } => "subflow",
         }
@@ -429,7 +482,7 @@ impl Executor {
     pub fn is_push(&self) -> bool {
         matches!(
             self,
-            Self::Session { .. } | Self::Agent { .. } | Self::Program { .. }
+            Self::Session { .. } | Self::Agent { .. } | Self::Program { .. } | Self::Command { .. }
         )
     }
 
@@ -514,11 +567,15 @@ pub enum ExitCond {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         label: Option<String>,
     },
-    /// A gate of the pack (`gates/<name>.yaml`) passes.
+    /// A gate of the pack (`gates/<name>.yaml`) passes. `rework_to`: where an automatic rework
+    /// goes when this gate fails, over the station's `on_unmet.rework_to` (it counts against
+    /// `on_unmet.max` all the same).
     Gate {
         gate: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         label: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        rework_to: Option<String>,
     },
     /// Someone confirms. `who` is an opaque label handed to the authorizer (a role, in Conix).
     /// `via: mcp` asks an outside approval system through MCP tools instead of a person here;
@@ -534,6 +591,22 @@ pub enum ExitCond {
         mcp: Option<Box<McpApproval>>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         timeout: Option<String>,
+        /// Approvals needed to pass (1 when absent); each decision is one vote of the round.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        min: Option<u32>,
+        /// One vote per actor, a later vote replacing an earlier one (true when absent).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        distinct: Option<bool>,
+        /// When rejections make the exit not met (`any` when absent).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reject: Option<RejectRule>,
+        /// Who may not vote: `author`, the actors that delivered in this run and whoever started it.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        not: Vec<String>,
+        /// What an approval is of: files whose digests are recorded when the exit passes, checked
+        /// again before every later station passes (`deliverables` when absent).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        binds: Option<Binds>,
     },
     /// The station's child runs finished, enough of them delivering (`require`, default all).
     Children {
@@ -589,6 +662,38 @@ pub struct FlowResult {
     #[cfg_attr(feature = "ts", ts(type = "unknown"))]
     pub schema: Option<Value>,
 }
+
+/// When rejections make a `confirm` exit not met: one is enough (`any`), or as many as the
+/// approvals it needs (`majority`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "snake_case")]
+pub enum RejectRule {
+    #[default]
+    Any,
+    Majority,
+}
+
+/// What a `confirm` exit's approval binds: `deliverables` (those of the station and of the
+/// stations it needs, in the run's directory), or a list of paths and globs, where the word
+/// `deliverables` may stand among them. `[]` binds nothing.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(untagged)]
+pub enum Binds {
+    Word(BindsWord),
+    List(Vec<String>),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "lowercase")]
+pub enum BindsWord {
+    Deliverables,
+}
+
+/// The word in a `binds` list that stands for the deliverables.
+pub const BINDS_DELIVERABLES: &str = "deliverables";
 
 /// Who decides a confirmation.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -701,7 +806,7 @@ impl ExitCond {
     pub fn label(&self) -> String {
         let (label, made) = match self {
             Self::Output { label } => (label, "output".to_string()),
-            Self::Gate { label, gate } => (label, format!("gate {gate}")),
+            Self::Gate { label, gate, .. } => (label, format!("gate {gate}")),
             Self::Confirm { label, who, .. } => (
                 label,
                 who.as_ref()
@@ -767,10 +872,49 @@ pub enum Work {
     One(TaskSpec),
     Tasks(Vec<TaskSpec>),
     Foreach {
-        items: String,
+        items: Foreach,
         max_parallel: Option<u32>,
         task: TaskSpec,
     },
+}
+
+/// Where a `foreach` station's items come from.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(untagged)]
+pub enum Foreach {
+    /// One reference to a list (`${stations.<id>.output.<list>}`).
+    Ref(String),
+    /// A script of the bundle that returns the list.
+    Script(ForeachScript),
+}
+
+/// `foreach: {script: <name>}`: `scripts/<name>.js`, read-only as a gate script is, given the run
+/// (`inputs`, the stations' `outputs`, `run`, `output_dir`, `data_dir`) and returning the items.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(deny_unknown_fields)]
+pub struct ForeachScript {
+    pub script: String,
+}
+
+impl Foreach {
+    /// The script that gives the items, when a script does.
+    pub fn script(&self) -> Option<&str> {
+        match self {
+            Self::Script(s) => Some(&s.script),
+            Self::Ref(_) => None,
+        }
+    }
+}
+
+impl std::fmt::Display for Foreach {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Ref(r) => f.write_str(r),
+            Self::Script(s) => write!(f, "script {}", s.script),
+        }
+    }
 }
 
 impl Work {
@@ -819,6 +963,22 @@ impl Station {
             Work::Tasks(ts) => ts.into_iter().find(|t| t.id == task),
             Work::Foreach { task: t, .. } => Some(t),
         }
+    }
+
+    /// Every station a rework from here may name: its `rework_to`, its `on_unmet.rework_to`, and
+    /// its gates' `rework_to`, each once, in that order.
+    pub fn rework_points(&self) -> Vec<String> {
+        let mut out: Vec<String> = vec![];
+        let gates = self.exit.iter().filter_map(|e| match e {
+            ExitCond::Gate { rework_to: Some(r), .. } => Some(r),
+            _ => None,
+        });
+        for r in self.rework_to.iter().chain(self.on_unmet.as_ref().map(|u| &u.rework_to)).chain(gates) {
+            if !out.contains(r) {
+                out.push(r.clone());
+            }
+        }
+        out
     }
 
     /// The `who` label of the first `confirm` exit, if any.

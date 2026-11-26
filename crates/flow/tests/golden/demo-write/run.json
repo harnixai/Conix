@@ -164,6 +164,9 @@
     }
   },
   "rev": 11,
+  "routed": {
+    "by": "named"
+  },
   "seq": 28,
   "session_keys": {
     "@main": {

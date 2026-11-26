@@ -133,6 +133,9 @@
     }
   },
   "rev": 6,
+  "routed": {
+    "by": "named"
+  },
   "seq": 17,
   "session_keys": {
     "@main": {

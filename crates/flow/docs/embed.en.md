@@ -458,6 +458,15 @@ is so as not to collide with Harnix's own next one; what changes for a host is l
   `CheckStatus::Error` is a gate that did not conclude: the station is unmet but not reworked
   automatically. **`Engine::rerun_gates`** (`Op::RerunGates`) runs a station's gates that did not pass
   again; `flow_retry` without `task` calls it.
+- **Write allow-lists** (`Station::writes`, a list of globs; new field `WorkItem::Task::writes:
+  Option<WriteScope>`): with `writes` set, a Write/Edit/MultiEdit/NotebookEdit to a project path
+  matching none is refused with a reason the model reads. The run's own directory is always writable
+  (but for `_run/`), `deny` still wins, paths outside the project are judged by `guard` as before; an
+  entry that is exactly an array reference (`${item.paths}`) expands per task. Bash cannot be
+  path-checked and is not covered. A host that judges calls itself calls
+  `narrow_writes(&scope, verdict, &call, station)` after `judge_under`; a reference that cannot be
+  expanded sets `WriteScope::error` and the runner fails the task. New exports: `WriteScope`,
+  `resolve_writes`, `narrow_writes`, `WRITE_TOOLS`.
 - **Command gates**: `env` names the variables passed (none by default), `RunnerConfig::env_deny`
   the ones never passed; `result: json` reads the result the command prints. A command that could
   not start or ran out of time is an `error`.
@@ -522,6 +531,58 @@ is so as not to collide with Harnix's own next one; what changes for a host is l
 - **A bundle's commands** (`TOOL_COMMAND`, `flow_command {command, args}`): the `commands/<name>.js` its `bundle.yaml`
   lists, pinned in `Pinned::commands`; run in the library's QuickJS with `write`, `append`, `remove` and `print` besides a
   gate script's `flow`, writing only the run's directory (not `_run/`) and `${data_dir}`. Not a read-only tool.
+- **Commands as an entry of their own** (in Conix): `bundle.yaml`'s `commands` is a list of names (every subcommand
+  writes) or a map `{name: {read_only: [first args…], description}}` (`bundle::Commands`, `CommandDecl`, pinned in
+  `Pinned::command_decls`); `bundle::is_read_only`, `bundle::command_help` (the file's leading `//` block; `help` or no
+  arguments answers it without running), `bundle::namespace_problems` and `validate::bundle_problems` (a bundle's flow
+  names, command names and station ids are one namespace; `help` and `status` reserved). `Runner::run_command(CommandCall
+  {bundle, command, args, run?, by: CommandBy{kind: person|model|station, id}, project_root?, …})` runs one with or
+  without a run (without: the current packs, `output_dir` null, writes only the bundle's data directory; a call whose
+  first argument is declared read-only gets a writer that throws; a **model** outside a run may make only those),
+  `Runner::is_read_only`. The command's `input` gains `by`, `run`. `FlowTools::call_in(session, tool, input, project)`
+  answers `flow_command {command: "bundle:name" | "name", args, run?}` for a session that serves no task too;
+  `command_tool_spec()` is its spec alone. Writes to one bundle's data directory (commands that may write, archiving) are
+  serialized across runs. API note: `BundleMeta::commands` is now `Commands` (was `Vec<String>`; `.names()`).
+- **Confirmations that count** (`ExitCond::Confirm` gains `min`, `distinct`, `reject` — `RejectRule` —, `not` and `binds` —
+  `Binds`, `BindsWord`, `BINDS_DELIVERABLES`): each decision is a vote of the round (a rework starts a new count); one per
+  actor id unless `distinct: false`; `reject: any` (default) is not met on one rejection, `majority` on `min` of them.
+  `not: [author]` makes `Engine::confirm` refuse (`Denied`) an actor that handed in a task of the run, worked one, or started
+  the run; an outside approval decided by one is an `error`. When the exit passes, what it `binds` (default: the
+  deliverables of the station and those it needs) is hashed by the runner and kept on the vote, `ConfirmRec::binds`
+  (`ConfirmRec::cond`: the exit an outside vote is for); every later station, before it passes, has an implicit
+  `confirm-stale` check that they are unchanged. Both go out as `WorkItem::Gate` under reserved names
+  (`confirm-binds@<exit>`, `confirm-stale@`) and come back through `gate_result`; a host that runs gates itself hands those
+  to the runner or answers them as it would any gate. `RunView::votes` (`Votes{cond, approvals, rejections, min}`) says
+  where each `confirm` exit stands.
+
+- **Starting by a bundle, triage, switching** (module `kernel::route`): `bundle.yaml` gains `flows` (their order),
+  `start: {route, triage}` (`bundle::StartDef`) and `pace`; what they name is checked with every flow of the bundle. A start
+  naming a bundle with no flow of its own name is routed — the first flow of `start.route` whose inputs accept the start's —
+  by `Engine::create` itself, `Engine::resolve_start` (for a host that makes something for the flow first; the runner's
+  `start_run` does) and `Engine::route(name, inputs, project_root)` (`Route::Flow{flow, by, reason}` or
+  `Route::Triage{bundle, skill, candidates}`, `RouteCandidate`). `CreateIn::routed` says how the starter chose (`RoutedRec`,
+  `RoutedBy`: `named`, `route`, `triage`); `RunRecord::routed` keeps it. `flow_start` answers a triage with the skill's text
+  and the candidates, nothing started. **`Engine::switch(run, to, reason, inputs, by)`** (`Op::Switch`, `flow_switch`,
+  `TOOL_SWITCH`): to another flow of the run's bundle while its first station is the one open, re-pinned, the station entered
+  again; `RunRecord::switched` (`SwitchRec`), event `run.switched`. `RUN_TOOLS` is nine long.
+- **Pace** (`Pace`: `auto`, `step`): `FlowDef::pace`, the bundle's, `CreateIn::pace`; `RunRecord::pace`. `step` holds every
+  station on entry as `hold: true` holds one.
+- **Rework points**: `ExitCond::Gate` gains `rework_to` — where `on_unmet` goes when that gate fails (the earliest of the
+  failing checks' points); `Station::rework_points` lists a station's (`rework_to`, `on_unmet.rework_to`, its gates').
+- **Proposals on the run**: `Engine::propose(run, station, task, token, kind, to, reason, by)` (`Op::Propose`;
+  `flow_propose` calls it, then sends its note as before) checks `to` against the station's rework points and records a
+  `ProposalRec` (`ProposalKind`, `ProposalStatus`) in `RunRecord::proposals`; a rework there accepts it, the station moving on
+  dismisses it, `Engine::dismiss_proposal` (`Op::DismissProposal`) too. `RunView::proposals` lists the open ones; events
+  `proposal.opened`, `proposal.accepted`, `proposal.dismissed`.
+- **Command steps, scripted items, item order, task-level exits** (Conix's M3, M9):
+  `Executor::Command{command, args}` (`kind: command`) runs a bundle's declared command as a station's task, no model;
+  it returns the output (a non-object as `{result}`). `Station::foreach` is a `Foreach` (`Ref` or
+  `Script(ForeachScript)`); a script's items are asked for with **`WorkItem::Items`** and reported through
+  **`Engine::foreach_items`**. An item's `after: [<id>]` holds its task back until those items' tasks are done.
+  `Station::task_exit` (gates only) judges each hand-in before it is taken: **`WorkItem::TaskGate`**, reported through
+  **`Engine::task_gate_result`**; `TaskRec::task_exit` (`TaskExitRec`) keeps the hand-in and its checks, event
+  `task.checked`. `Gates::run_for_task` (default: `Gates::run`) is a host gate on one task. `Work::Foreach::items`
+  is now a `Foreach` (was a `String`); `Mocks::items` mocks a script's items in a dry run.
 
 ### `FLOW_API_VERSION = 1`
 
@@ -576,3 +637,20 @@ Migration: a host that used the kernel from `harnix-ext-flow` keeps `harnix_ext_
 re-exports the whole library); one that depends on the library directly writes `harnix_flow::X`.
 Run state written before these changes is not read: `show_in_space` and the bare session ids are
 gone, and a store directory without `FORMAT` is refused — clear it, or migrate it by hand.
+
+## Bundle JavaScript: imports and `flow.*` (in Conix)
+
+- Scripts (`scripts/*.js`) and commands (`commands/*.js`) of a bundle may `import` other files of the same bundle by
+  relative path (`../lib/specs.js`); `lib/` is the intended place. Module names are bundle-relative paths. A bare
+  specifier (`fs`), a path leaving the bundle, or any import in a flow outside a bundle is an error. The files a run's
+  scripts and commands import (followed to the end) are pinned with it (`Pinned::libs`); the loader reads only those.
+  Gate trials resolve imports from the packs.
+- `flow.*` shares names with Agix's `agix.*`: `flow.yaml.{parse,stringify,parseFrontmatter,stringifyFrontmatter}`,
+  `flow.glob.{test,filter}` (pure, as `agix.glob`; `flow.glob(pattern)` still lists files; no `{a,b}` or `[abc]`),
+  `flow.path.*` (as `path.posix`), `flow.sha256` / `flow.hash.sha256` (strings only), `flow.json.validate(schema, value)`.
+  `flow.schema.validate(value, schema)` is the older form.
+- `flow.git.base()` (the run's `RunRecord::base_commit`, also `${base_commit}`), `flow.git.head()`,
+  `flow.git.changed({since?})` (committed since, staged, unstaged and untracked; sorted; without the artifacts
+  directory and the data directory); `flow.runs.list({bundle?, active?})` and `flow.runs.get(id)` (a snapshot of the
+  project's runs: `{id, flow, bundle, subject, status, inputs, output_dir, data_dir, stations: {id: status}}`).
+- `Prepared` gained `base_commit` (build it with `..Default::default()`).

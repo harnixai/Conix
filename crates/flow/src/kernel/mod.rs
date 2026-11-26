@@ -2,14 +2,18 @@
 //! leases and the protocol layer. It starts no session and touches no disk; it
 //! reads and commits through the host traits in [`host`].
 
+pub(crate) mod confirm;
 pub mod def;
 pub mod engine;
 pub mod parts;
 pub mod host;
+pub(crate) mod handin;
+pub(crate) mod items;
 pub mod layout;
 pub mod output;
 pub mod protocol;
 pub mod refs;
+pub mod route;
 pub mod run;
 pub mod schema;
 pub(crate) mod txn;

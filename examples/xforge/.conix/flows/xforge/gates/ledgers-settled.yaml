@@ -1,18 +1,9 @@
 name: ledgers-settled
 title: 台账里没有悬而未决的
-kind: check
-check: schema
-file: "${output_dir}/ledgers/*.yaml"
-schema:
-  type: object
-  required: [entries]
-  properties:
-    entries:
-      type: array
-      items:
-        type: object
-        required: [id, text, conclusion]
-        properties:
-          conclusion:
-            enum: [accepted, rejected, resolved, deferred]
-            description: "open 的条目要先有结论：xledger set <种类> <编号> accepted|rejected|resolved|deferred"
+description: >-
+  运行目录 ledgers/ 里的每份台账：decisions、risks 没有 open；findings 没有 open / disputed、有 ref、
+  rejected 与 deferred 是检查站或人给的；questions 是人答的。规矩与 xledger 同一份（lib/ledger.js）。
+kind: script
+script: ledgers-settled
+params:
+  dir: "${output_dir}/ledgers"

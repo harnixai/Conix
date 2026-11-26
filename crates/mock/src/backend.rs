@@ -536,6 +536,7 @@ impl ScriptedBackend {
                         origin: port::FlowOrigin::Project,
                         active_runs: 0,
                         source: None,
+                        bundle: None,
                     }));
                 }
                 Ok(Reply::FlowImported(port::FlowImported {
@@ -577,24 +578,99 @@ impl ScriptedBackend {
                 .get(run)
                 .map(|r| Reply::Run(Box::new(r.clone())))
                 .ok_or_else(|| PortError::Failed(format!("没有运行 {run}"))),
-            StartRun { flow, subject, .. } => {
-                let view = self.start_run(flow, subject)?;
+            StartRun {
+                flow,
+                subject,
+                inputs,
+                step,
+                session,
+            } => {
+                let (bundle, flows) = {
+                    let state = st();
+                    (
+                        state.bundles.iter().find(|b| &b.name == flow).cloned(),
+                        state
+                            .flows
+                            .iter()
+                            .map(|f| f.summary.name.clone())
+                            .collect::<Vec<_>>(),
+                    )
+                };
+                let full = match crate::flowops::pick(bundle.as_ref(), flow, inputs, &flows)
+                    .map_err(PortError::Failed)?
+                {
+                    crate::flowops::Pick::Flow(full) => full,
+                    crate::flowops::Pick::Triage(b) => {
+                        // 分诊：往主会话发一轮，由模型判断后自己再起运行。
+                        let sid = match session {
+                            Some(s) => s.clone(),
+                            None => {
+                                let s = self.new_session(
+                                    &format!("{b} triage"),
+                                    None,
+                                    None,
+                                    None,
+                                    port::Origin::User,
+                                );
+                                self.emit_now(Event::SessionUpserted(s.clone()));
+                                s.id
+                            }
+                        };
+                        self.answer_with(&sid, crate::flowops::triage_reply(&b, subject));
+                        return Ok(Reply::Triage { session: sid });
+                    }
+                };
+                let view = self.start_run(&full, subject, *step)?;
                 let summary = view.summary.clone();
                 self.emit_now(Event::RunDetail(Box::new(view)));
                 Ok(Reply::RunStarted(summary))
             }
             RunOp { run, op } => {
-                if effects {
-                    let mut view = st()
-                        .runs
-                        .get(run)
-                        .cloned()
-                        .ok_or_else(|| PortError::Failed(format!("没有运行 {run}")))?;
-                    apply_run_op(&mut view, op);
-                    self.emit_now(Event::RunUpserted(view.summary.clone()));
-                    self.emit_now(Event::RunDetail(Box::new(view)));
+                if !effects {
+                    return Ok(Reply::Ok);
                 }
-                Ok(Reply::Ok)
+                let mut view = st()
+                    .runs
+                    .get(run)
+                    .cloned()
+                    .ok_or_else(|| PortError::Failed(format!("没有运行 {run}")))?;
+                let text = match op {
+                    port::RunOp::Goto { station, .. } => {
+                        Some(crate::flowops::goto(&mut view, station).map_err(PortError::Failed)?)
+                    }
+                    port::RunOp::Switch { to, .. } => {
+                        let full = crate::flowops::full_name(&view, to);
+                        let stations = st()
+                            .flows
+                            .iter()
+                            .find(|f| f.summary.name == full)
+                            .map(|f| f.stations.clone())
+                            .ok_or_else(|| PortError::Failed(format!("没有流程 {full}")))?;
+                        Some(
+                            crate::flowops::switch(&mut view, &full, stations)
+                                .map_err(PortError::Failed)?,
+                        )
+                    }
+                    _ => {
+                        apply_run_op(&mut view, op);
+                        None
+                    }
+                };
+                self.emit_now(Event::RunUpserted(view.summary.clone()));
+                self.emit_now(Event::RunDetail(Box::new(view)));
+                Ok(text.map_or(Reply::Ok, |text| Reply::Text { text }))
+            }
+            ListBundles => Ok(Reply::Bundles(st().bundles.clone())),
+            FlowCommand {
+                bundle,
+                command,
+                args,
+                run,
+            } => {
+                let info = st().bundles.iter().find(|b| &b.name == bundle).cloned();
+                crate::flowops::command_text(info.as_ref(), command, args, run.is_some())
+                    .map(|text| Reply::Text { text })
+                    .map_err(PortError::Failed)
             }
             ListJobs => Ok(Reply::Jobs(
                 st().jobs.values().map(|(j, _)| j.clone()).collect(),
@@ -754,7 +830,7 @@ impl ScriptedBackend {
                             }
                         }
                         port::JobKind::Flow { flow, subject, .. } => {
-                            let view = self.start_run(flow, subject)?;
+                            let view = self.start_run(flow, subject, false)?;
                             let t = JobTarget::Run {
                                 id: view.summary.id.clone(),
                                 subject: view.summary.subject.clone(),
@@ -826,13 +902,13 @@ impl ScriptedBackend {
         }
     }
 
-    fn start_run(&self, flow: &str, subject: &str) -> Result<RunView, PortError> {
-        let stations = {
+    fn start_run(&self, flow: &str, subject: &str, step: bool) -> Result<RunView, PortError> {
+        let (stations, bundle) = {
             let st = self.state.lock().unwrap();
             st.flows
                 .iter()
                 .find(|f| f.summary.name == flow)
-                .map(|f| f.stations.clone())
+                .map(|f| (f.stations.clone(), f.summary.bundle.clone()))
                 .ok_or_else(|| PortError::Failed(format!("没有流程 {flow}")))?
         };
         let main = self.new_session(subject, None, None, None, port::Origin::User);
@@ -852,6 +928,12 @@ impl ScriptedBackend {
                 started_ms: self.now_ms(),
                 ended_ms: None,
                 usage: Usage::default(),
+                bundle,
+                pace: if step {
+                    port::Pace::Step
+                } else {
+                    port::Pace::Auto
+                },
             },
             main_session: main.id,
             stations: stations
@@ -866,6 +948,7 @@ impl ScriptedBackend {
                 .collect(),
             def_digest: String::new(),
             def_state: port::DefState::Current,
+            proposals: vec![],
         };
         advance(&mut view);
         Ok(view)
@@ -883,7 +966,11 @@ impl ScriptedBackend {
             );
             return;
         }
-        let reply = format!("（mock）收到：{text}");
+        self.answer_with(session, format!("（mock）收到：{text}"));
+    }
+
+    /// 一轮回答：开始、分块的文字、结束。
+    fn answer_with(&self, session: &SessionId, reply: String) {
         let chars: Vec<char> = reply.chars().collect();
         let mut steps = vec![Step {
             after: 0,
@@ -977,7 +1064,7 @@ fn command_session(cmd: &Command) -> Option<SessionId> {
 }
 
 /// 进站：所有前置都已通过（或跳过）的待进入站开始进行；没有可做的且都结束了则运行完成。
-fn advance(view: &mut RunView) {
+pub(crate) fn advance(view: &mut RunView) {
     let done =
         |s: &port::StationView| matches!(s.status, StationStatus::Passed | StationStatus::Skipped);
     let finished: HashSet<_> = view
@@ -986,6 +1073,7 @@ fn advance(view: &mut RunView) {
         .filter(|s| done(s))
         .map(|s| s.id.clone())
         .collect();
+    let step = view.summary.pace == port::Pace::Step;
     let mut prev: Option<port::StationId> = None;
     let ids: Vec<_> = view.stations.iter().map(|s| s.id.clone()).collect();
     for (i, s) in view.stations.iter_mut().enumerate() {
@@ -997,7 +1085,12 @@ fn advance(view: &mut RunView) {
         if matches!(s.status, StationStatus::Pending | StationStatus::Stale)
             && needs.iter().all(|n| finished.contains(n))
         {
-            s.status = StationStatus::Working;
+            // 步进：进站都搁置，等人放行。
+            s.status = if step {
+                StationStatus::Held
+            } else {
+                StationStatus::Working
+            };
         }
         prev = Some(ids[i].clone());
     }
@@ -1026,7 +1119,7 @@ fn advance(view: &mut RunView) {
     }
 }
 
-fn apply_run_op(view: &mut RunView, op: &RunOp) {
+pub(crate) fn apply_run_op(view: &mut RunView, op: &RunOp) {
     let station = |view: &mut RunView, id: &port::StationId| -> Option<usize> {
         view.stations.iter().position(|s| &s.id == id)
     };
@@ -1034,6 +1127,40 @@ fn apply_run_op(view: &mut RunView, op: &RunOp) {
         RunOp::Pause => view.summary.status = RunStatus::Paused,
         RunOp::Resume => view.summary.status = RunStatus::Running,
         RunOp::Cancel => view.summary.status = RunStatus::Cancelled,
+        // 多人确认：一票一票记，够 `min` 才过；驳回一票就不过（`reject: any`）。
+        RunOp::Confirm {
+            station: id,
+            reject,
+            ..
+        } if station(view, id).is_some_and(|i| view.stations[i].votes.is_some()) => {
+            let i = station(view, id).unwrap_or_default();
+            let st = &mut view.stations[i];
+            if let Some(v) = st.votes.as_mut() {
+                if *reject {
+                    v.rejections += 1;
+                    st.status = StationStatus::Unmet;
+                    st.unmet = Some("rejected".into());
+                } else {
+                    v.approvals += 1;
+                    if v.approvals >= v.min {
+                        st.status = StationStatus::Passed;
+                        st.unmet = None;
+                    }
+                }
+            }
+            view.summary.status = RunStatus::Running;
+            advance(view);
+            if view.stations[i].status == StationStatus::Working
+                && let Some(v) = view.stations[i].votes
+            {
+                view.summary.status = RunStatus::Waiting {
+                    reason: format!(
+                        "待确认：{} {}/{}",
+                        view.stations[i].title, v.approvals, v.min
+                    ),
+                };
+            }
+        }
         RunOp::Confirm { station: id, .. }
         | RunOp::Release { station: id }
         | RunOp::Force { station: id, .. } => {
@@ -1048,6 +1175,8 @@ fn apply_run_op(view: &mut RunView, op: &RunOp) {
             view.summary.status = RunStatus::Running;
             advance(view);
         }
+        // 站操作与换路由 `flowops` 定做什么，再落到上面这些。
+        RunOp::Goto { .. } | RunOp::Switch { .. } => {}
         RunOp::Retry { station: id } => {
             if let Some(i) = station(view, id) {
                 view.stations[i].status = StationStatus::Working;
@@ -1056,6 +1185,16 @@ fn apply_run_op(view: &mut RunView, op: &RunOp) {
             view.summary.status = RunStatus::Running;
         }
         RunOp::Rework { to, .. } => {
+            // 接受建议就是打回到它建议的站；别的在等的建议随这次打回作废。
+            for p in &mut view.proposals {
+                if p.status == port::ProposalStatus::Open {
+                    p.status = if &p.to == to {
+                        port::ProposalStatus::Accepted
+                    } else {
+                        port::ProposalStatus::Dismissed
+                    };
+                }
+            }
             if let Some(i) = station(view, to) {
                 for s in &mut view.stations[i..] {
                     if s.status != StationStatus::Skipped {

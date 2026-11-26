@@ -151,6 +151,15 @@ else. Its flows are named `<bundle>/<flow>`, its parts `<bundle>/<name>`; saving
   flow)`, `input.args` its arguments, `flow` a gate script's plus `write`, `append`, `remove`, `print`, writing only the run's
   directory and `${data_dir}`. A station's session runs one with `flow_command {command, args}`; a policy may refuse the model
   writing those files, the command still can.
+- Several flows of one bundle are paths of one piece of work. `flows: [quick, solid, major]` orders them; a start naming the
+  bundle alone takes the first of `start.route` (default: `flows`) whose `inputs` schemas accept what it was given — so the
+  schemas say what each path is for (`risk: {schema: {enum: [low]}}`). When the inputs given cannot decide, `start.triage: <skill>`
+  names the skill a model judges them by before starting. A run may switch to another flow of its bundle (`flow_switch`) while its
+  first station is open, if that flow starts with the same station.
+- `pace: step` (in `bundle.yaml`, a flow, or a start) holds every station on entry for a person to release, one by one.
+- A gate may say where a failure goes back to: `{kind: gate, gate: spec-delta, rework_to: propose}` — over `on_unmet.rework_to`,
+  counted in `on_unmet.max`; it is the station itself, its `rework_to` or its `on_unmet.rework_to`. A station's session proposes a
+  rework only to those points (`flow_propose`), and the run records what it proposed until a person takes it or it is moot.
 
 
 ### In sequence: draft, then a person confirms
@@ -219,6 +228,28 @@ stations:
     exit: [{kind: output}]
 ```
 
+In a bundle, the list can come from a script and the work need no model:
+
+```yaml
+  - id: build
+    foreach: {script: pending-packages}   # scripts/pending-packages.js returns the items
+    max_parallel: 2
+    executor: {kind: command, command: xpkg, args: [build, "${item.id}"]}
+    output: {type: object}
+    task_exit: [{kind: gate, gate: package-verify}]   # each hand-in, with its ${item}
+    exit: [{kind: output}]
+```
+
+- `foreach: {script}`: the script reads as a gate script does and returns the list, when the station is entered; a throw or no
+  list leaves the station unmet with why.
+- An item `{id, after: [<id>…]}` waits until the items it names are done (handed in and taken), within `max_parallel`; an
+  `after` naming no item, or going round, leaves the station unmet; one after an item that failed for good fails too.
+- `executor: {kind: command}` runs one of the bundle's declared commands with no model: its return value is the output (a value
+  that is no object as `{result}`), a throw fails the attempt (`retry` applies); `input.by` is `{kind: station}`.
+- `task_exit` (gates only) judges each task's hand-in before it is taken. One that does not pass sends it back: a session or
+  sub-agent is told what was found and hands in again (as for an output the contract refuses), a command or program fails the
+  attempt. The station's own `exit` sees only hand-ins taken.
+
 ### Rules, policies, gates
 
 ```yaml
@@ -242,6 +273,14 @@ stations:
 ```
 
 `deny` always wins: what the flow refuses, no station opens. So a general refusal goes on the stations it is for, and what is opened is written where it is needed.
+
+**Write allow-list `writes`**: a station (or a `foreach` task) with `writes: [glob]` may Write/Edit/NotebookEdit only
+those paths inside the project; the rest are refused with a reason the model reads. The run's own directory (but for
+`_run/`) is always writable. It is not an allow/deny rule (a `deny` beats an `allow`, so an allow-list cannot be said
+with them), hence its own field; `deny` still wins and paths outside the project are `guard`'s. In a `foreach`, an
+entry that is exactly an array reference (`writes: ["${item.paths}"]`) expands per task, so each work package writes
+only its own paths. **Bash cannot be path-checked and is not covered**: to keep a shell from writing, deny it with
+`commands` or do not allow it.
 
 The parts beside it:
 

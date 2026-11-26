@@ -16,7 +16,7 @@ use super::def::{Executor, FlowDef, TaskSpec, Work};
 use super::engine::{Engine, MAX_FOREACH_ITEMS, MAX_LEASE_MS, MAX_SUBFLOW_DEPTH};
 use super::host::{ChangeSet, Event, Outcome, WorkItem};
 use super::parts::{GateKind, Pinned};
-use super::refs::{asserts_fail, context_in, resolve, resolve_str, station_output};
+use super::refs::{asserts_fail, context_in, resolve, station_output};
 use super::run::{
     Actor, CheckRec, CheckStatus, History, Lease, ParentRef, RunRecord, RunStatus, StationRec,
     StationStatus, TaskRec, TaskStatus, Trigger, Workspace,
@@ -114,6 +114,12 @@ impl<'e> Txn<'e> {
         &self.slots[id].rec
     }
 
+    /// A loaded run's record itself: for a change the state machine cannot make, since it reads
+    /// the definition once (a switch to another flow).
+    pub fn get_mut(&mut self, id: &str) -> &mut RunRecord {
+        &mut self.slots.get_mut(id).expect("run loaded").rec
+    }
+
     pub fn insert_new(&mut self, rec: RunRecord) {
         self.slots.insert(rec.id.clone(), Slot { rec, orig: None });
     }
@@ -170,7 +176,7 @@ impl<'e> Txn<'e> {
                     let mut m = self.m(&parent.run);
                     m.by = Actor::flow("dispatch");
                     match result {
-                        Ok(out) => m.task_submitted(&parent.station, &parent.task, out),
+                        Ok(out) => m.hand_in(&parent.station, &parent.task, out, None).await,
                         Err(e) => m.task_failed(&parent.station, &parent.task, e),
                     }
                     self.fx.advance.insert(parent.run);
@@ -262,6 +268,8 @@ impl<'e> Txn<'e> {
                             child.output_dir = up.output_dir.clone();
                             child.data_dir = up.data_dir.clone();
                             child.worktree = up.worktree.clone();
+                            child.base_commit = up.base_commit.clone();
+                            child.pace = super::route::pace_of(&child.def, packs.as_ref(), None);
                             Ok(child)
                         }
                     }
@@ -364,7 +372,12 @@ pub(crate) fn new_record(
         output_dir: None,
         data_dir: None,
         worktree: None,
+        base_commit: None,
         governed: false,
+        pace: Default::default(),
+        routed: None,
+        switched: vec![],
+        proposals: vec![],
         def,
     }
 }
@@ -427,7 +440,7 @@ pub(crate) fn check_output(
 
 /// Task ids for foreach items: the items themselves (strings, or an object's `id`/`name`)
 /// when they are all present and distinct, otherwise positions `0`, `1`, ….
-fn item_ids(items: &[Value]) -> Vec<String> {
+pub(super) fn item_ids(items: &[Value]) -> Vec<String> {
     let key = |v: &Value| match v {
         Value::String(s) => Some(s.clone()),
         Value::Number(n) => Some(n.to_string()),
@@ -449,7 +462,7 @@ fn item_ids(items: &[Value]) -> Vec<String> {
 }
 
 /// Why a `foreach` list did not resolve.
-fn foreach_problem(items: &str, got: &Value) -> String {
+pub(super) fn foreach_problem(items: &str, got: &Value) -> String {
     match got {
         Value::Array(list) => format!(
             "{items} has {} items; a station fans out to at most {MAX_FOREACH_ITEMS}",
@@ -685,36 +698,10 @@ impl<'a> M<'a> {
                         .iter()
                         .map(|t| TaskRec::new(t.id.clone(), None))
                         .collect(),
-                    Work::Foreach { items, .. } => match resolve_str(items, &ctx) {
-                        Value::Array(list) if list.len() <= MAX_FOREACH_ITEMS => item_ids(&list)
-                            .into_iter()
-                            .zip(list)
-                            .map(|(id, v)| TaskRec::new(id, Some(v)))
-                            .collect(),
-                        other => {
-                            let r = self.st(sid);
-                            r.clear_tasks();
-                            r.status = StationStatus::Unmet;
-                            r.checks = vec![CheckRec {
-                                cond: None,
-                                kind: "foreach".into(),
-                                label: "foreach".into(),
-                                round,
-                                status: CheckStatus::Fail,
-                                detail: foreach_problem(items, &other),
-                                at: now,
-                                ..Default::default()
-}];
-                            self.emit("station.entered", Some(sid), None, json!({"round": round}));
-                            self.emit("station.unmet", Some(sid), None, json!({"round": round}));
-                            self.log(
-                                "enter",
-                                Some(sid),
-                                None,
-                                json!({"round": round, "error": "foreach"}),
-                            );
-                            return;
-                        }
+                    // Resolved now, or worked out by a script; `None`: left unmet (`items.rs`).
+                    Work::Foreach { items, .. } => match self.foreach_entered(sid, items, &ctx, round) {
+                        Some(tasks) => tasks,
+                        None => return,
                     },
                 };
                 let ids = tasks.iter().map(|t| t.id.clone()).collect();
@@ -732,8 +719,10 @@ impl<'a> M<'a> {
             }
         };
 
+        // A run stepped through holds every station as `hold` holds one.
+        let hold = st.hold || self.rec.pace == super::def::Pace::Step;
         let r = self.st(sid);
-        r.status = if st.hold {
+        r.status = if hold {
             StationStatus::Held
         } else {
             StationStatus::Working
@@ -742,7 +731,7 @@ impl<'a> M<'a> {
         let data = json!({"round": round, "tasks": fresh});
         self.emit("station.entered", Some(sid), None, data.clone());
         self.log("enter", Some(sid), None, data);
-        if st.hold {
+        if hold {
             self.emit("station.held", Some(sid), None, json!({"round": round}));
         }
         for t in &fresh {
@@ -750,7 +739,7 @@ impl<'a> M<'a> {
         }
         // Paused (a rework while paused): nothing is judged or dispatched here until the run
         // resumes — a station with no tasks would run its gates now (review).
-        if !st.hold && self.rec.paused.is_none() {
+        if !hold && self.rec.paused.is_none() {
             if empty {
                 self.judge_later(sid);
             }
@@ -767,6 +756,8 @@ impl<'a> M<'a> {
         let Some(st) = self.def.station(sid).cloned() else {
             return;
         };
+        // An item after one that failed for good cannot start (`items.rs`).
+        self.fail_unreachable(sid);
         let Some(r) = self.rec.stations.get(sid) else {
             return;
         };
@@ -788,7 +779,7 @@ impl<'a> M<'a> {
         let ready: Vec<String> = r
             .tasks
             .iter()
-            .filter(|t| t.status == TaskStatus::Ready)
+            .filter(|t| t.status == TaskStatus::Ready && !super::items::waits(r, t))
             .map(|t| t.id.clone())
             .collect();
         for tid in ready {
@@ -800,7 +791,7 @@ impl<'a> M<'a> {
             };
             match &spec.executor {
                 Executor::External { .. } => continue,
-                Executor::Session { .. } | Executor::Agent { .. } | Executor::Program { .. } => {
+                Executor::Session { .. } | Executor::Agent { .. } | Executor::Program { .. } | Executor::Command { .. } => {
                     self.claim_push(sid, &tid, &spec)
                 }
                 Executor::Subflow { flow, inputs } => self.claim_subflow(sid, &tid, flow, inputs),
@@ -1009,23 +1000,13 @@ impl<'a> M<'a> {
         let mut checks = vec![];
         let r = self.rec.stations[sid].clone();
         // A fan-out whose list never resolved has no tasks, and an `output` exit over no tasks
-        // would pass: the station stays unmet until a rework enters it again.
-        if let Work::Foreach { items, .. } = st.work() {
-            if r.tasks.is_empty() {
-                match resolve_str(&items, &self.ctx(None, None)) {
-                    Value::Array(list) if list.len() <= MAX_FOREACH_ITEMS => {}
-                    other => checks.push(CheckRec {
-                        cond: None,
-                        kind: "foreach".into(),
-                        label: "foreach".into(),
-                        round,
-                        status: CheckStatus::Fail,
-                        detail: foreach_problem(&items, &other),
-                        at: now,
-                        ..Default::default()
-}),
-                }
+        // would pass: the station stays unmet until a rework enters it again. One whose script
+        // is still working out its items has nothing to judge yet.
+        if let Some(c) = self.foreach_judged(sid) {
+            if c.status == CheckStatus::Wait {
+                return false;
             }
+            checks.push(c);
         }
         // A `children` exit short of `all` counts the failed children itself.
         let partial = st.exit.iter().any(|e| matches!(e, super::def::ExitCond::Children { require: Some(q), .. } if !q.is_all()));
@@ -1112,31 +1093,32 @@ impl<'a> M<'a> {
                 },
                 },
                 C::Confirm { via, mcp, timeout, .. } => {
+                    use super::confirm::Decision;
                     let before = r.checks.iter().find(|k| k.cond == Some(i) && k.round == round);
-                    match r.confirms.iter().rev().find(|c| c.round == round) {
-                        Some(c) if c.pass => (CheckStatus::Pass, String::new()),
-                        Some(c) => (
-                            CheckStatus::Fail,
-                            format!(
-                                "rejected by {}: {}",
-                                c.by,
-                                c.reason.clone().unwrap_or_default()
-                            ),
-                        ),
+                    let rule = super::confirm::Rule::of(c).expect("a confirm exit");
+                    let tally = super::confirm::tally(&rule, &r.confirms, round, i);
+                    match tally.decision {
+                        Decision::Approved(_, vote) => {
+                            let a = super::confirm::approved(self.rec, sid, round, i, vote, before);
+                            self.fx.work.extend(a.ask);
+                            carried = a.carried;
+                            (a.status, a.detail)
+                        }
+                        Decision::Rejected(c) => (CheckStatus::Fail, tally.rejected(c)),
                         // An approval that could not be asked for stays so until someone asks again.
-                        None if before.is_some_and(|k| k.status == CheckStatus::Error) => {
+                        Decision::Open if before.is_some_and(|k| k.status == CheckStatus::Error) => {
                             let k = before.unwrap();
                             at = k.at;
                             (CheckStatus::Error, k.detail.clone())
                         }
-                        None => {
+                        Decision::Open => {
                             // Waiting since it first waited this round: what a timeout counts from.
                             let since = before.filter(|k| k.status == CheckStatus::Wait).map_or(now, |k| k.at);
                             at = since;
                             let limit = timeout.as_deref().and_then(super::def::duration_ms);
                             if limit.is_some_and(|l| now >= since.saturating_add(l)) {
                                 (CheckStatus::Fail, format!("no decision within {}", timeout.as_deref().unwrap_or_default()))
-                            } else if *via == Some(super::def::ConfirmVia::Mcp) {
+                            } else if *via == Some(super::def::ConfirmVia::Mcp) && !super::confirm::mcp_voted(&r, round, i) {
                                 let server = mcp.as_ref().map_or("", |m| m.server.as_str());
                                 match r.approvals.iter().find(|a| a.cond == i && a.round == round) {
                                     Some(a) => (
@@ -1161,7 +1143,7 @@ impl<'a> M<'a> {
                                     }
                                 }
                             } else {
-                                (CheckStatus::Wait, "awaiting confirmation".into())
+                                (CheckStatus::Wait, format!("awaiting confirmation{}", tally.so_far()))
                             }
                         }
                     }
@@ -1215,6 +1197,10 @@ impl<'a> M<'a> {
                 metrics: carried.metrics,
             });
         }
+        if let Some((k, ask)) = super::confirm::stale_check(self.rec, sid, round, &r, &checks, now) {
+            self.fx.work.extend(ask);
+            checks.push(k);
+        }
         let fail = checks.iter().any(|c| matches!(c.status, CheckStatus::Fail | CheckStatus::Error));
         let wait = checks.iter().any(|c| c.status == CheckStatus::Wait);
         self.st(sid).checks = checks;
@@ -1257,22 +1243,28 @@ impl<'a> M<'a> {
         let data = json!({"round": r.round, "forced": r.forced.is_some()});
         self.emit("station.passed", Some(sid), None, data.clone());
         self.log("pass", Some(sid), None, data);
+        self.proposals_dismissed(sid);
     }
 
     /// `on_unmet`: rework automatically while under `max` and the rework limit.
     fn on_unmet(&mut self, sid: &str, unmet: Vec<CheckRec>) -> bool {
-        let Some(u) = self.def.station(sid).and_then(|s| s.on_unmet.clone()) else {
+        let Some(st) = self.def.station(sid).cloned() else {
             return false;
         };
-        if self.st(sid).auto_reworks >= u.max || self.can_rework(&u.rework_to).is_err() {
+        let Some(u) = st.on_unmet.clone() else {
+            return false;
+        };
+        // A failed gate may name its own point to go back to.
+        let to = super::route::unmet_target(&self.def, &st, &unmet, &u.rework_to);
+        if self.st(sid).auto_reworks >= u.max || self.can_rework(&to).is_err() {
             return false;
         }
         self.st(sid).auto_reworks += 1;
         let by = std::mem::replace(&mut self.by, Actor::flow("auto"));
-        self.rework(&u.rework_to, None, &format!("on_unmet of {sid}"));
+        self.rework(&to, None, &format!("on_unmet of {sid}"));
         self.by = by;
         // The round that starts over is told what was not met, findings and all.
-        if let Some(r) = self.st(&u.rework_to).reworked.as_mut() {
+        if let Some(r) = self.st(&to).reworked.as_mut() {
             r.from = Some(sid.to_string());
             r.unmet = unmet;
         }
@@ -1330,6 +1322,7 @@ impl<'a> M<'a> {
         let data = json!({"reason": reason, "tasks": partial, "stale": swept});
         self.emit("station.reworked", Some(to), None, data.clone());
         self.log("rework", Some(to), None, data);
+        self.proposals_on_rework(to);
         self.enter(to, partial);
         let rec = super::run::ReworkRec { by: self.by.clone(), at: now, reason: reason.to_string(), from: None, unmet: vec![] };
         self.st(to).reworked = Some(rec);
@@ -1341,6 +1334,7 @@ impl<'a> M<'a> {
         let now = self.now();
         self.rec.status = RunStatus::Finished;
         self.rec.finished_at = Some(now);
+        self.proposals_closed(false);
         self.close_keyed_sessions();
         self.emit("run.finished", None, None, Value::Null);
         self.log("finish", None, None, Value::Null);
@@ -1380,6 +1374,7 @@ impl<'a> M<'a> {
         }
         self.rec.status = RunStatus::Cancelled;
         self.rec.finished_at = Some(now);
+        self.proposals_closed(true);
         self.close_keyed_sessions();
         let data = json!({"reason": reason});
         self.emit("run.cancelled", None, None, data.clone());
@@ -1409,7 +1404,9 @@ impl<'a> M<'a> {
         let mut expired = vec![];
         for (sid, r) in &self.rec.stations {
             for t in &r.tasks {
+                // A hand-in waiting on its `task_exit` gates waits on the flow, not the worker.
                 if t.status == TaskStatus::Claimed
+                    && !t.checking()
                     && t.lease.as_ref().is_some_and(|l| l.until <= now)
                 {
                     expired.push((sid.clone(), t.id.clone()));

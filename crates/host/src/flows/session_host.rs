@@ -197,6 +197,9 @@ pub(crate) fn options_of(spec: &OpenSpec, policy: Option<&RunPolicy>) -> Value {
         o["host_tools"] = Value::Array(
             spec.tools
                 .iter()
+                // `flow_command` 已作为连接上的工具挂在每个会话上（`flows::tools::declarations`），
+                // 这里再带一份就是同名两个。
+                .filter(|t| t.name != harnix_flow::runner::TOOL_COMMAND)
                 .map(|t| {
                     json!({"name": t.name, "description": t.description,
                            "input_schema": t.input_schema, "read_only": t.read_only})
@@ -427,7 +430,11 @@ mod tests {
         spec.tools = harnix_flow::runner::tool_specs();
         let o = options_of(&spec, None);
         assert_eq!(o["settings"]["model"]["effort"], "high");
-        assert_eq!(o["host_tools"].as_array().unwrap().len(), 4);
+        assert_eq!(
+            o["host_tools"].as_array().unwrap().len(),
+            3,
+            "flow_command 在连接上，不在会话上"
+        );
         assert!(
             o["settings"].get("sandbox").is_none(),
             "不是作业起的运行：网络照设置"

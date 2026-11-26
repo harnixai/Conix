@@ -149,6 +149,8 @@ pub async fn handle(hub: Hub, call: HostLibCall) -> Result<Value, HostLibError> 
                 flow: flow.to_string(),
                 subject,
                 inputs,
+                step: false,
+                session: None,
             })
             .await?
             {

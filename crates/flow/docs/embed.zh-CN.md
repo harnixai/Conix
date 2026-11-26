@@ -337,6 +337,12 @@ Conix 在 Harnix 0.4.7 分叉了这个库，先把站的治理（门禁、确认
   （新，在根上）。`CheckRec` 带上 `findings`、`evidence`、`metrics`，`CheckRec::explain` 把不对的地方说成一段；
   `CheckStatus::Error` 是门禁没得出结论：站未达标，但不自动打回。**`Engine::rerun_gates`**（`Op::RerunGates`）把一站没过的门禁
   重跑；`flow_retry` 不带 `task` 时调它。
+- **站的写入白名单**（`Station::writes`，glob 列表；`WorkItem::Task::writes: Option<WriteScope>` 新字段）：站写了
+  `writes`，它的任务用 Write/Edit/MultiEdit/NotebookEdit 写项目里不在其中的路径就被拒（理由给模型看）；运行目录
+  （`_run/` 除外）永远可写，`deny` 照旧优先，项目外照 `guard`。整条恰为数组引用（`${item.paths}`）的按任务展开。
+  Bash 无法按路径检查，不在此列。宿主自己判断调用时，在 `judge_under` 之后调 `narrow_writes(&scope, verdict, &call, station)`；
+  引用展开不了（不是数组或字符串）时 `WriteScope::error` 有值，派工器让任务失败。新导出：`WriteScope`、`resolve_writes`、
+  `narrow_writes`、`WRITE_TOOLS`。
 - **命令门禁**：`env` 列出透传的变量（缺省一个不传），`RunnerConfig::env_deny` 是永远不传的；`result: json` 按命令打印的结果判。
   起不来、超时算 `error`。
 - **`StationRec::reworked`**（`ReworkRec`，新，在根上）：这一轮为什么重来；`on_unmet` 打回的还带当时没过的检查，任务的协议讲给会话。
@@ -382,6 +388,46 @@ Conix 在 Harnix 0.4.7 分叉了这个库，先把站的治理（门禁、确认
 - **包的命令**（`TOOL_COMMAND`，`flow_command {command, args}`）：`bundle.yaml` 的 `commands` 列出的 `commands/<名>.js`，
   随运行钉进 `Pinned::commands`；在库自己的 QuickJS 里跑，`flow` 比脚本门禁的多 `write`、`append`、`remove`、`print`，
   只写得了运行目录（`_run/` 除外）与 `${data_dir}`。它不是只读的工具。
+- **命令成为独立入口**（Conix）：`bundle.yaml` 的 `commands` 写成名字列表（所有子命令都算会写）或映射
+  `{名字: {read_only: [第一个参数…], description}}`（`bundle::Commands`、`CommandDecl`，随运行钉进 `Pinned::command_decls`）；
+  `bundle::is_read_only`、`bundle::command_help`（文件头的 `//` 注释块；`help` 或不带参数时直接回答、不运行命令）、
+  `bundle::namespace_problems` 与 `validate::bundle_problems`（包里的流程名、命令名、站 id 一个空间；`help`、`status` 保留）。
+  `Runner::run_command(CommandCall {bundle, command, args, run?, by: CommandBy{kind: person|model|station, id}, project_root?, …})`
+  有无运行都能跑（没有运行：用当前的包，`output_dir` 为空，只写包的数据目录；第一个参数声明为只读的调用拿到一个一写就抛的
+  writer；运行之外**模型**只能做这些），`Runner::is_read_only`。命令的 `input` 多了 `by`、`run`。
+  `FlowTools::call_in(session, tool, input, project)` 让不服务任务的会话也能用
+  `flow_command {command: "包:名" | "名", args, run?}`；`command_tool_spec()` 只给这一个工具的声明。
+  同一个包数据目录的写入（可能写的命令、归档）跨运行串行。接口变化：`BundleMeta::commands` 现在是 `Commands`（原 `Vec<String>`，用 `.names()`）。
+- **计票的确认**（`ExitCond::Confirm` 加 `min`、`distinct`、`reject`（`RejectRule`）、`not`、`binds`（`Binds`、`BindsWord`、
+  `BINDS_DELIVERABLES`））：每个决定是这一轮的一票（打回就重新计）；缺省一个 actor id 一票，后一票替换前一票；`reject: any`
+  （缺省）一票驳回就不过，`majority` 驳回够 `min` 才不过。`not: [author]` 时 `Engine::confirm` 拒绝（`Denied`）这次运行里交付过、
+  做过任务或发起运行的人；外部审批由这样的人决定的，出口是 `error`。出口通过时运行器给 `binds`（缺省是本站及其前站的制品）
+  逐个算摘要，记在那一票上（`ConfirmRec::binds`；`ConfirmRec::cond` 是外部审批那一票属于哪个出口）；之后每一站通过前都有一道
+  隐含的 `confirm-stale` 检查核对它们没变。两者都以保留名的 `WorkItem::Gate` 发出（`confirm-binds@<出口>`、`confirm-stale@`），
+  经 `gate_result` 回来。`RunView::votes`（`Votes{cond, approvals, rejections, min}`）给出每个确认出口的票数。
+- **按包启动、分诊、换路**（模块 `kernel::route`）：`bundle.yaml` 加 `flows`（顺序）、`start: {route, triage}`（`bundle::StartDef`）、
+  `pace`，名字不对随包里每条流程一起报。启动写的是一个没有同名流程的包时选路：取 `start.route` 里第一条接受这份输入的流程。
+  `Engine::create` 自己选；`Engine::resolve_start` 给先要为流程做事的宿主（runner 的 `start_run` 用它）；`Engine::route(name, inputs,
+  project_root)` 回 `Route::Flow{flow, by, reason}` 或 `Route::Triage{bundle, skill, candidates}`（`RouteCandidate`）。
+  `CreateIn::routed` 是启动方说的选法（`RoutedRec`、`RoutedBy`：`named`、`route`、`triage`），记进 `RunRecord::routed`。
+  `flow_start` 遇到分诊时回 skill 的正文与候选，什么也不起。**`Engine::switch(run, to, reason, inputs, by)`**（`Op::Switch`、
+  `flow_switch`、`TOOL_SWITCH`）：第一站还开着时换到同一个包的另一条流程，重新钉住，这一站重进；`RunRecord::switched`
+  （`SwitchRec`），事件 `run.switched`。`RUN_TOOLS` 变成九个。
+- **步进**（`Pace`：`auto`、`step`）：`FlowDef::pace`、包的 `pace`、`CreateIn::pace`；`RunRecord::pace`。`step` 让每一站进站都像
+  `hold: true` 一样搁置。
+- **回退点**：`ExitCond::Gate` 加 `rework_to`：这道门不过时 `on_unmet` 打回到这里（几道不过取最靠前的）；
+  `Station::rework_points` 列出一站能退到的点（`rework_to`、`on_unmet.rework_to`、各门禁的）。
+- **建议记进运行**：`Engine::propose(run, station, task, token, kind, to, reason, by)`（`Op::Propose`；`flow_propose` 调它，照旧也发
+  note）按站的回退点核对 `to`，记一条 `ProposalRec`（`ProposalKind`、`ProposalStatus`）进 `RunRecord::proposals`；打回到那里就是
+  接受，站往前走就作废，`Engine::dismiss_proposal`（`Op::DismissProposal`）也能作废。`RunView::proposals` 是还开着的；事件
+  `proposal.opened`、`proposal.accepted`、`proposal.dismissed`。
+- **命令步骤、脚本给的工作项、工作项的先后、任务级出口**（Conix 的 M3、M9）：`Executor::Command{command, args}`
+  （`kind: command`）不用模型，把包声明的命令当作站的任务跑，返回值就是输出（不是对象时包成 `{result}`）。`Station::foreach`
+  是 `Foreach`（`Ref` 或 `Script(ForeachScript)`）；脚本的工作项用 **`WorkItem::Items`** 要、经 **`Engine::foreach_items`**
+  报回。工作项的 `after: [<id>]` 让它等那几项的任务做完再派。`Station::task_exit`（只收门禁）在收下每次交付之前判它：
+  **`WorkItem::TaskGate`**，经 **`Engine::task_gate_result`** 报回；`TaskRec::task_exit`（`TaskExitRec`）记交付与结果，
+  事件 `task.checked`。`Gates::run_for_task`（缺省同 `Gates::run`）是对一个任务跑的宿主门禁。`Work::Foreach::items`
+  改成了 `Foreach`（原来是 `String`）；试运行里 `Mocks::items` 给脚本的工作项。
 
 - **试运行用会话所在的流程包**：`Sandbox::start_in(input, by, packs)`；`flow_dry_run` 用会话读的那份（项目的流程、件），
   不再只看应用自己的包——项目里的流程以前试运行时找不到。

@@ -181,6 +181,8 @@ pub struct Domain {
     pub conn: Option<ConnState>,
     pub sessions: Vec<SessionSummary>,
     pub flows: Vec<FlowSummary>,
+    /// 流程包的目录：地址里的名字是流程、站还是命令，靠它认（flows.md §4.3）。
+    pub bundles: Vec<port::BundleInfo>,
     pub jobs: Vec<Job>,
     /// 被 Watch 的会话。
     pub convs: Map<SessionId, Conversation>,

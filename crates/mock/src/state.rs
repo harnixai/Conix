@@ -17,6 +17,7 @@ pub struct MockState {
     pub tasks: BTreeMap<TaskId, Task>,
     pub task_output: BTreeMap<TaskId, String>,
     pub flows: Vec<FlowSeed>,
+    pub bundles: Vec<port::BundleInfo>,
     pub runs: BTreeMap<RunId, RunView>,
     pub jobs: BTreeMap<JobId, (Job, Vec<JobEntry>)>,
     /// 已关闭的会话，关掉的新的在前。
@@ -41,6 +42,7 @@ impl MockState {
             tasks: seed.tasks.into_iter().map(|t| (t.id.clone(), t)).collect(),
             task_output: seed.task_output,
             flows: seed.flows,
+            bundles: seed.bundles,
             plugin_packages: seed.plugin_packages,
             plugins: vec![],
             runs: seed

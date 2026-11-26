@@ -38,6 +38,8 @@ pub(crate) const ENDED_PAGE: u32 = 50;
 pub enum FlowLower {
     /// 运行的主 Agent。
     Main,
+    /// 站里的会话提的、在等人的建议（`RunView::proposals` 里在等的第 n 条）。
+    Proposal(usize),
     Station(StationId),
     /// 站里的一件任务（子 Agent 有会话）。
     StationTask(StationId, usize),
@@ -134,6 +136,11 @@ impl State {
                     t.into_iter().map(|(id, p)| FlowLower::Task(id, p))
                 };
                 let mut out = vec![FlowLower::Main];
+                out.extend(
+                    open_proposals(v)
+                        .into_iter()
+                        .map(|(i, _)| FlowLower::Proposal(i)),
+                );
                 out.extend(tasks(&v.main_session, "  ", &listed));
                 for st in &v.stations {
                     out.push(FlowLower::Station(st.id.clone()));
@@ -233,8 +240,27 @@ impl State {
     }
 }
 
-/// 运行走到哪了：`站 3/7 实现`；结束了的只说几站。各处（列表、下框标题、面板）同一个写法。
+/// 在等人的建议：原序号与内容。
+fn open_proposals(v: &RunView) -> Vec<(usize, &port::ProposalView)> {
+    v.proposals
+        .iter()
+        .enumerate()
+        .filter(|(_, p)| p.status == port::ProposalStatus::Open)
+        .collect()
+}
+
+/// 运行走到哪了：`站 3/7 实现`；结束了的只说几站；步进的运行末尾标出来。各处（列表、下框标题、
+/// 面板）同一个写法。
 pub(crate) fn progress(r: &RunSummary) -> String {
+    let base = progress_base(r);
+    if r.pace == port::Pace::Step && !is_ended(&r.status) {
+        format!("{base}{}", i18n::t!("flows.pace_step_tag"))
+    } else {
+        base
+    }
+}
+
+fn progress_base(r: &RunSummary) -> String {
     match (&r.status, &r.current) {
         (RunStatus::Finished | RunStatus::Cancelled, _) | (_, None) => {
             i18n::t!(
@@ -421,6 +447,11 @@ pub(crate) fn lower_lines(s: &State, width: usize) -> Vec<Line> {
                     width,
                 )
             }
+            FlowLower::Proposal(i) => match v.proposals.get(*i) {
+                Some(p) => Line::toned("  ⚑ ", Tone::Warn)
+                    .push(crate::flow_addr::proposal_text(p, v), Tone::Warn),
+                None => Line::default(),
+            },
             FlowLower::Station(id) => {
                 let Some(st) = v.stations.iter().find(|x| &x.id == id) else {
                     return Line::default();
@@ -453,6 +484,21 @@ pub(crate) fn lower_lines(s: &State, width: usize) -> Vec<Line> {
                 let note = join_note(&v.stations, st);
                 if !note.is_empty() {
                     left = left.push(format!("  {note}"), Tone::Dim);
+                }
+                // 多人确认的票数：够了才过。
+                if let Some(votes) = st.votes {
+                    let mut t = i18n::t!("flows.votes", n = votes.approvals, min = votes.min);
+                    if votes.rejections > 0 {
+                        t.push_str(&i18n::t!("flows.votes_rejected", n = votes.rejections));
+                    }
+                    let tone = if votes.rejections > 0 {
+                        Tone::Error
+                    } else if st.status == StationStatus::Passed {
+                        Tone::Dim
+                    } else {
+                        Tone::Warn
+                    };
+                    left = left.push(format!("  {t}"), tone);
                 }
                 // 状态不写字：左边的符号与颜色已经说了。未达标的原因例外，那是信息。
                 let mut right = Line::default();

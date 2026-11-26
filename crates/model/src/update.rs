@@ -81,7 +81,12 @@ pub(crate) enum Pending {
     Hello,
     Sessions,
     Flows,
+    Bundles,
     Jobs,
+    /// 流程地址发出的命令：回来的文字当本地输出显示（`/xforge:apply`、`/flow:xforge:xspec list`……），标题是敲的那条。
+    FlowText(String),
+    /// `/flow:…` 启动一次运行。
+    Started,
     Watch(port::SessionId),
     Commands(port::SessionId),
     /// 插话时要拿到消息 id，等 `SteerDelivered` / `SteerReturned` 对上。
@@ -175,6 +180,7 @@ impl State {
                 },
             ),
             self.call(Pending::Flows, Command::ListFlows),
+            self.call(Pending::Bundles, Command::ListBundles),
             self.call(Pending::Jobs, Command::ListJobs),
         ]
     }
@@ -1160,9 +1166,11 @@ fn event(s: &mut State, e: Event) -> Vec<Effect> {
         }
         Event::RunDetail(v) => {
             upsert_run(s, &v.summary);
-            s.domain
+            let old = s
+                .domain
                 .run_views
                 .insert(v.summary.id.clone(), (**v).clone());
+            crate::flow_addr::proposals_arrived(s, old.as_ref(), v);
         }
         Event::FlowDetail(d) => {
             s.domain
@@ -1193,6 +1201,7 @@ fn event(s: &mut State, e: Event) -> Vec<Effect> {
                     },
                 ),
                 s.call(Pending::Flows, Command::ListFlows),
+                s.call(Pending::Bundles, Command::ListBundles),
                 s.call(Pending::Jobs, Command::ListJobs),
             ];
             s.domain.runs.clear();
@@ -1266,14 +1275,28 @@ fn event(s: &mut State, e: Event) -> Vec<Effect> {
             // 关掉的会进「已关闭」、删掉的不进：哪一种由实例说了算，重取一次。
             d.closed_loaded = false;
         }
-        Event::FlowUpserted(f) => match d.flows.iter_mut().find(|x| x.name == f.name) {
-            Some(x) => *x = f,
-            None => d.flows.push(f),
-        },
+        Event::FlowUpserted(f) => {
+            // 包里多了流程：目录跟着重取。
+            let stale = f.bundle.as_ref().is_some_and(|b| {
+                !d.bundles
+                    .iter()
+                    .any(|x| &x.name == b && x.flows.iter().any(|n| format!("{b}/{n}") == f.name))
+            });
+            match d.flows.iter_mut().find(|x| x.name == f.name) {
+                Some(x) => *x = f,
+                None => d.flows.push(f),
+            }
+            if stale {
+                out.push(s.call(Pending::Bundles, Command::ListBundles));
+            }
+        }
         Event::FlowRemoved { name } => {
             d.flows.retain(|x| x.name != name);
             d.flow_details.remove(&name);
             d.runs.remove(&name);
+            if name.contains('/') {
+                out.push(s.call(Pending::Bundles, Command::ListBundles));
+            }
         }
         Event::JobUpserted(j) => match d.jobs.iter_mut().find(|x| x.id == j.id) {
             Some(x) => *x = j,
@@ -1363,6 +1386,45 @@ fn reply(s: &mut State, id: ReqId, r: Result<Reply, PortError>) -> Vec<Effect> {
         (Pending::Flows, Reply::Flows(v)) => {
             d.flows = v;
             d.load_errors[1] = None;
+            // 包里的流程有在跑的运行：先取一遍，全局的 `/flow:<包>:<站>` 要靠它认运行。
+            let want: Vec<String> = d
+                .flows
+                .iter()
+                .filter(|f| {
+                    f.bundle.is_some() && f.active_runs > 0 && !d.runs.contains_key(&f.name)
+                })
+                .map(|f| f.name.clone())
+                .collect();
+            return want
+                .into_iter()
+                .map(|flow| s.call(Pending::Runs(flow.clone()), Command::ListRuns { flow }))
+                .collect();
+        }
+        (Pending::Bundles, Reply::Bundles(v)) => {
+            d.bundles = v;
+        }
+        (Pending::FlowText(title), Reply::Text { text }) => {
+            if text.contains('\n') {
+                s.ui.overlay = Some(Overlay::Text {
+                    title,
+                    lines: text.lines().map(str::to_string).collect(),
+                    scroll: 0,
+                });
+            } else {
+                s.notice(text, false);
+            }
+        }
+        (Pending::Started, Reply::RunStarted(r)) => {
+            s.notice(
+                i18n::t!("flow_addr.started", subject = r.subject, id = r.id),
+                false,
+            );
+        }
+        (Pending::Started, Reply::Triage { session }) => {
+            s.notice(i18n::t!("flow_addr.triage_started"), false);
+            if s.ui.chat.as_ref() != Some(&session) {
+                return crate::chat_update::open_session(s, session);
+            }
         }
         (Pending::Jobs, Reply::Jobs(v)) => {
             d.jobs = v;

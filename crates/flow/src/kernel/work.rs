@@ -61,6 +61,12 @@ pub(crate) fn task_work(
         }
         _ => vec![],
     };
+    let writes = match (&spec.executor, st) {
+        (Executor::Session { .. } | Executor::Agent { .. }, Some(st)) if !st.writes.is_empty() => {
+            Some(super::parts::resolve_writes(&st.writes, &ctx, rec.output_dir.as_deref()))
+        }
+        _ => None,
+    };
     let (placement, delivery, scene) = match &spec.executor {
         e if e.in_main() => {
             let (placement, scene) = main_placement(rec, main_scene, &ctx);
@@ -107,6 +113,7 @@ pub(crate) fn task_work(
             item: item.as_ref(),
             guarded,
             permissions: &permissions,
+            writes: writes.as_ref(),
             gates: &rec.parts.gates,
             delivery: delivery.unwrap_or(Delivery::StructuredOutput),
             executor: Some(&spec.executor),
@@ -129,6 +136,21 @@ pub(crate) fn task_work(
             .collect(),
         _ => vec![],
     };
+    // A command step's arguments are handed out as they read for this task.
+    let executor = match &spec.executor {
+        Executor::Command { command, args } => Executor::Command {
+            command: command.clone(),
+            args: args
+                .iter()
+                .map(|a| match resolve_str(a, &ctx) {
+                    Value::String(s) => s,
+                    Value::Null => String::new(),
+                    v => v.to_string(),
+                })
+                .collect(),
+        },
+        e => e.clone(),
+    };
     WorkItem::Task {
         run: rec.id.clone(),
         station: sid.to_string(),
@@ -136,11 +158,12 @@ pub(crate) fn task_work(
         task: tid.to_string(),
         token,
         attempt,
-        executor: spec.executor.clone(),
+        executor,
         skill: spec.skill.clone(),
         skill_digest: digest,
         rules,
         permissions,
+        writes,
         item,
         output_schema: st.and_then(|s| s.output.clone()),
         protocol,
@@ -210,8 +233,15 @@ pub(crate) fn dispatched_work_with(rec: &RunRecord, eng: &Engine, now: u64) -> V
         let Some(sdef) = rec.def.station(sid) else {
             continue;
         };
+        // Hand-ins waiting on their `task_exit` gates, items a script is working out.
+        out.extend(super::handin::pending_work(rec, sid, st));
+        out.extend(super::items::pending_work(rec, sid, st));
         if matches!(st.status, StationStatus::Working | StationStatus::Unmet) {
             for c in &st.checks {
+                if let Some(w) = super::confirm::pending(rec, sid, st, c) {
+                    out.push(w);
+                    continue;
+                }
                 let gate = c.cond.and_then(|i| sdef.exit.get(i));
                 if let (Some(ExitCond::Gate { gate, .. }), CheckStatus::Wait, true) =
                     (gate, c.status, c.round == st.round)
@@ -254,6 +284,11 @@ pub(crate) fn dispatched_work_with(rec: &RunRecord, eng: &Engine, now: u64) -> V
                 continue;
             };
             if !spec.executor.is_push() {
+                continue;
+            }
+            // A program or command that handed in has nothing more to do while its hand-in is
+            // checked; running it again would only hand in twice. A session is still talked to.
+            if t.checking() && matches!(spec.executor, Executor::Program { .. } | Executor::Command { .. }) {
                 continue;
             }
             let digest = spec

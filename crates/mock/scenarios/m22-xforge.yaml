@@ -1,0 +1,6 @@
+# 场景 m22：流程包 xforge——地址（/flow:<包>…、流程上下文里 /<包>:<站>）、步进、分诊、建议、多人确认。
+# 数据在种子 xforge 里；5 秒时 x1「实施」站里的会话提了一条打回建议（测试里 advance 过去才会出现）。
+name: m22-xforge
+seed: xforge
+timeline:
+  - {at: 5000, run_detail: {"summary": {"id": "x1", "flow": "xforge/solid", "subject": "登录加 OAuth", "status": {"waiting": {"reason": "搁置：实施"}}, "current": "实施", "stations_done": 3, "stations_total": 5, "started_ms": 1763275200000, "bundle": "xforge", "pace": "step"}, "main_session": "sx1", "stations": [{"id": "spec", "title": "规格", "work": "session", "exit": ["output"], "status": "passed"}, {"id": "design", "title": "设计", "work": "session", "exit": ["output"], "status": "passed"}, {"id": "check", "title": "检查", "work": "confirm", "exit": ["confirm"], "status": "passed", "votes": {"approvals": 2, "rejections": 0, "min": 2}}, {"id": "apply", "title": "实施", "work": "agent × 2", "exit": ["output", "gate: verify"], "status": "held"}, {"id": "archive", "title": "归档", "work": "command", "exit": ["output"], "status": "pending"}], "proposals": [{"id": "p2", "station": "apply", "kind": "rework", "to": "design", "reason": "接口缺取消语义", "by": "worker", "status": "open"}]}}

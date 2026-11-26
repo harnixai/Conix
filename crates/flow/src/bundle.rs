@@ -24,7 +24,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::kernel::def::{Executor, ExitCond, FlowDef};
+use crate::kernel::def::{Executor, ExitCond, FlowDef, Pace};
 use crate::kernel::parts::PartKind;
 
 /// The file that makes a directory a bundle.
@@ -51,12 +51,255 @@ pub struct BundleMeta {
     pub description: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub version: String,
-    /// The bundle's commands, each `commands/<name>.js`: what its stations' sessions may run.
+    /// The bundle's commands, each `commands/<name>.js`: what sessions, people and stations may run.
+    #[serde(default, skip_serializing_if = "Commands::is_empty")]
+    pub commands: Commands,
+    /// Its flows by file stem, in the order people are offered them (and a start is routed by,
+    /// unless `start.route` says otherwise). Absent: every flow file, by name.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub commands: Vec<String>,
+    pub flows: Vec<String>,
+    /// How a start that names the bundle alone is routed to one of its flows
+    /// ([`crate::kernel::route`]).
+    #[serde(default, skip_serializing_if = "StartDef::is_empty")]
+    pub start: StartDef,
+    /// How its runs go from station to station when a flow says nothing ([`Pace`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pace: Option<Pace>,
     /// What running it needs of the host (checked when a package is imported).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub requires: Option<BundleRequires>,
+}
+
+/// What `bundle.yaml` says of one command.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(deny_unknown_fields)]
+pub struct CommandDecl {
+    /// The first arguments that only read (`list`, `get`, `help`): a call with one of them gets no
+    /// writer, so it cannot change anything whoever runs it. Every other call counts as writing.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub read_only: Vec<String>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub description: String,
+}
+
+/// A bundle's commands in the order `bundle.yaml` gives them: written as a list of names (every
+/// subcommand writes) or as a map from a name to its [`CommandDecl`]. The list stays a form so
+/// bundles written before the map still read.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Commands(pub Vec<(String, CommandDecl)>);
+
+impl Commands {
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+    pub fn names(&self) -> impl Iterator<Item = &str> {
+        self.0.iter().map(|(n, _)| n.as_str())
+    }
+    pub fn get(&self, name: &str) -> Option<&CommandDecl> {
+        self.0.iter().find(|(n, _)| n == name).map(|(_, d)| d)
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum CommandsForm {
+    List(Vec<String>),
+    // A `Mapping`, not a `BTreeMap`: the order the file gives is the order commands are listed in.
+    Map(serde_yaml::Mapping),
+}
+
+impl<'de> Deserialize<'de> for Commands {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        use serde::de::Error;
+        match CommandsForm::deserialize(d)? {
+            CommandsForm::List(l) => Ok(Commands(l.into_iter().map(|n| (n, CommandDecl::default())).collect())),
+            CommandsForm::Map(m) => m
+                .into_iter()
+                .map(|(k, v)| {
+                    let name = k.as_str().ok_or_else(|| D::Error::custom("a command's name is a string"))?.to_string();
+                    let decl = if v.is_null() { CommandDecl::default() } else { serde_yaml::from_value(v).map_err(D::Error::custom)? };
+                    Ok((name, decl))
+                })
+                .collect::<Result<_, _>>()
+                .map(Commands),
+        }
+    }
+}
+
+impl Serialize for Commands {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::{SerializeMap, SerializeSeq};
+        if self.0.iter().all(|(_, d)| *d == CommandDecl::default()) {
+            let mut q = s.serialize_seq(Some(self.0.len()))?;
+            for (n, _) in &self.0 {
+                q.serialize_element(n)?;
+            }
+            q.end()
+        } else {
+            let mut m = s.serialize_map(Some(self.0.len()))?;
+            for (n, d) in &self.0 {
+                m.serialize_entry(n, d)?;
+            }
+            m.end()
+        }
+    }
+}
+
+/// Whether a call of a command only reads: its first argument is one its declaration lists. `help`
+/// and no argument at all read too: they answer from the file's comment without running it.
+pub fn is_read_only(decl: Option<&CommandDecl>, args: &[String]) -> bool {
+    match args.first().map(String::as_str) {
+        None | Some("help") => true,
+        Some(a) => decl.is_some_and(|d| d.read_only.iter().any(|r| r == a)),
+    }
+}
+
+/// A command's usage: the `//` comment block its file opens with, markers taken off. `None` when
+/// it opens with none.
+pub fn command_help(source: &str) -> Option<String> {
+    let mut lines: Vec<String> = vec![];
+    for l in source.lines() {
+        let t = l.trim_start();
+        if let Some(rest) = t.strip_prefix("//") {
+            lines.push(rest.strip_prefix(' ').unwrap_or(rest).trim_end().to_string());
+        } else if t.is_empty() && lines.is_empty() {
+            continue;
+        } else {
+            break;
+        }
+    }
+    let text = lines.join("\n").trim().to_string();
+    (!text.is_empty()).then_some(text)
+}
+
+/// Names a bundle keeps for itself: `help` and `status` are the address's own, so no flow, command
+/// or station may take them.
+pub const RESERVED: [&str; 2] = ["help", "status"];
+
+/// The problems in a bundle's one namespace: its flows' local names, its commands' names and the
+/// station ids of its flows must not collide across these kinds (a station id repeats across
+/// flows: they are one station at different lengths), and none is reserved. `flows` is each flow's
+/// local name with its station ids. One name, one meaning: `/<bundle>:<name>` cannot be two things.
+pub fn namespace_problems(commands: &[&str], flows: &[(String, Vec<String>)]) -> Vec<String> {
+    let mut out = vec![];
+    let mut seen: std::collections::BTreeMap<String, &'static str> = Default::default();
+    let mut claim = |name: &str, kind: &'static str, out: &mut Vec<String>| {
+        if RESERVED.contains(&name) {
+            out.push(format!("{kind} {name:?}: `{name}` is reserved"));
+        }
+        match seen.get(name) {
+            Some(&k) if k != kind => out.push(format!("{name:?} is both a {k} and a {kind}: a bundle's names are one space")),
+            Some(_) if kind != "station" => out.push(format!("{kind} {name:?} is named twice")),
+            _ => {}
+        }
+        seen.entry(name.to_string()).or_insert(kind);
+    };
+    for (local, _) in flows {
+        claim(local, "flow", &mut out);
+    }
+    for c in commands {
+        claim(c, "command", &mut out);
+    }
+    for (_, stations) in flows {
+        for s in stations {
+            claim(s, "station", &mut out);
+        }
+    }
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// A bundle's `start`: the order its flows are tried in, and the skill the main session judges by
+/// when the inputs given cannot decide.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StartDef {
+    /// Flow stems, tried in order: the first whose inputs accept the start's is the one. Absent:
+    /// the bundle's `flows`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub route: Vec<String>,
+    /// A skill of the bundle (`skills/<name>/SKILL.md`) a model follows to judge the inputs the
+    /// route needs, when the start did not give them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub triage: Option<String>,
+}
+
+impl StartDef {
+    pub fn is_empty(&self) -> bool {
+        self.route.is_empty() && self.triage.is_none()
+    }
+}
+
+impl BundleMeta {
+    /// Read from a `bundle.yaml`'s text (its name is not checked against a directory here).
+    pub fn parse(text: &str) -> Result<Self, String> {
+        serde_yaml::from_str(text).map_err(|e| format!("{BUNDLE_FILE}: {e}"))
+    }
+
+    /// The bundle's flows by stem, in order: `flows` as written, else `stems` by name.
+    pub fn flow_order(&self, stems: &BTreeSet<String>) -> Vec<String> {
+        if self.flows.is_empty() {
+            stems.iter().filter(|s| *s != MAIN_FLOW).cloned().collect()
+        } else {
+            self.flows.clone()
+        }
+    }
+
+    /// The stems a start naming the bundle is routed through, in order.
+    pub fn route_order(&self, stems: &BTreeSet<String>) -> Vec<String> {
+        if self.start.route.is_empty() {
+            self.flow_order(stems)
+        } else {
+            self.start.route.clone()
+        }
+    }
+
+    /// What is wrong with its `flows`, `start` and `pace`, given the stems of the flows it has
+    /// and whether it has a skill of a name.
+    pub fn start_problems(&self, stems: &BTreeSet<String>, has_skill: &dyn Fn(&str) -> bool) -> Vec<String> {
+        let mut out = vec![];
+        let mut seen = BTreeSet::new();
+        for f in &self.flows {
+            if !stems.contains(f) {
+                out.push(format!("{BUNDLE_FILE}: flows names {f}, which is not a flow of the bundle"));
+            }
+            if !seen.insert(f) {
+                out.push(format!("{BUNDLE_FILE}: flows names {f} twice"));
+            }
+        }
+        let order = self.flow_order(stems);
+        for f in &self.start.route {
+            if !order.contains(f) {
+                out.push(format!("{BUNDLE_FILE}: start.route names {f}, which is not one of its flows ({})", order.join(", ")));
+            }
+        }
+        if let Some(t) = &self.start.triage {
+            if !has_skill(t) {
+                out.push(format!("{BUNDLE_FILE}: start.triage names the skill {t}, which the bundle does not have (skills/{t}/SKILL.md)"));
+            }
+        }
+        out
+    }
+}
+
+/// A bundle's `bundle.yaml` as packs offer it, if they offer the bundle and it reads.
+pub fn meta_of(packs: &dyn crate::Packs, bundle: &str) -> Option<BundleMeta> {
+    BundleMeta::parse(&packs.bundle_file(bundle, BUNDLE_FILE)?).ok()
+}
+
+/// The stems of a bundle's flows as packs offer them (`flow` for the bundle's own).
+pub fn offered_stems(packs: &dyn crate::Packs, bundle: &str) -> BTreeSet<String> {
+    packs
+        .flows()
+        .iter()
+        .filter_map(|f| match split(f) {
+            Some((b, s)) if b == bundle => Some(s.to_string()),
+            None if f == bundle => Some(MAIN_FLOW.to_string()),
+            _ => None,
+        })
+        .collect()
 }
 
 /// What a bundle needs of the host that runs it.
@@ -70,11 +313,11 @@ pub struct BundleRequires {
 
 /// Names a bundle cannot have: they are the words of `conix flow export` / `import`, which a flow
 /// address (`/flow:export`) is told apart from a bundle by.
-pub const RESERVED: [&str; 2] = ["export", "import"];
+pub const RESERVED_BUNDLES: [&str; 2] = ["export", "import"];
 
 /// Whether a name may be a bundle's: `[a-z][a-z0-9-]*`, not a reserved one.
 pub fn is_bundle_name(s: &str) -> bool {
-    is_name(s) && !RESERVED.contains(&s)
+    is_name(s) && !RESERVED_BUNDLES.contains(&s)
 }
 
 /// A requirement `>=x.y.z`, as the version it names. Only this form: a bundle says the oldest
@@ -154,7 +397,7 @@ pub fn meta(dir: &Path) -> Result<BundleMeta, String> {
     if m.name != named {
         return Err(format!("{BUNDLE_FILE}: name {:?} is not the directory's ({named:?})", m.name));
     }
-    if RESERVED.contains(&m.name.as_str()) {
+    if RESERVED_BUNDLES.contains(&m.name.as_str()) {
         return Err(format!("{BUNDLE_FILE}: name {:?} is reserved (it is a word of flow export / import)", m.name));
     }
     if let Some(c) = m.requires.as_ref().and_then(|r| r.conix.as_deref()) {
@@ -172,7 +415,7 @@ pub fn bundles_in(dir: &Path) -> Vec<(String, PathBuf)> {
         .filter(|p| p.is_dir() && is_bundle(p))
         .filter_map(|p| {
             let n = p.file_name()?.to_str()?.to_string();
-            (segment(&n) && is_name(&n) && !RESERVED.contains(&n.as_str())).then_some((n, p))
+            (segment(&n) && is_name(&n) && !RESERVED_BUNDLES.contains(&n.as_str())).then_some((n, p))
         })
         .collect();
     out.sort();
@@ -181,7 +424,7 @@ pub fn bundles_in(dir: &Path) -> Vec<(String, PathBuf)> {
 
 /// The bundle of that name in a pack directory.
 pub fn bundle_in(dir: &Path, name: &str) -> Option<PathBuf> {
-    if !segment(name) || RESERVED.contains(&name) {
+    if !segment(name) || RESERVED_BUNDLES.contains(&name) {
         return None;
     }
     let d = dir.join(name);
@@ -234,7 +477,7 @@ pub fn read_flow(bundle: &str, dir: &Path, stem: &str) -> Option<(FlowDef, Strin
     qualify(&mut def, bundle, &|s: &str| stems.contains(s));
     for st in def.stations.iter_mut().filter(|s| !s.deliverables.is_empty()) {
         let gate = qualified(bundle, &format!("{DELIVERABLES_GATE}{stem}.{}", st.id));
-        st.exit.insert(0, ExitCond::Gate { gate, label: Some("deliverables".into()) });
+        st.exit.insert(0, ExitCond::Gate { gate, label: Some("deliverables".into()), rework_to: None });
     }
     Some((def, text))
 }
@@ -288,10 +531,13 @@ pub fn qualify(def: &mut FlowDef, bundle: &str, has_flow: &dyn Fn(&str) -> bool)
         if let Some(Executor::Subflow { flow, .. }) = &mut s.executor {
             *flow = subflow(bundle, flow, has_flow);
         }
-        for e in &mut s.exit {
+        for e in s.exit.iter_mut().chain(s.task_exit.iter_mut()) {
             if let ExitCond::Gate { gate, .. } = e {
                 *gate = in_bundle(bundle, gate);
             }
+        }
+        if let Some(crate::kernel::def::Foreach::Script(f)) = &mut s.foreach {
+            f.script = in_bundle(bundle, &f.script);
         }
     }
 }
@@ -368,6 +614,70 @@ pub fn file(dir: &Path, rel: &str) -> Option<String> {
     std::fs::read_to_string(parts.iter().fold(dir.to_path_buf(), |p, s| p.join(s))).ok()
 }
 
+// ── imports between a bundle's scripts ───────────────────────────────────────
+
+/// The module a script's `import` names, as a path in the bundle: `spec` is relative (`./`, `../`)
+/// and taken from the directory of `from`, itself a path in the bundle (`scripts/spec-delta.js`).
+/// Never a bare name (`fs`: there is no package to find it in) and never out of the bundle.
+pub fn resolve_import(from: &str, spec: &str) -> Result<String, String> {
+    if !(spec.starts_with("./") || spec.starts_with("../")) {
+        return Err(format!(
+            "cannot import {spec:?}: only the bundle's own files are imported, by a relative path (`./x.js`, `../lib/x.js`)"
+        ));
+    }
+    let mut at: Vec<&str> = from.split('/').collect();
+    at.pop();
+    for seg in spec.split('/') {
+        match seg {
+            "" | "." => {}
+            ".." => {
+                if at.pop().is_none() {
+                    return Err(format!("cannot import {spec:?} from {from}: it leaves the bundle"));
+                }
+            }
+            s => at.push(s),
+        }
+    }
+    if at.is_empty() || !at.iter().all(|p| segment(p)) {
+        return Err(format!("cannot import {spec:?} from {from}: not a file of the bundle"));
+    }
+    Ok(at.join("/"))
+}
+
+/// The specifiers a module's text imports (`import … from "x"`, `import "x"`, `export … from "x"`).
+/// A scan, not a parse: a quoted `from "x"` in a comment is found too, which only costs a file looked
+/// for and not found.
+pub fn imports_of(source: &str) -> Vec<String> {
+    use std::sync::OnceLock;
+    static RE: OnceLock<regex::Regex> = OnceLock::new();
+    let re = RE.get_or_init(|| {
+        regex::Regex::new(r#"(?:\b(?:import|export)\b[^;"'`]*?\bfrom\s*|\bimport\s*)["']([^"'\n]+)["']"#).expect("the import pattern")
+    });
+    re.captures_iter(source).map(|c| c[1].to_string()).collect()
+}
+
+/// What `roots` (path in the bundle → source) import, followed to the end: path → source, the
+/// roots themselves left out. `read` gives a bundle file by its path. What cannot be read or
+/// resolved is left for the loader to say when the script runs.
+pub fn import_closure(roots: &[(&str, &str)], read: &dyn Fn(&str) -> Option<String>) -> std::collections::BTreeMap<String, String> {
+    let mut found = std::collections::BTreeMap::new();
+    let known: BTreeSet<&str> = roots.iter().map(|(p, _)| *p).collect();
+    let mut todo: Vec<(String, String)> = roots.iter().map(|(p, s)| (p.to_string(), s.to_string())).collect();
+    while let Some((from, text)) = todo.pop() {
+        for spec in imports_of(&text) {
+            let Ok(path) = resolve_import(&from, &spec) else { continue };
+            if known.contains(path.as_str()) || found.contains_key(&path) {
+                continue;
+            }
+            if let Some(src) = read(&path) {
+                todo.push((path.clone(), src.clone()));
+                found.insert(path, src);
+            }
+        }
+    }
+    found
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -427,7 +737,7 @@ mod tests {
     #[test]
     fn a_bundle_cannot_take_a_reserved_name_or_an_odd_requirement() {
         let d = tempfile::tempdir().unwrap();
-        for n in RESERVED {
+        for n in RESERVED_BUNDLES {
             let b = d.path().join(n);
             std::fs::create_dir_all(&b).unwrap();
             std::fs::write(b.join("bundle.yaml"), format!("name: {n}\n")).unwrap();

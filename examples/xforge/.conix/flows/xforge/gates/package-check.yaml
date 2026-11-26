@@ -1,0 +1,10 @@
+name: package-check
+title: 这一包做完了、账对得上
+description: >-
+  任务级出口（task_exit）：这一包 status 是 done（blocked 就不过，说卡在哪）；每条判据有证据；files 都在包的路径里；
+  基线以来（含没提交的）的改动里落在这个包路径下的，都登记在 files 里。
+kind: script
+script: package-check
+params:
+  plan: "${output_dir}/work-packages.yaml"
+  item: "${item}"

@@ -9,7 +9,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::def::FlowDef;
+use super::def::{FlowDef, Pace};
 use super::parts::Pinned;
 
 /// Whoever did something. The kernel records it and never interprets it.
@@ -168,6 +168,44 @@ pub struct TaskRec {
     /// Who handed the output in, and as what (docs/design/flows.md §6.4, in Conix).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub delivery: Option<DeliveryRec>,
+    /// Its station's `task_exit` gates on its latest hand-in: waiting, taken, or sent back.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_exit: Option<TaskExitRec>,
+}
+
+/// A hand-in judged by its station's `task_exit` gates. While they run the task stays claimed (its
+/// lease does not run out: the wait is the flow's, not the worker's) and the output waits here;
+/// taken, it becomes the task's output; sent back, it stays here with what was found.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct TaskExitRec {
+    /// Which hand-in of the task's this is (from 1): a result for another one is not this one's.
+    pub seq: u32,
+    /// `wait` while a gate runs; `pass` taken; `fail` or `error` sent back.
+    pub status: CheckStatus,
+    /// One per `task_exit` condition, `cond` its index.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub checks: Vec<CheckRec>,
+    /// What was handed in, until it is taken.
+    #[serde(default, skip_serializing_if = "Value::is_null")]
+    #[cfg_attr(feature = "ts", ts(type = "unknown"))]
+    pub output: Value,
+    pub by: Actor,
+    pub at: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent: Option<AgentDelivery>,
+}
+
+impl TaskExitRec {
+    /// What did not pass, in one piece, for the task sent back to fix it.
+    pub fn explain(&self) -> String {
+        self.checks
+            .iter()
+            .filter(|c| matches!(c.status, CheckStatus::Fail | CheckStatus::Error))
+            .map(|c| format!("{}: {}", c.label, c.explain()))
+            .collect::<Vec<_>>()
+            .join("; ")
+    }
 }
 
 /// How a task's output came in: who handed it in, when, as which kind of executor — and for a
@@ -227,7 +265,13 @@ impl TaskRec {
             usage: Usage::default(),
             asking: None,
             delivery: None,
+            task_exit: None,
         }
+    }
+
+    /// A hand-in of it is still being judged by its station's `task_exit`.
+    pub fn checking(&self) -> bool {
+        self.status == TaskStatus::Claimed && self.task_exit.as_ref().is_some_and(|x| x.status == CheckStatus::Wait)
     }
 
     /// Ready or claimed: still to be done.
@@ -455,6 +499,14 @@ pub struct ConfirmRec {
     /// The outside request it was decided in: its link, else its id.
     #[serde(default, rename = "ref", skip_serializing_if = "Option::is_none")]
     pub reference: Option<String>,
+    /// The `confirm` exit it is a vote for, when it is one exit's alone (an outside approval's);
+    /// `None` counts for every `confirm` exit of the station.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cond: Option<usize>,
+    /// On the vote that passed the exit: what was approved, path (relative to the workspace) →
+    /// sha256, as it was then. `None` until recorded; empty when the exit binds no file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub binds: Option<BTreeMap<String, String>>,
 }
 
 /// A confirmation asked of an outside approval system (`via: mcp`): what the request gave back,
@@ -695,9 +747,120 @@ pub struct RunRecord {
     /// start, and what became of it once the run was over. A child run holds its parent's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub worktree: Option<WorktreeRec>,
+    /// The commit the run's workspace stood at when it started (its worktree's `HEAD`, else the
+    /// project's): what `${base_commit}` and `flow.git` measure changes against. A record, not a
+    /// lookup, because the branch moves on while the run goes. Absent: the project is no git
+    /// repository (or the run has no project). A child run holds its parent's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_commit: Option<String>,
     /// Started from a governed flow (`Packs::governed`): it cannot be forced past a station.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub governed: bool,
+    /// How it goes from station to station: `step` holds every station on entry.
+    #[serde(default, skip_serializing_if = "Pace::is_auto")]
+    pub pace: Pace,
+    /// How its flow was chosen, when it was started by name (a child run's is its parent's word).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub routed: Option<RoutedRec>,
+    /// Each switch to another flow of its bundle, oldest first (`Engine::switch`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub switched: Vec<SwitchRec>,
+    /// What its stations' sessions proposed (a rework, a cancel) for a person to decide, oldest
+    /// first (`Engine::propose`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub proposals: Vec<ProposalRec>,
+}
+
+/// How a run's flow was chosen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "snake_case")]
+pub enum RoutedBy {
+    /// The start named the flow.
+    Named,
+    /// The start named its bundle, and the bundle's `start.route` took the first flow that
+    /// accepts the inputs.
+    Route,
+    /// As `route`, with inputs a model judged by the bundle's `start.triage` skill.
+    Triage,
+}
+
+/// How a run's flow was chosen, and why.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct RoutedRec {
+    pub by: RoutedBy,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+/// A run switched to another flow of its bundle before its first station passed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct SwitchRec {
+    pub from: String,
+    pub to: String,
+    pub by: Actor,
+    pub at: u64,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "snake_case")]
+pub enum ProposalKind {
+    Rework,
+    Cancel,
+}
+
+impl ProposalKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Rework => "rework",
+            Self::Cancel => "cancel",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "snake_case")]
+pub enum ProposalStatus {
+    /// Waiting for a person.
+    Open,
+    /// Done as proposed: the rework went to `to` (or the run was cancelled).
+    Accepted,
+    /// Not taken: a person said no, or the station moved on without it.
+    Dismissed,
+}
+
+/// What a station's session proposed for a person to decide.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct ProposalRec {
+    /// `p1`, `p2`, … within the run.
+    pub id: String,
+    pub station: String,
+    pub round: u32,
+    pub task: String,
+    pub kind: ProposalKind,
+    /// With `rework`: the station to go back to, one of the proposing station's rework points.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub to: Option<String>,
+    pub reason: String,
+    pub by: Actor,
+    pub at: u64,
+    pub status: ProposalStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub decided_by: Option<Actor>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub decided_at: Option<u64>,
+}
+
+impl ProposalRec {
+    pub fn is_open(&self) -> bool {
+        self.status == ProposalStatus::Open
+    }
 }
 
 /// A run's worktree of its project (`docs/glossary.md`, 项目任务): outside the project, in the
@@ -1009,7 +1172,7 @@ impl RunRecord {
             .stations
             .values()
             .flat_map(|s| &s.tasks)
-            .filter(|t| t.status == TaskStatus::Claimed)
+            .filter(|t| t.status == TaskStatus::Claimed && !t.checking())
             .filter_map(|t| t.lease.as_ref().map(|l| l.until));
         let confirms = self
             .stations
@@ -1209,6 +1372,24 @@ pub struct RunView {
     /// What the run is doing (`RunRecord::phase`, xops-03 §3).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub phase: Option<Phase>,
+    /// Station id → how each of its `confirm` exits stands this round ("1 of 2 approvals").
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub votes: BTreeMap<String, Vec<Votes>>,
+    /// The proposals still waiting for a person (every one, decided or not, is in the record).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub proposals: Vec<ProposalRec>,
+}
+
+/// How one `confirm` exit's votes stand in the station's current round.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct Votes {
+    /// Index into the station's `exit`.
+    pub cond: usize,
+    pub approvals: u32,
+    pub rejections: u32,
+    /// Approvals needed.
+    pub min: u32,
 }
 
 impl RunView {

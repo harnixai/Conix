@@ -411,6 +411,22 @@ pub enum Op {
     DryRun {
         flow: String,
     },
+    /// Switching a run to another flow of its bundle (`Engine::switch`): `from`, `to` full names.
+    Switch {
+        from: String,
+        to: String,
+    },
+    /// A station's session proposing a rework (`to`) or a cancel for a person to decide
+    /// (`Engine::propose`): `kind` is `rework` or `cancel`.
+    Propose {
+        station: String,
+        kind: String,
+        to: Option<String>,
+    },
+    /// Dismissing an open proposal (`Engine::dismiss_proposal`).
+    DismissProposal {
+        id: String,
+    },
 }
 
 impl Op {
@@ -439,6 +455,9 @@ impl Op {
             Self::ListRuns { .. } => "list_runs",
             Self::ReadRun => "read_run",
             Self::DryRun { .. } => "dry_run",
+            Self::Switch { .. } => "switch",
+            Self::Propose { .. } => "propose",
+            Self::DismissProposal { .. } => "dismiss_proposal",
         }
     }
 }
@@ -585,6 +604,12 @@ impl GateResult {
 #[async_trait]
 pub trait Gates: Send + Sync {
     async fn run(&self, run: &RunRecord, station: &str, gate: &str) -> GateResult;
+
+    /// A `task_exit` gate on one task's hand-in ([`WorkItem::TaskGate`]): `item` is the task's
+    /// `foreach` item. A host that judges only stations judges it as [`Gates::run`] does.
+    async fn run_for_task(&self, run: &RunRecord, station: &str, _task: &str, _item: Option<&Value>, gate: &str) -> GateResult {
+        self.run(run, station, gate).await
+    }
 }
 
 /// Calls the MCP tools of `via: mcp` confirmations (called by the module for a
@@ -694,6 +719,11 @@ pub const EVENT_KINDS: &[&str] = &[
     "task.cancelled",
     "task.expired",
     "task.asking",
+    "run.switched",
+    "proposal.opened",
+    "proposal.accepted",
+    "proposal.dismissed",
+    "task.checked",
 ];
 
 /// Work for the module to carry out after the commit.
@@ -724,6 +754,9 @@ pub enum WorkItem {
         /// tasks).
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         permissions: Vec<Granted>,
+        /// The station's write allow-list, resolved for this task.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        writes: Option<super::parts::WriteScope>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         item: Option<Value>,
         /// The station's output contract (for the session's `output_schema`).
@@ -770,6 +803,25 @@ pub enum WorkItem {
     },
     /// A session served a task that was cancelled.
     CloseSession { session: String },
+    /// Run `task_exit` condition `cond` of the station (a `gate` the run pins) on hand-in `seq` of
+    /// a task, with that task's context; report through `task_gate_result`.
+    TaskGate {
+        run: String,
+        station: String,
+        round: u32,
+        task: String,
+        seq: u32,
+        cond: usize,
+        gate: String,
+    },
+    /// Evaluate a `foreach: {script}` station's script (the run pins it) for its items; report
+    /// through `foreach_items`.
+    Items {
+        run: String,
+        station: String,
+        round: u32,
+        script: String,
+    },
 }
 
 /// A session task's placement, as the station gave it with `params` resolved for the run.

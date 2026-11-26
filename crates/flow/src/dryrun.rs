@@ -65,6 +65,8 @@ pub struct Mocks {
     pub gates: BTreeMap<String, bool>,
     /// Tool → what a `tool` gate's tool gets back (`{}` when absent).
     pub tools: BTreeMap<String, Value>,
+    /// Station id → the items a `foreach: {script}` gives (`[]` when absent).
+    pub items: BTreeMap<String, Value>,
 }
 
 /// Starting a dry run: a pack's flow by name, or a definition text not saved anywhere.
@@ -173,7 +175,7 @@ fn take_in(c: &mut Catalog, def: &FlowDef, packs: &dyn Packs) {
     }
     c.command_gates = true;
     for s in &def.stations {
-        for e in &s.exit {
+        for e in s.exit.iter().chain(s.task_exit.iter()) {
             if let ExitCond::Gate { gate, .. } = e {
                 c.gates.insert(gate.clone());
                 if let Some(t) = packs.gate(gate).and_then(|g| g.tool) {
@@ -657,6 +659,35 @@ impl Sandbox {
                     task: None,
                     gate: Some(gate),
                     result: if pass { "passed" } else { "not passed" }.into(),
+                };
+                (stepped, r.map(|o| o.work).unwrap_or_default())
+            }
+            WorkItem::TaskGate { run, station, round, task, seq, cond, gate } => {
+                let pass = d.mocks.gates.get(&gate).copied().unwrap_or(true);
+                let detail = if pass { "mocked: passes" } else { "mocked: does not pass" };
+                let result = if pass { GateResult::passed(detail) } else { GateResult::failed(detail) };
+                let r = engine.task_gate_result(&run, &station, round, &task, seq, cond, result).await;
+                let stepped = Stepped {
+                    kind: "task_gate".into(),
+                    run,
+                    station: Some(station),
+                    task: Some(task),
+                    gate: Some(gate),
+                    result: if pass { "passed" } else { "not passed" }.into(),
+                };
+                (stepped, r.map(|o| o.work).unwrap_or_default())
+            }
+            WorkItem::Items { run, station, round, script } => {
+                let items = d.mocks.items.get(&station).cloned().unwrap_or_else(|| json!([]));
+                let n = items.as_array().map_or(0, Vec::len);
+                let r = engine.foreach_items(&run, &station, round, Ok(items)).await;
+                let stepped = Stepped {
+                    kind: "items".into(),
+                    run,
+                    station: Some(station),
+                    task: None,
+                    gate: None,
+                    result: format!("mocked: script {script} gives {n} items"),
                 };
                 (stepped, r.map(|o| o.work).unwrap_or_default())
             }

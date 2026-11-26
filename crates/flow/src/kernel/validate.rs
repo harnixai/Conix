@@ -162,6 +162,13 @@ pub fn validate(def: &FlowDef, packs: &dyn Packs) -> Vec<Problem> {
     if def.bundle.is_some() && def.output_dir.is_some() {
         c.flow("output_dir: a bundle's flow works in the run's own directory; say where it is archived with archive.name".to_string());
     }
+    // A bundle's flows, commands and stations share one namespace (the address `/<bundle>:<name>`
+    // names any of them); read from the packs, so a flow reports its bundle's collisions too.
+    if let Some(b) = &def.bundle {
+        for m in bundle_problems(b, packs) {
+            c.flow(format!("bundle {b}: {m}"));
+        }
+    }
     if let Some(a) = &def.archive {
         if let Some(t) = &a.name {
             for m in super::output::template_problems(t, &def.inputs) {
@@ -188,6 +195,9 @@ pub fn validate(def: &FlowDef, packs: &dyn Packs) -> Vec<Problem> {
                 c.at(&s.id, format!("deliverable {:?}: a template is a bundle's (templates/); this flow is in none", d.path));
             }
         }
+    }
+    for m in super::route::bundle_problems(def, c.packs) {
+        c.flow(m);
     }
     if def.workspace == Some(super::run::Workspace::Scratch) {
         c.flow("workspace: a flow's tasks work in the project or a worktree of it (project | worktree)".to_string());
@@ -432,15 +442,26 @@ fn station_problems(c: &mut Ctx, s: &Station, cyclic: bool) {
     for t in &specs {
         executor_problems(c, id, t);
     }
-    if let Some(items) = &s.foreach {
-        let r = refs_in(items);
-        if r.len() != 1 || !items.trim().starts_with("${") || !items.trim().ends_with('}') {
-            c.at(
-                id,
-                "foreach must be one reference, like ${stations.<id>.output.<list>}",
-            );
+    match &s.foreach {
+        Some(super::def::Foreach::Ref(items)) => {
+            let r = refs_in(items);
+            if r.len() != 1 || !items.trim().starts_with("${") || !items.trim().ends_with('}') {
+                c.at(
+                    id,
+                    "foreach must be one reference, like ${stations.<id>.output.<list>}, or {script: <name>}",
+                );
+            }
         }
+        Some(super::def::Foreach::Script(f)) => {
+            if f.script.trim().is_empty() {
+                c.at(id, "foreach names its script: {script: <name>}");
+            } else if c.packs.part(PartKind::Script, &f.script).is_none() {
+                c.at(id, format!("foreach: there is no script {} (scripts/<name>.js)", f.script));
+            }
+        }
+        None => {}
     }
+    task_exit_problems(c, s);
 
     // exits
     if s.exit.is_empty() {
@@ -489,6 +510,9 @@ fn station_problems(c: &mut Ctx, s: &Station, cyclic: bool) {
             },
             ExitCond::Confirm { via, mcp, timeout, .. } => {
                 use super::def::{duration_ms, ConfirmVia};
+                for m in super::confirm::problems(e) {
+                    c.at(id, m);
+                }
                 if let Some(t) = timeout {
                     if duration_ms(t).is_none() {
                         c.at(id, format!("confirm timeout {t:?}: a duration such as 90m, 8h, 3d or 1h30m"));
@@ -553,6 +577,26 @@ fn station_problems(c: &mut Ctx, s: &Station, cyclic: bool) {
                 .collect::<Vec<_>>()
         })
         .collect();
+    // writes: the allow-list of where its tasks write in the project
+    let mut refs = refs;
+    for (i, w) in s.writes.iter().enumerate() {
+        if w.trim().is_empty() {
+            c.at(id, format!("writes[{i}]: a glob is empty"));
+        } else if w.split('/').any(|seg| seg.contains("**") && seg != "**") {
+            c.at(id, format!("writes[{i}]: {w}: `**` must be a whole path segment"));
+        }
+        if w.matches('[').count() != w.matches(']').count() {
+            c.at(id, format!("writes[{i}]: {w}: unbalanced brackets"));
+        }
+        for r in refs_in(w) {
+            let root = r.split(['.', '[']).next().unwrap_or("");
+            if !ROOTS.contains(&root) {
+                c.at(id, format!("writes[{i}]: reference {r}: unknown root {root:?}"));
+            } else {
+                refs.push(r.to_string());
+            }
+        }
+    }
     ref_problems(c, s, &refs);
 
     // when
@@ -594,6 +638,65 @@ fn station_problems(c: &mut Ctx, s: &Station, cyclic: bool) {
             c.at(id, "on_unmet.max must be at least 1");
         }
     }
+    gate_rework_problems(c, s);
+}
+
+/// A gate's own rework point is one of the station's: it, its `rework_to`, its `on_unmet`'s —
+/// and only an automatic rework goes there, so the station must rework automatically.
+fn gate_rework_problems(c: &mut Ctx, s: &Station) {
+    for e in &s.exit {
+        let ExitCond::Gate { gate, rework_to: Some(r), .. } = e else { continue };
+        match &s.on_unmet {
+            None => c.at(&s.id, format!("gate {gate}: rework_to {r} needs on_unmet on the station (it says where an automatic rework goes)")),
+            Some(u) if *r != s.id && *r != u.rework_to && !s.rework_to.contains(r) => c.at(
+                &s.id,
+                format!("gate {gate}: rework_to {r} is not one of the station's rework points (the station itself, its rework_to, its on_unmet.rework_to)"),
+            ),
+            Some(_) => {}
+        }
+    }
+}
+
+/// `task_exit`: gates only, on a station that has tasks to hand in, each gate as an exit's would be.
+fn task_exit_problems(c: &mut Ctx, s: &Station) {
+    let id = s.id.as_str();
+    if s.task_exit.is_empty() {
+        return;
+    }
+    if matches!(s.work(), Work::None) {
+        c.at(id, "task_exit judges each task's hand-in; a checkpoint has no tasks");
+    }
+    for e in &s.task_exit {
+        let ExitCond::Gate { gate, .. } = e else {
+            c.at(id, format!("task_exit holds only gates (kind: gate), not {}", e.kind()));
+            continue;
+        };
+        match c.packs.part(PartKind::Gate, gate) {
+            None => c.at(id, format!("task_exit: gate {gate} is not in the packs")),
+            Some((text, _)) => {
+                for m in part_problems(PartKind::Gate, gate, &text, c.packs) {
+                    c.at(id, format!("task_exit: gate {gate}: {m}"));
+                }
+                if let Some(g) = c.packs.gate(gate) {
+                    if !g.args.is_null() {
+                        ref_problems(c, s, &refs_in_value(&g.args));
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// The commands a bundle declares in its `bundle.yaml`: a list of names, or a table by name (what
+/// each read-only subcommand is, in Conix); `None` when the file is not there or does not parse.
+fn declared_commands(packs: &dyn Packs, bundle: &str) -> Option<Vec<String>> {
+    let text = packs.bundle_file(bundle, crate::bundle::BUNDLE_FILE)?;
+    let v: serde_yaml::Value = serde_yaml::from_str(&text).ok()?;
+    Some(match v.get("commands") {
+        Some(serde_yaml::Value::Sequence(l)) => l.iter().filter_map(|x| x.as_str().map(String::from)).collect(),
+        Some(serde_yaml::Value::Mapping(m)) => m.keys().filter_map(|x| x.as_str().map(String::from)).collect(),
+        _ => vec![],
+    })
 }
 
 fn executor_problems(c: &mut Ctx, id: &str, t: &TaskSpec) {
@@ -701,6 +804,20 @@ fn executor_problems(c: &mut Ctx, id: &str, t: &TaskSpec) {
             }
         }
         Executor::External { .. } => {}
+        Executor::Command { command, args } => match &c.def.bundle {
+            None => c.at(id, format!("command task {}: a command is a bundle's; this flow is in none", t.id)),
+            Some(b) => {
+                if !declared_commands(c.packs, b).unwrap_or_default().iter().any(|x| x == command) {
+                    c.at(id, format!("command task {}: bundle {b} declares no command {command} (bundle.yaml commands)", t.id));
+                } else if c.packs.bundle_file(b, &format!("commands/{command}.js")).is_none() {
+                    c.at(id, format!("command task {}: there is no commands/{command}.js in bundle {b}", t.id));
+                }
+                let refs: Vec<String> = args.iter().flat_map(|a| refs_in(a).into_iter().map(String::from).collect::<Vec<_>>()).collect();
+                if let Some(st) = c.def.station(id).cloned() {
+                    ref_problems(c, &st, &refs);
+                }
+            }
+        },
         Executor::Subflow { flow, .. } => {
             if c.packs.flow(flow).is_none() {
                 c.at(id, format!("subflow {flow} is not a flow in the packs"));
@@ -1066,6 +1183,23 @@ pub fn is_part_name(kind: PartKind, name: &str) -> bool {
         PartKind::Skill => is_skill_name(name),
         _ => is_name(name, &[]),
     }
+}
+
+/// The problems in a bundle's one namespace (see [`crate::bundle::namespace_problems`]), read from
+/// the packs: its flows, the commands its `bundle.yaml` declares, their stations. In Conix.
+pub fn bundle_problems(bundle: &str, packs: &dyn Packs) -> Vec<String> {
+    let meta = packs.bundle_file(bundle, crate::bundle::BUNDLE_FILE).and_then(|t| serde_yaml::from_str::<crate::bundle::BundleMeta>(&t).ok());
+    let commands: Vec<&str> = meta.as_ref().map(|m| m.commands.names().collect()).unwrap_or_default();
+    // The bundle's own main flow (`flow.yaml`, offered as the bundle's name) has no local name.
+    let flows: Vec<(String, Vec<String>)> = packs
+        .flows()
+        .into_iter()
+        .filter_map(|n| {
+            let (b, local) = crate::bundle::split(&n)?;
+            (b == bundle).then(|| (local.to_string(), packs.flow(&n).map(|(d, _)| d.stations.iter().map(|s| s.id.clone()).collect()).unwrap_or_default()))
+        })
+        .collect();
+    crate::bundle::namespace_problems(&commands, &flows)
 }
 
 /// Every problem of a part's text on its own (a flow that uses it is judged by [`validate`]);

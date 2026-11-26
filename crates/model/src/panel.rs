@@ -845,6 +845,7 @@ mod tests {
             usage: Default::default(),
             unmet: None,
             session: None,
+            votes: None,
         }
     }
 

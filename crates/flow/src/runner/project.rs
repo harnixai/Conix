@@ -75,6 +75,12 @@ pub(crate) async fn start(rn: &Arc<Runner>, mut input: CreateIn, by: Actor) -> c
         // In a project a name means the project's own flow: not run until it is trusted.
         super::trust::withheld(engine.packs_for(Some(root)).as_ref(), &input.flow)?;
     }
+    // A bundle's name is the flow it routes to, before anything is made for that flow.
+    let named = input.flow.clone();
+    input = engine.resolve_start(input)?;
+    if let Some(root) = root.as_ref().filter(|_| input.flow != named) {
+        super::trust::withheld(engine.packs_for(Some(root)).as_ref(), &input.flow)?;
+    }
     let mut prepared = Prepared::default();
     if let Some(root) = &root {
         let def = engine.packs_for(Some(root)).flow(&input.flow).map(|(d, _)| d);
@@ -82,7 +88,11 @@ pub(crate) async fn start(rn: &Arc<Runner>, mut input: CreateIn, by: Actor) -> c
         input.workspace = Some(workspace);
         if workspace == Workspace::Worktree && def.is_some() {
             let (id, w) = super::worktree::make(engine, root, &input.flow).await?;
-            prepared = Prepared { id: Some(id), worktree: Some(w) };
+            prepared = Prepared { base_commit: Some(w.base.clone()), id: Some(id), worktree: Some(w) };
+        } else if workspace.in_project() {
+            // Where the run works is the project itself: what its `HEAD` is now.
+            let dir = std::path::PathBuf::from(root);
+            prepared.base_commit = tokio::task::spawn_blocking(move || super::git::head(&dir)).await.ok().flatten();
         }
     }
     let claimed = match prepare(engine, &mut input, prepared.worktree.as_ref()) {

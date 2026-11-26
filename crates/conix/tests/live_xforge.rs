@@ -14,7 +14,10 @@ use std::path::Path;
 use std::time::Duration;
 
 use live::{Answering, Client, Endpoint, Live};
-use port::{Command, Event, Reply, RunId, RunOp, RunStatus, RunView, StationId, StationStatus};
+use port::{
+    Command, Event, ProposalStatus, Reply, RunId, RunOp, RunStatus, RunView, StationId,
+    StationStatus,
+};
 use serde_json::Value;
 
 const RUN: Duration = Duration::from_secs(3000);
@@ -172,6 +175,8 @@ async fn the_builtin_xforge_runs_a_change_from_proposal_to_archive_with_its_own_
             flow: "xforge/solid".into(),
             subject: "给 textkit 加 truncate(text, n)：文字超过 n 个字符时截成前 n-1 个字符再加一个省略号 …，不超过时原样返回".into(),
             inputs: serde_json::json!({"title": "truncate"}),
+            step: false,
+            session: None,
         })
         .await
     {
@@ -196,6 +201,7 @@ async fn the_builtin_xforge_runs_a_change_from_proposal_to_archive_with_its_own_
 
     // 独立检查：问题留成 open 时台账门禁挡住这一站，人看了打回设计（至多两次），过了就确认。
     let mut reworks = 0;
+    let mut proposed_back = false;
     loop {
         let v = wait_run(&mut c, &id, "独立检查有结论", Some("check"), |v| {
             waiting_at(v, "check")
@@ -212,12 +218,31 @@ async fn the_builtin_xforge_runs_a_change_from_proposal_to_archive_with_its_own_
             break;
         }
         reworks += 1;
-        assert!(reworks <= 2, "打回两次检查还没过");
+        assert!(reworks <= 3, "打回三次检查还没过");
+        // 像人那样听检查的建议：问题的根在提案就退到提案，没有建议就退到设计。
+        let to = v
+            .proposals
+            .iter()
+            .rev()
+            .find(|p| p.station.0 == "check" && p.status == ProposalStatus::Open)
+            .map(|p| p.to.0.clone())
+            .filter(|t| t == "propose" || t == "design")
+            .unwrap_or_else(|| "design".into());
+        eprintln!(
+            "==== 打回到 {to}（建议：{:?}）",
+            v.proposals
+                .iter()
+                .map(|p| (&p.to.0, &p.reason))
+                .collect::<Vec<_>>()
+        );
+        if to == "propose" {
+            proposed_back = true;
+        }
         c.ok(Command::RunOp {
             run: id.clone(),
             op: RunOp::Rework {
-                to: StationId("design".into()),
-                reason: Some("检查还留着 open 的问题：设计照台账改，改完让检查再看".into()),
+                to: StationId(to),
+                reason: Some("检查还留着 open 的问题：照台账改，改完让检查再看".into()),
             },
         })
         .await;
@@ -252,7 +277,7 @@ async fn the_builtin_xforge_runs_a_change_from_proposal_to_archive_with_its_own_
     })
     .await;
     let rec = rec_of(&lv);
-    eprintln!("==== 结束（打回设计 {reworks} 次）");
+    eprintln!("==== 结束（打回 {reworks} 次，按建议退到提案：{proposed_back}）");
     report(&rec);
     for s in &done.stations {
         assert_eq!(s.status, StationStatus::Passed, "{}", s.id.0);

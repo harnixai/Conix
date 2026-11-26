@@ -22,6 +22,8 @@ pub struct Binding {
     pub token: String,
     /// What the task works under, references resolved.
     pub permissions: Vec<Granted>,
+    /// The task's write allow-list, resolved.
+    pub writes: Option<crate::kernel::parts::WriteScope>,
 }
 
 /// One task in one round: what is dispatched at most once at a time.
@@ -215,7 +217,7 @@ mod tests {
     }
 
     fn binding(token: &str) -> Binding {
-        Binding { run: "r-1".into(), station: "a".into(), round: 1, task: "a".into(), token: token.into(), permissions: vec![] }
+        Binding { run: "r-1".into(), station: "a".into(), round: 1, task: "a".into(), token: token.into(), permissions: vec![], writes: None }
     }
 
     #[test]
@@ -279,7 +281,7 @@ mod tests {
             ]}}
         }))
         .unwrap();
-        let b = Binding { run: "r".into(), station: "a".into(), round: 1, task: "t".into(), token: "tok".into(), permissions: vec![] };
+        let b = Binding { run: "r".into(), station: "a".into(), round: 1, task: "t".into(), token: "tok".into(), permissions: vec![], writes: None };
         assert!(binding_current(&rec, &b), "handed in, station open: it may hand in again");
         let other = Binding { token: "old".into(), ..b.clone() };
         assert!(!binding_current(&rec, &other));

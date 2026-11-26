@@ -6,6 +6,7 @@
 mod chat;
 mod chat_update;
 mod composer;
+mod flow_addr;
 mod flows;
 mod follow;
 mod highlight;

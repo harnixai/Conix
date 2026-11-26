@@ -346,6 +346,7 @@ mod tests {
         assert_eq!((rec.workspace, Path::new(&w.path)), (Workspace::Worktree, wt.as_path()));
         assert_eq!(w.branch, format!("harnix/flow/{run}"));
         assert_eq!(w.base, git_out(p, &["rev-parse", "HEAD"]));
+        assert_eq!(rec.base_commit.as_deref(), Some(w.base.as_str()));
         assert_eq!(git_out(&wt, &["symbolic-ref", "--short", "HEAD"]), w.branch);
         // Its sessions and gates work there; its deliverables go there.
         assert_eq!(e.workspace_for(&rec), Some(wt.clone()));
@@ -419,6 +420,30 @@ mod tests {
             let yes = info_of(r.path()).await;
             assert_eq!((yes["git"].clone(), yes["branch"].clone()), (json!(true), json!("main")));
         }
+    }
+
+    #[tokio::test]
+    async fn a_run_records_the_commit_its_workspace_stood_at_and_a_later_commit_does_not_move_it() {
+        if !have_git() {
+            return;
+        }
+        let r = repo();
+        let p = r.path();
+        let head = git_out(p, &["rev-parse", "HEAD"]);
+        let data = tempfile::tempdir().unwrap();
+        let e = engine(data.path());
+        let run = started(&e, "f", p, Some(Workspace::Project)).await.unwrap();
+        std::fs::write(p.join("b.txt"), "x").unwrap();
+        commit_all(p, "second");
+        assert_eq!(e.record(&run).await.unwrap().base_commit.as_deref(), Some(head.as_str()));
+        // The next run starts from the new commit.
+        let later = started(&e, "f", p, Some(Workspace::Project)).await.unwrap();
+        assert_eq!(e.record(&later).await.unwrap().base_commit, Some(git_out(p, &["rev-parse", "HEAD"])));
+        assert_ne!(e.record(&later).await.unwrap().base_commit.as_deref(), Some(head.as_str()));
+        // A project that is no repository has none.
+        let plain = tempfile::tempdir().unwrap();
+        let run = started(&e, "f", plain.path(), Some(Workspace::Project)).await.unwrap();
+        assert_eq!(e.record(&run).await.unwrap().base_commit, None);
     }
 
     async fn info_of(p: &Path) -> Value {

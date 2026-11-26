@@ -247,6 +247,8 @@ async fn main() {
             flow: "example-review".into(),
             subject: "审查 shop 的代码".into(),
             inputs: serde_json::json!({}),
+            step: false,
+            session: None,
         })
         .await
     {

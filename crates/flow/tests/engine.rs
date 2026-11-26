@@ -1309,7 +1309,7 @@ async fn a_child_run_works_where_its_parent_does() {
         base: "0123".into(),
         outcome: None,
     };
-    let prepared = Prepared { id: Some(id.clone()), worktree: Some(worktree.clone()) };
+    let prepared = Prepared { id: Some(id.clone()), worktree: Some(worktree.clone()), ..Default::default() };
     let o = h
         .eng
         .create_prepared(

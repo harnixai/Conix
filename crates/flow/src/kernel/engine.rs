@@ -69,6 +69,14 @@ pub struct CreateIn {
     /// flow's own); recorded, the host shows the session there once it is opened.
     #[serde(default)]
     pub shown_in: Option<String>,
+    /// How its stations are gone through, over what its flow (or bundle) says: `step` holds each.
+    #[serde(default)]
+    pub pace: Option<super::def::Pace>,
+    /// How the starter chose the flow, when it says: `triage` (a model judged the inputs by the
+    /// bundle's triage skill) and why. A start naming a bundle is routed whatever this says; the
+    /// run records how ([`RunRecord::routed`]).
+    #[serde(default)]
+    pub routed: Option<super::run::RoutedRec>,
 }
 
 /// What the host made ready for a run before starting it ([`Engine::create_prepared`]): the id it
@@ -78,6 +86,9 @@ pub struct CreateIn {
 pub struct Prepared {
     pub id: Option<String>,
     pub worktree: Option<WorktreeRec>,
+    /// The commit the workspace stands at (`RunRecord::base_commit`), when the host looked: git is
+    /// the runner's, so the kernel cannot say it. A worktree's own base is taken when this is none.
+    pub base_commit: Option<String>,
 }
 
 /// Where a new run works and how it came to be, checked.
@@ -88,6 +99,7 @@ struct Place {
     trigger: Trigger,
     shown_in: Option<String>,
     worktree: Option<WorktreeRec>,
+    base_commit: Option<String>,
 }
 
 impl Place {
@@ -98,13 +110,14 @@ impl Place {
         rec.trigger = self.trigger.clone();
         rec.shown_in = self.shown_in.clone();
         rec.worktree = self.worktree.clone();
+        rec.base_commit = self.base_commit.clone().or_else(|| self.worktree.as_ref().map(|w| w.base.clone()));
     }
 }
 
 /// A start's project, workspace, output directory and trigger, as the run will hold them: the
 /// root absolute (kept as given, but for trailing `/`s), a workspace in the project only with one
 /// (the start's, else the flow's, else the project itself).
-fn placement(input: &CreateIn, by: &Actor, def: &FlowDef, worktree: Option<WorktreeRec>) -> Result<Place> {
+fn placement(input: &CreateIn, by: &Actor, def: &FlowDef, worktree: Option<WorktreeRec>, base_commit: Option<String>) -> Result<Place> {
     let project_root = project_root_of(input)?;
     let workspace = Workspace::chosen(input.workspace, def.workspace, project_root.as_deref());
     if workspace.in_project() && project_root.is_none() {
@@ -117,6 +130,7 @@ fn placement(input: &CreateIn, by: &Actor, def: &FlowDef, worktree: Option<Workt
         trigger: input.trigger.clone().unwrap_or_else(|| Trigger::manual(by.clone())),
         shown_in: input.shown_in.clone().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()),
         worktree: worktree.filter(|_| workspace == Workspace::Worktree),
+        base_commit: base_commit.filter(|_| workspace.in_project()),
     })
 }
 
@@ -172,6 +186,8 @@ macro_rules! transact {
         }
     }};
 }
+// The operations of `items.rs` and `handin.rs` are transactions like these.
+pub(crate) use transact;
 
 fn invalid<T>(m: impl Into<String>) -> Result<T> {
     Err(FlowError::Invalid(m.into()))
@@ -547,12 +563,18 @@ impl Engine {
         self.may_create(&input, &by)?;
         // In a project, its own flows and parts over the application's.
         let packs = self.packs_for(project_root_of(&input)?.as_deref());
+        // A bundle's name is the flow it routes to; that one is asked about too.
+        let named = input.flow.clone();
+        let input = super::route::resolve(packs.as_ref(), input)?;
+        if input.flow != named {
+            self.may_create(&input, &by)?;
+        }
         let (def, digest) = packs
             .flow(&input.flow)
             .ok_or_else(|| FlowError::NotFound(format!("flow {}", input.flow)))?;
         check_def(&def, packs.as_ref())?;
         let inputs = apply_inputs(&def, &input.inputs).map_err(FlowError::Invalid)?;
-        let place = placement(&input, &by, &def, prepared.worktree.clone())?;
+        let place = placement(&input, &by, &def, prepared.worktree.clone(), prepared.base_commit.clone())?;
         transact!(self, by.clone(), |t| {
             let id = match &prepared.id {
                 Some(id) => id.clone(),
@@ -572,6 +594,8 @@ impl Engine {
             );
             place.apply(&mut rec);
             rec.governed = packs.governed(&def.name);
+            rec.pace = super::route::pace_of(&def, packs.as_ref(), input.pace);
+            rec.routed = input.routed.clone();
             // A relative output directory is taken where the run works: a run of no project's own
             // directory is known only once it has its id.
             if let Some(d) = rec.output_dir.clone().filter(|d| !std::path::Path::new(d).is_absolute()) {
@@ -903,6 +927,9 @@ impl Engine {
                     tr.status
                 )));
             }
+            if super::items::waits(st, tr) {
+                return invalid(format!("task {station}/{task} comes after items not done yet"));
+            }
             if let super::def::Work::Foreach {
                 max_parallel: Some(m),
                 ..
@@ -1056,7 +1083,11 @@ impl Engine {
             if !matches!(st.status, StationStatus::Working | StationStatus::Unmet) {
                 return invalid(format!("station {station} is {:?}", st.status));
             }
-            held(st, station, task, token, now)?;
+            if held(st, station, task, token, now)?.checking() {
+                return invalid(format!(
+                    "task {station}/{task}: what it handed in last is still being checked (task_exit); wait for the result"
+                ));
+            }
             let sdef = def.station(station).cloned();
             let executor = task_executor(def, station, task)?;
             hand_in_by(&executor, &by, station, task)?;
@@ -1077,15 +1108,13 @@ impl Engine {
             check_output(sdef.and_then(|s| s.output).as_ref(), &output).map_err(|e| {
                 FlowError::Contract(format!("output does not satisfy the contract: {e}"))
             })?;
-            let mut m = t.m(run);
-            m.task_submitted(station, task, output.clone());
-            if let Some(a) = agent.clone() {
-                if let Some(d) = m.task_mut(station, task).and_then(|x| x.delivery.as_mut()) {
-                    d.agent = Some(a);
-                }
-            }
+            // Taken now, or held for the station's `task_exit` gates (`handin.rs`).
+            t.m(run).hand_in(station, task, output.clone(), agent.clone()).await;
             t.settle().await?;
-            Ok(json!({"run": run, "station": t.get(run).stations[station].status}))
+            let after = &t.get(run).stations[station];
+            let checking = after.task(task).is_some_and(|x| x.checking());
+            let sent_back = after.task(task).and_then(super::handin::sent_back);
+            Ok(json!({"run": run, "station": after.status, "checking": checking, "sent_back": sent_back}))
         })
     }
 
@@ -1235,13 +1264,14 @@ impl Engine {
             let sdef = def.station(station).cloned();
             // A gate, or an outside approval that could not be asked for (it errors, it never fails).
             let is_gate = |c: &CheckRec| {
-                c.cond
-                    .and_then(|i| sdef.as_ref().and_then(|s| s.exit.get(i)))
-                    .is_some_and(|e| match e {
-                        ExitCond::Gate { .. } => true,
-                        ExitCond::Confirm { .. } => c.status == CheckStatus::Error,
-                        _ => false,
-                    })
+                super::confirm::is_stale_check(c)
+                    || c.cond
+                        .and_then(|i| sdef.as_ref().and_then(|s| s.exit.get(i)))
+                        .is_some_and(|e| match e {
+                            ExitCond::Gate { .. } => true,
+                            ExitCond::Confirm { .. } => c.status == CheckStatus::Error,
+                            _ => false,
+                        })
             };
             let round = st.round;
             let again: Vec<String> = st
@@ -1278,7 +1308,7 @@ impl Engine {
             && mcp
             && st.round == round
             && st.status == StationStatus::Working
-            && !st.confirms.iter().any(|c| c.round == round)
+            && !super::confirm::mcp_voted(st, round, cond)
     }
 
     /// The request for an outside approval is open: what it gave back is kept, so it is polled
@@ -1338,6 +1368,22 @@ impl Engine {
                 return Ok(json!({"applied": false}));
             }
             let now = t.fx.now;
+            // Decided by an author where the exit says not: [author]: not a vote, and nothing the
+            // run can fix by itself — an error a person looks at, as a request that failed is.
+            if let Some(why) = super::confirm::refused(t.get(run), station, &by) {
+                let mut m = t.m(run);
+                if let Some(s) = m.rec.stations.get_mut(station) {
+                    for c in s.checks.iter_mut().filter(|c| c.cond == Some(cond) && c.round == round) {
+                        c.status = CheckStatus::Error;
+                        c.detail = why.clone();
+                        c.at = now;
+                    }
+                }
+                m.log("approval_refused", Some(station), None, json!({"cond": cond, "round": round, "by": by, "detail": why}));
+                m.judge_later(station);
+                t.settle().await?;
+                return Ok(json!({"applied": true, "refused": why}));
+            }
             let mut m = t.m(run);
             if let Some(s) = m.rec.stations.get_mut(station) {
                 s.confirms.push(ConfirmRec {
@@ -1348,6 +1394,8 @@ impl Engine {
                     reason: reason.clone(),
                     via: Some(super::def::ConfirmVia::Mcp),
                     reference: reference.clone(),
+                    cond: Some(cond),
+                    binds: None,
                 });
                 if let Some(a) = s.approvals.iter_mut().find(|a| a.cond == cond && a.round == round) {
                     a.polled_at = Some(now);
@@ -1440,6 +1488,9 @@ impl Engine {
                 &by,
                 Some(rec),
             )?;
+            if let Some(why) = super::confirm::refused(rec, station, &by) {
+                return Err(FlowError::Denied(why));
+            }
             let now = t.fx.now;
             let mut m = t.m(run);
             let round = m.rec.stations[station].round;
@@ -1452,6 +1503,8 @@ impl Engine {
                     reason: reason.map(String::from),
                     via: None,
                     reference: None,
+                    cond: None,
+                    binds: None,
                 });
             }
             let data = json!({"pass": pass, "reason": reason, "round": round});
@@ -1550,12 +1603,10 @@ impl Engine {
                 .filter(|_| def.station(to).is_some())
                 .ok_or_else(|| FlowError::NotFound(format!("station {to}")))?;
             if !target.status.is_open() {
-                let listed = rec.open_stations().iter().any(|o| {
-                    def.station(o).is_some_and(|s| {
-                        s.rework_to.iter().any(|r| r == to)
-                            || s.on_unmet.as_ref().is_some_and(|u| u.rework_to == to)
-                    })
-                });
+                let listed = rec
+                    .open_stations()
+                    .iter()
+                    .any(|o| def.station(o).is_some_and(|s| s.rework_points().iter().any(|r| r == to)));
                 if !listed {
                     return invalid(format!("no open station may rework to {to}"));
                 }
@@ -1643,6 +1694,17 @@ impl Engine {
                 return Ok(json!({"applied": false}));
             }
             let now = t.fx.now;
+            if super::confirm::implicit(gate).is_some() {
+                let mut m = t.m(run);
+                let applied = super::confirm::take_result(m.rec, station, round, gate, &result, now) == Some(true);
+                if applied {
+                    m.log("gate_result", Some(station), None, json!({"gate": gate, "round": round, "pass": result.is_pass(), "verdict": result.verdict,
+                           "detail": result.summary, "findings": result.findings, "evidence": result.evidence}));
+                    m.judge_later(station);
+                    t.settle().await?;
+                }
+                return Ok(json!({"applied": applied}));
+            }
             let fail_on = rec.parts.gates.get(gate).and_then(|g| g.fail_on);
             // The transaction may run again on a conflict: the result is taken afresh each time.
             let result = result.clone().strict(fail_on);
@@ -1680,6 +1742,197 @@ impl Engine {
                 t.settle().await?;
             }
             Ok(json!({"applied": applied}))
+        })
+    }
+}
+
+// ── starting by a bundle, switching flows, proposals (in Conix: docs/design/flows.md) ──────────
+
+impl Engine {
+    /// Where a start of `name` (a flow, or a bundle with no flow of its own name) with `inputs`
+    /// goes, in the packs a run in `project_root` sees ([`super::route::route`]): what a host asks
+    /// before starting, to tell a person or a model which flow it will be, or that the inputs
+    /// need judging.
+    pub fn route(&self, name: &str, inputs: &Value, project_root: Option<&str>) -> Result<super::route::Route> {
+        super::route::route(self.packs_for(project_root).as_ref(), name, inputs)
+    }
+
+    /// A start with a bundle's name made the flow it routes to, and how that was chosen in
+    /// `routed`: what [`Engine::create`] does first, for a host that does something with the flow
+    /// before it (makes its worktree). A start that needs triage is refused, saying so.
+    pub fn resolve_start(&self, input: CreateIn) -> Result<CreateIn> {
+        let root = project_root_of(&input)?;
+        super::route::resolve(self.packs_for(root.as_deref()).as_ref(), input)
+    }
+
+    /// Switch a run to another flow of its bundle (`to`: its full name, or its file's stem): only
+    /// while the first station is the one open and has not passed, and only to a flow where that
+    /// station is a start too. The new flow and its parts are pinned as a start pins them, the
+    /// inputs are the run's that it knows with `inputs` over them, the open station's tasks are
+    /// cancelled and it is entered again — a new round — under the new flow. What the run wrote in
+    /// its directory stays. `value`: `{run, from, to}`.
+    pub async fn switch(&self, run: &str, to: &str, reason: &str, inputs: Option<Value>, by: Actor) -> Result<Outcome> {
+        if reason.trim().is_empty() {
+            return invalid("switching a run's flow needs a reason");
+        }
+        transact!(self, by.clone(), |t| {
+            t.load(run).await?;
+            let rec = t.get(run);
+            let Some(bundle) = rec.def.bundle.clone() else {
+                return invalid(format!("run {run} is of flow {}, which is in no bundle: there is no other flow to switch to", rec.flow));
+            };
+            let first = super::route::switch_point(rec).map_err(FlowError::Invalid)?;
+            let to = super::route::switch_target(&bundle, to);
+            if to == rec.flow {
+                return invalid(format!("run {run} is a run of {to} already"));
+            }
+            let packs = self.packs_for(rec.project_root.as_deref());
+            let (def, digest) = packs.flow(&to).ok_or_else(|| FlowError::NotFound(format!("flow {to}")))?;
+            if def.bundle.as_deref() != Some(bundle.as_str()) {
+                return invalid(format!("{to} is not a flow of bundle {bundle}: a run switches only within its bundle"));
+            }
+            check_def(&def, packs.as_ref())?;
+            if def.station(&first).is_none() || !def.needs_of(&first).is_empty() {
+                return invalid(format!("{to} does not start at station {first}, where run {run} is: it cannot take the run over"));
+            }
+            let new_inputs = super::route::switch_inputs(&def, &rec.inputs, inputs.as_ref())
+                .map_err(|e| FlowError::Invalid(format!("the inputs for {to}: {e}")))?;
+            let from = rec.flow.clone();
+            self.authorize(&Op::Switch { from: from.clone(), to: to.clone() }, &by, Some(rec))?;
+            // The open station's work is cancelled under the definition it was dispatched by.
+            {
+                let mut m = t.m(run);
+                let ids: Vec<String> = m.rec.stations[&first].tasks.iter().filter(|x| x.in_flight()).map(|x| x.id.clone()).collect();
+                for id in ids {
+                    m.cancel_task(&first, &id);
+                }
+            }
+            let now = t.fx.now;
+            {
+                let parts = super::parts::pin(&def, packs.as_ref());
+                let rec = t.get_mut(run);
+                let kept = rec.stations.remove(&first).unwrap_or_default();
+                rec.stations = def.stations.iter().map(|s| (s.id.clone(), super::run::StationRec::new())).collect();
+                rec.stations.insert(first.clone(), kept);
+                rec.flow = to.clone();
+                rec.def_digest = digest.clone();
+                rec.parts = parts;
+                rec.inputs = new_inputs.clone();
+                rec.governed = packs.governed(&to);
+                rec.def = def.clone();
+                rec.switched.push(super::run::SwitchRec { from: from.clone(), to: to.clone(), by: by.clone(), at: now, reason: reason.to_string() });
+            }
+            let mut m = t.m(run);
+            let data = json!({"from": from, "to": to, "reason": reason, "station": first, "inputs": new_inputs});
+            m.emit("run.switched", None, None, data.clone());
+            m.log("switch", Some(&first), None, data);
+            m.proposals_dismissed(&first);
+            m.enter(&first, None);
+            if let Some(s) = m.rec.stations.get_mut(&first) {
+                // What the session doing it again is told first.
+                s.reworked = Some(super::run::ReworkRec {
+                    by: by.clone(),
+                    at: now,
+                    reason: format!("the run switched from flow {from} to {to}: {reason}"),
+                    from: None,
+                    unmet: vec![],
+                });
+            }
+            m.advance_later();
+            t.settle().await?;
+            Ok(json!({"run": run, "from": from, "to": to}))
+        })
+    }
+
+    /// A station's session proposes, under its task's claim, that a person rework the run to
+    /// `to` — one of the station's rework points ([`super::def::Station::rework_points`]) — or
+    /// cancel it. Recorded on the run, open until someone reworks there (accepted), the station
+    /// moves on (dismissed) or a person dismisses it. `value`: `{run, proposal}`.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn propose(
+        &self,
+        run: &str,
+        station: &str,
+        task: &str,
+        token: &str,
+        kind: super::run::ProposalKind,
+        to: Option<&str>,
+        reason: &str,
+        by: Actor,
+    ) -> Result<Outcome> {
+        use super::run::ProposalKind;
+        if reason.trim().is_empty() {
+            return invalid("a proposal needs a reason");
+        }
+        transact!(self, by.clone(), |t| {
+            t.load(run).await?;
+            let now = t.fx.now;
+            let rec = t.get(run);
+            let (def, st) = open_station(rec, station)?;
+            held(st, station, task, token, now)?;
+            let sdef = def.station(station).ok_or_else(|| FlowError::NotFound(format!("station {station}")))?;
+            let to = match (kind, to.map(str::trim).filter(|s| !s.is_empty())) {
+                (ProposalKind::Cancel, _) => None,
+                (ProposalKind::Rework, None) => return invalid("a rework proposal names the station to go back to in `to`"),
+                (ProposalKind::Rework, Some(to)) => {
+                    let points = sdef.rework_points();
+                    if !points.iter().any(|p| p == to) {
+                        return invalid(if points.is_empty() {
+                            format!("station {station} names no station to go back to: propose cancelling, or say in your output what is wrong")
+                        } else {
+                            format!("station {station} may go back to {} only, not {to}", points.join(", "))
+                        });
+                    }
+                    Some(to.to_string())
+                }
+            };
+            self.authorize(&Op::Propose { station: station.into(), kind: kind.as_str().into(), to: to.clone() }, &by, Some(rec))?;
+            let round = st.round;
+            let mut m = t.m(run);
+            let p = super::run::ProposalRec {
+                id: format!("p{}", m.rec.proposals.len() + 1),
+                station: station.to_string(),
+                round,
+                task: task.to_string(),
+                kind,
+                to,
+                reason: reason.trim().to_string(),
+                by: by.clone(),
+                at: now,
+                status: super::run::ProposalStatus::Open,
+                decided_by: None,
+                decided_at: None,
+            };
+            m.rec.proposals.push(p.clone());
+            let data = serde_json::to_value(&p).unwrap_or(Value::Null);
+            m.emit("proposal.opened", Some(station), Some(task), data.clone());
+            m.log("propose", Some(station), Some(task), data.clone());
+            Ok(json!({"run": run, "proposal": data}))
+        })
+    }
+
+    /// Dismiss an open proposal: nobody is going to do it. `value`: `{run, proposal}`.
+    pub async fn dismiss_proposal(&self, run: &str, id: &str, by: Actor) -> Result<Outcome> {
+        transact!(self, by.clone(), |t| {
+            t.load(run).await?;
+            let rec = t.get(run);
+            let p = rec.proposals.iter().find(|p| p.id == id).ok_or_else(|| FlowError::NotFound(format!("proposal {id} of run {run}")))?;
+            if !p.is_open() {
+                return invalid(format!("proposal {id} is {:?} already", p.status));
+            }
+            self.authorize(&Op::DismissProposal { id: id.into() }, &by, Some(rec))?;
+            let station = p.station.clone();
+            let now = t.fx.now;
+            let mut m = t.m(run);
+            if let Some(p) = m.rec.proposals.iter_mut().find(|p| p.id == id) {
+                p.status = super::run::ProposalStatus::Dismissed;
+                p.decided_by = Some(by.clone());
+                p.decided_at = Some(now);
+            }
+            let data = json!({"id": id, "by": by});
+            m.emit("proposal.dismissed", Some(&station), None, data.clone());
+            m.log("dismiss_proposal", Some(&station), None, data);
+            Ok(json!({"run": run, "proposal": id}))
         })
     }
 }
@@ -1754,7 +2007,7 @@ fn hand_in_by(
     let ok = match executor {
         E::External { .. } => true,
         E::Session { .. } | E::Agent { .. } => by.kind == FLOW_KIND || by.kind == AGENT_KIND,
-        E::Program { .. } | E::Subflow { .. } => by.kind == FLOW_KIND,
+        E::Program { .. } | E::Command { .. } | E::Subflow { .. } => by.kind == FLOW_KIND,
     };
     if ok {
         Ok(())
@@ -1885,10 +2138,14 @@ pub fn view(mut record: RunRecord) -> RunView {
         unmet.insert(id.clone(), list);
     }
     let phase = Some(record.phase());
+    let votes = super::confirm::votes(&record);
+    let proposals = record.proposals.iter().filter(|p| p.is_open()).cloned().collect();
     RunView {
         record,
         unmet,
         phase,
+        votes,
+        proposals,
     }
 }
 

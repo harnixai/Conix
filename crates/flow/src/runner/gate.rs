@@ -25,26 +25,47 @@ pub(crate) async fn run_gate(rn: &Arc<Runner>, run: String, station: String, rou
             return;
         }
     };
-    let result = match rec.parts.gates.get(&gate) {
+    let result = judge_gate(rn, &rec, &station, round, &gate, None).await;
+    let r = offer_result(engine, rn.cancelled(), &run, &station, round, &gate, result).await;
+    settle(rn, &run, "gate_result", r).await;
+}
+
+/// The task a `task_exit` gate judges the hand-in of: what its references and its context see as
+/// `${task}` and `${item}`.
+pub(crate) struct ForTask<'a> {
+    pub task: &'a str,
+    pub item: Option<&'a Value>,
+}
+
+/// Judge a gate of the run, for its station or (`task`) for one task's hand-in.
+pub(crate) async fn judge_gate(rn: &Arc<Runner>, rec: &RunRecord, station: &str, round: u32, gate: &str, task: Option<&ForTask<'_>>) -> GateResult {
+    let engine = rn.engine();
+    match rec.parts.gates.get(gate) {
+        // What a confirmation approved, recorded or checked again: the library's own reading.
+        None if crate::kernel::confirm::implicit(gate).is_some() => super::checks::implicit(engine, rec, station, gate),
         // A command runs on this machine: a project's run gets to run one only while the project
         // is trusted, as its hooks and its own servers do.
         Some(g) if g.kind == GateKind::Command && rec.project_root.as_deref().is_some_and(|r| !rn.cfg.trust.trusted(r)) => {
             GateResult::errored(format!("the project is not trusted: its command gate {} does not run", g.name))
         }
         Some(g) if g.kind == GateKind::Command => {
-            command_gate(rn.cfg.command_gates, &rn.cfg.env_deny, engine, &rec, &station, g).await
+            command_gate(rn.cfg.command_gates, &rn.cfg.env_deny, engine, rec, station, g, task).await
         }
-        Some(g) if g.kind == GateKind::Check => own_gate(engine, &rec, &station, round, g).await,
-        Some(g) if g.kind == GateKind::Script && g.script.is_some() => own_gate(engine, &rec, &station, round, g).await,
-        Some(g) => match (&rn.cfg.gates, g.host_function()) {
-            (Some(gs), Some(f)) => gs.run(&rec, &station, f).await,
-            (None, _) => GateResult::errored(format!("the host runs no checks: {gate} cannot run")),
-            (_, None) => GateResult::errored(format!("gate {gate} is not one the host runs")),
+        Some(g) if g.kind == GateKind::Check => own_gate(engine, rec, station, round, g, task).await,
+        Some(g) if g.kind == GateKind::Script && g.script.is_some() => own_gate(engine, rec, station, round, g, task).await,
+        Some(g) => match (&rn.cfg.gates, g.host_function(), task) {
+            (Some(gs), Some(f), None) => gs.run(rec, station, f).await,
+            (Some(gs), Some(f), Some(t)) => gs.run_for_task(rec, station, t.task, t.item, f).await,
+            (None, _, _) => GateResult::errored(format!("the host runs no checks: {gate} cannot run")),
+            (_, None, _) => GateResult::errored(format!("gate {gate} is not one the host runs")),
         },
         None => GateResult::errored(format!("gate {gate} was not in the packs when the run started")),
-    };
-    let r = offer_result(engine, rn.cancelled(), &run, &station, round, &gate, result).await;
-    settle(rn, &run, "gate_result", r).await;
+    }
+}
+
+/// The reference context a gate is judged against: the run's, with the task's when it judges one.
+fn gate_context(rec: &RunRecord, task: Option<&ForTask<'_>>, ws: Option<&str>) -> Value {
+    crate::kernel::refs::context_in(rec, task.and_then(|t| t.item), task.map(|t| t.task), ws)
 }
 
 /// The first wait before a gate's result is offered again after a conflict; it doubles each time.
@@ -108,6 +129,7 @@ pub(crate) async fn command_gate(
     rec: &RunRecord,
     station: &str,
     g: &crate::GateDef,
+    task: Option<&ForTask<'_>>,
 ) -> GateResult {
     // Everything up to the command's own conclusion is the gate not getting to one.
     let fail = GateResult::errored;
@@ -117,7 +139,7 @@ pub(crate) async fn command_gate(
     let (Some(ws), Some(station_dir)) = (engine.workspace_for(rec), super::project::station_dir(engine, rec, station)) else {
         return fail(format!("gate {}: the run has no workspace", g.name));
     };
-    let ctx = crate::kernel::refs::context_in(rec, None, None, ws.to_str());
+    let ctx = gate_context(rec, task, ws.to_str());
     command_at(env_deny, g, &GateSite { run: &rec.id, station, ws: &ws, station_dir: &station_dir, ctx: &ctx }).await
 }
 
@@ -294,7 +316,7 @@ fn passed_env(
 }
 
 /// Run a gate the library judges itself, `check` or `script`, against the run's workspace.
-async fn own_gate(engine: &Engine, rec: &RunRecord, station: &str, round: u32, g: &crate::GateDef) -> GateResult {
+async fn own_gate(engine: &Engine, rec: &RunRecord, station: &str, round: u32, g: &crate::GateDef, task: Option<&ForTask<'_>>) -> GateResult {
     let Some(ws) = engine.workspace_for(rec) else {
         return GateResult::errored(format!("gate {}: the run has no workspace", g.name));
     };
@@ -302,7 +324,7 @@ async fn own_gate(engine: &Engine, rec: &RunRecord, station: &str, round: u32, g
         Ok(r) => std::sync::Arc::new(r),
         Err(e) => return GateResult::errored(format!("gate {}: {e}", g.name)),
     };
-    let ctx = crate::kernel::refs::context_in(rec, None, None, ws.to_str());
+    let ctx = gate_context(rec, task, ws.to_str());
     if g.kind == GateKind::Check {
         return super::checks::run(g, &ctx, rec, &reader);
     }
@@ -341,8 +363,15 @@ async fn script_gate(
         "data_dir": rec.data_dir,
         "workspace": ctx.get("workspace"),
         "params": crate::kernel::refs::resolve(&g.params, ctx),
+        // A `task_exit` gate's task and item; null for a station's own gate.
+        "task": ctx.get("task"),
+        "item": ctx.get("item"),
     });
-    let (result, trace) = super::script::run(source, input, reader, Duration::from_secs(g.script_seconds())).await;
+    let env = match engine.workspace_for(rec) {
+        Some(ws) => super::scriptenv::Env::for_run(engine, rec, ws, super::scriptenv::Modules::script_path(&name), &source).await,
+        None => super::scriptenv::Env::bare(),
+    };
+    let (result, trace) = super::script::run(source, input, reader, env, Duration::from_secs(g.script_seconds())).await;
     if !trace.log.is_empty() {
         if let Some(dir) = super::project::station_dir(engine, rec, station) {
             let log = dir.join(format!("gate-{}.log", g.name));
@@ -382,6 +411,9 @@ pub(crate) struct Trial {
     pub data_dir: Option<String>,
     /// Why a command may not run here; `None`: it may.
     pub no_commands: Option<String>,
+    /// What the script may import and reach: the packs' bundle files (nothing is pinned in a trial).
+    #[cfg(feature = "script")]
+    pub env: super::scriptenv::Env,
 }
 
 /// What a trial gives back besides the result: what the gate wrote to its log.
@@ -431,6 +463,9 @@ async fn try_gate(rn: &Runner, t: Trial) -> Tried {
                 "inputs": t.inputs, "outputs": t.outputs, "output_dir": t.output_dir, "data_dir": t.data_dir,
                 "workspace": t.ws.to_string_lossy(), "params": crate::kernel::refs::resolve(&g.params, &ctx),
             });
+            #[cfg(feature = "script")]
+            return trial_script(source, input, reader, t.env.clone(), g.script_seconds()).await;
+            #[cfg(not(feature = "script"))]
             trial_script(source, input, reader, g.script_seconds()).await
         }
         GateKind::Command => {
@@ -474,8 +509,8 @@ fn trial_record(station: &str) -> RunRecord {
 }
 
 #[cfg(feature = "script")]
-async fn trial_script(source: String, input: Value, reader: Arc<super::files::Reader>, seconds: u64) -> Tried {
-    let (result, trace) = super::script::run(source, input, reader, Duration::from_secs(seconds)).await;
+async fn trial_script(source: String, input: Value, reader: Arc<super::files::Reader>, env: super::scriptenv::Env, seconds: u64) -> Tried {
+    let (result, trace) = super::script::run(source, input, reader, env, Duration::from_secs(seconds)).await;
     Tried { result, log: trace.log }
 }
 

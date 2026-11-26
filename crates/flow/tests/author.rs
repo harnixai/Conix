@@ -134,7 +134,7 @@ fn the_specs_are_the_tables() {
     let b = bench(false, &[]);
     assert_eq!(b.tools.specs(), tool_specs().as_slice());
     let names: Vec<&str> = b.tools.specs().iter().map(|t| t.name.as_str()).collect();
-    assert_eq!(names.len(), 23);
+    assert_eq!(names.len(), 24);
     assert!(RUN_TOOLS.iter().all(|t| names.contains(t)));
     assert_eq!(names[0], TOOL_LIST);
 }

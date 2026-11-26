@@ -308,7 +308,9 @@ fn info(m: &Manifest, dir: &Path) -> FlowPackageInfo {
         requires_conix: m.requires.conix.clone(),
         files: m.files.len() as u32,
         flows,
-        commands: meta.map(|m| m.commands).unwrap_or_default(),
+        commands: meta
+            .map(|m| m.commands.names().map(String::from).collect())
+            .unwrap_or_default(),
         command_gates,
     }
 }
@@ -549,7 +551,7 @@ pub fn validate_bundle(dir: &Path, catalog: Catalog) -> Vec<String> {
         }
     }
     if let Ok(meta) = bundle::meta(dir) {
-        for c in &meta.commands {
+        for c in meta.commands.names() {
             if c.is_empty()
                 || c.contains(['/', '\\'])
                 || c.starts_with('.')
@@ -1084,7 +1086,7 @@ mod tests {
         let m: Manifest =
             serde_yaml::from_str(&manifest_text(Path::new(&e.file)).unwrap()).unwrap();
         assert_eq!(m.requires.conix, ">=0.1.0");
-        for n in bundle::RESERVED {
+        for n in bundle::RESERVED_BUNDLES {
             assert!(locate(a.path(), &[], None, n).is_none());
         }
     }
