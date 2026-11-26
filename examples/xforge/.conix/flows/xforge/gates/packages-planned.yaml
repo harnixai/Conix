@@ -1,6 +1,8 @@
 name: packages-planned
 title: 工作包都划好了
-description: 交出的 packages 与 xpkg plan 划的一一对得上，每个都有路径。
+description: >-
+  设计交出的 packages 与 xpkg plan 划的一一对得上；每包有路径、至少一条判据；after 指的包存在、不成环；
+  包的路径不在工作区的同一个文件上重叠。
 kind: script
 script: packages-planned
 params:
