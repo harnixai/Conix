@@ -337,7 +337,7 @@ async fn the_verification_record_covers_every_item_of_both_deltas_with_a_conclus
     let r = b.verdict("verification", sample(record("- TK-R3 通过：单测"), TESTS, "governance: {interface: false}\n"), json!({})).await;
     assert_eq!(r["verdict"], "pass", "{r}");
     // A conclusion outside 覆盖 is no coverage; 未通过 fails, 未验证 is the owner's to judge.
-    let outside = format!("# 验证\n\n- TK-R3 通过\n- fn:textkit.truncate 通过\n\n## 覆盖\n见上\n\n## 连贯性\n一致。\n");
+    let outside = "# 验证\n\n- TK-R3 通过\n- fn:textkit.truncate 通过\n\n## 覆盖\n见上\n\n## 连贯性\n一致。\n".to_string();
     assert_eq!(b.verdict("verification", sample(outside, TESTS, both), json!({})).await["verdict"], "fail");
     let failed = "- TK-R3 未通过：多截了一个字\n- fn:textkit.truncate 通过：一致";
     assert_eq!(b.verdict("verification", sample(record(failed), TESTS, both), json!({})).await["verdict"], "fail");

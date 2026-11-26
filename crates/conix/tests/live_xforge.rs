@@ -174,7 +174,7 @@ async fn the_builtin_xforge_runs_a_change_from_proposal_to_archive_with_its_own_
         .ok(Command::StartRun {
             flow: "xforge/solid".into(),
             subject: "给 textkit 加 truncate(text, n)：文字超过 n 个字符时截成前 n-1 个字符再加一个省略号 …，不超过时原样返回".into(),
-            inputs: serde_json::json!({"title": "truncate"}),
+            inputs: serde_json::json!({"title": "truncate", "risk": "medium"}),
             step: false,
             session: None,
         })
