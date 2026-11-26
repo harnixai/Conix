@@ -409,12 +409,13 @@ fn file_name(name: &str) -> String {
 }
 
 /// Write the run's projection into its process directory, after a change. A failure is logged.
-pub(crate) fn project_run(engine: &Engine, rec: &RunRecord) {
-    let Some(dir) = process_dir(engine, rec) else { return };
+/// What archiving the run just made, for the ledger (`Engine::note_archive`).
+pub(crate) fn project_run(engine: &Engine, rec: &RunRecord) -> Option<crate::kernel::run::ArchiveRef> {
+    let dir = process_dir(engine, rec)?;
     if let Err(e) = write_projection(&dir, rec) {
         tracing::warn!(run = rec.id, dir = %dir.display(), error = %e, "the run's process directory not written");
     }
-    super::archive::archive(engine, rec, &dir);
+    super::archive::archive(engine, rec, &dir)
 }
 
 fn write_projection(dir: &Path, rec: &RunRecord) -> std::io::Result<()> {

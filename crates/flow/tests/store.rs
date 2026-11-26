@@ -39,6 +39,7 @@ fn record(id: &str, flow: &str, subject: &str, rev: u64, at: u64) -> RunRecord {
         worktree: None,
         base_commit: None,
         governed: false,
+        archive: None,
         pace: Default::default(),
         routed: None,
         switched: vec![],

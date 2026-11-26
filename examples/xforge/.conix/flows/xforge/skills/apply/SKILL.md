@@ -7,8 +7,9 @@ description: 实施一个工作包：只改包的路径，每条判据做到并�
 有设计就读 `design.md` 里与这个包有关的几节。弄清这个包要满足什么，再动手。
 
 只改包的路径里的文件（别处写不进去），小步改。新增、修改的每条需求与接口元素，测试里各加一条用例，用注释 `# <编号>`
-标明它测的是哪条（`# TK-R3`、`# fn:textkit.truncate`）。照包写的验证方法自己跑一次，再跑项目的 `.conix/governance/verify.sh`：
-出口跑的就是它，跑整棵树。
+标明它测的是哪条（`# TK-R3`、`# fn:textkit.truncate`）。包登记了验证（`xpkg list` 的「验证」，名字对应 `xpkg verify-menu` 里的命令），
+交付时门禁 package-tests 就照菜单跑这几项，一项不过就退回来：交之前照菜单里的命令自己跑一遍。再跑项目的 `.conix/governance/verify.sh`：
+站的出口跑的就是它，跑整棵树。
 
 做完登记：`xpkg done <编号> "<做了什么>" --files a,b --evidence "C1=<怎么证明的，如 tests/test_x.py#test_y 通过>;C2=…"`。
 每条判据一条证据，`--files` 列出你改的每个文件；交出 `{package, status: done, summary}`。登记会被核对：改了没列的、

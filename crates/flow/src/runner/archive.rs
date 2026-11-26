@@ -16,19 +16,20 @@ use crate::kernel::def::{ArchiveWhen, DEFAULT_ARCHIVE_NAME};
 use crate::kernel::engine::Engine;
 use crate::kernel::layout::PROCESS_DIR;
 use crate::kernel::output::OutputVars;
-use crate::kernel::run::{RunRecord, RunStatus};
+use crate::kernel::run::{ArchiveRef, RunRecord, RunStatus};
+
+use crate::archive::{hash_file, list_files, RECORD, RECORD_FORMAT};
 
 use super::files::Reader;
 use super::project::{claim, local_date};
 
 /// What the process directory keeps once the run is archived.
 const ARCHIVED: &str = "archived.json";
-/// The record in an archive.
-pub const RECORD: &str = "record.json";
 
 /// Archive `rec` if it is a bundle's (or says `archive:`), is over as its flow wants, and was not
-/// archived yet; `process` is its process directory.
-pub(crate) fn archive(engine: &Engine, rec: &RunRecord, process: &Path) {
+/// archived yet; `process` is its process directory. What the ledger is to record of it is
+/// returned: the caller commits it, this is not async.
+pub(crate) fn archive(engine: &Engine, rec: &RunRecord, process: &Path) -> Option<ArchiveRef> {
     let when = rec.def.archive.as_ref().and_then(|a| a.when).unwrap_or_default();
     let over = match rec.status {
         RunStatus::Finished => true,
@@ -36,25 +37,41 @@ pub(crate) fn archive(engine: &Engine, rec: &RunRecord, process: &Path) {
         RunStatus::Active => false,
     };
     if !over || (rec.def.bundle.is_none() && rec.def.archive.is_none()) || process.join(ARCHIVED).exists() {
-        return;
+        return None;
     }
     // A child works in its parent's directory: the parent's archive holds what it wrote.
     if rec.parent.is_some() {
-        return;
+        return None;
     }
-    let (Some(run_dir), Some(data)) = (rec.output_dir.as_deref(), rec.data_dir.as_deref()) else { return };
+    let (Some(run_dir), Some(data)) = (rec.output_dir.as_deref(), rec.data_dir.as_deref()) else { return None };
     match archive_into(engine, rec, Path::new(run_dir), Path::new(data)) {
-        Ok(to) => {
+        Ok((to, record_sha256)) => {
             let note = json!({"to": to.to_string_lossy(), "at": engine.clock().now_ms()});
             if let Err(e) = std::fs::write(process.join(ARCHIVED), pretty(&note)) {
                 tracing::warn!(run = rec.id, error = %e, "the archive was made but not noted");
             }
+            Some(ArchiveRef { dir: project_relative(rec, &to), record_sha256 })
         }
-        Err(e) => tracing::warn!(run = rec.id, error = %e, "the run was not archived"),
+        Err(e) => {
+            tracing::warn!(run = rec.id, error = %e, "the run was not archived");
+            None
+        }
     }
 }
 
-fn archive_into(engine: &Engine, rec: &RunRecord, run_dir: &Path, data: &Path) -> Result<PathBuf, String> {
+/// `dir` as the ledger names it: relative to the project, or to the run's worktree, which holds
+/// the same tree; absolute when it is under neither.
+fn project_relative(rec: &RunRecord, dir: &Path) -> String {
+    let roots = rec.project_root.iter().map(Path::new).chain(rec.worktree.as_ref().map(|w| Path::new(w.path.as_str())));
+    for root in roots {
+        if let Ok(rel) = dir.strip_prefix(root) {
+            return rel.to_string_lossy().replace('\\', "/");
+        }
+    }
+    dir.to_string_lossy().into_owned()
+}
+
+fn archive_into(engine: &Engine, rec: &RunRecord, run_dir: &Path, data: &Path) -> Result<(PathBuf, String), String> {
     let keep = kept(rec, run_dir)?;
     let template = rec.def.archive.as_ref().and_then(|a| a.name.clone()).unwrap_or_else(|| DEFAULT_ARCHIVE_NAME.to_string());
     let date = local_date(rec.finished_at.unwrap_or_else(|| engine.clock().now_ms()));
@@ -70,8 +87,15 @@ fn archive_into(engine: &Engine, rec: &RunRecord, run_dir: &Path, data: &Path) -
         }
         std::fs::copy(&from, &dest).map_err(|e| format!("{}: {e}", from.display()))?;
     }
-    std::fs::write(to.join(RECORD), pretty(&record(rec, run_dir, &keep))).map_err(|e| format!("{RECORD}: {e}"))?;
-    Ok(to)
+    // The listing is read back from the archive: what it holds is what is checked later, whatever
+    // `keep` meant. `record.json` cannot list itself; the ledger holds its digest.
+    let files = list_files(&to).map_err(|e| format!("{}: {e}", to.display()))?;
+    let mut v = record(rec, run_dir, &keep);
+    v["format"] = json!(RECORD_FORMAT);
+    v["files"] = serde_json::to_value(files).unwrap_or_default();
+    std::fs::write(to.join(RECORD), pretty(&v)).map_err(|e| format!("{RECORD}: {e}"))?;
+    let (sha, _) = hash_file(&to.join(RECORD)).map_err(|e| format!("{RECORD}: {e}"))?;
+    Ok((to, sha))
 }
 
 /// A flow's own name in its bundle: `xforge/solid` → `solid`, `brief` → `brief`.

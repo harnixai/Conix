@@ -47,6 +47,7 @@ pub const DEFINITION_FORMAT: u32 = 1;
 /// format is refused, not read in part.
 pub const RUN_FORMAT: u32 = 1;
 
+pub mod archive;
 #[cfg(feature = "runner")]
 pub mod author;
 pub mod bundle;
@@ -82,7 +83,7 @@ pub use kernel::parts::{
 pub use kernel::protocol::{agent_tag, ask_rules, skill_body, STRUCTURED_OUTPUT_TOOL};
 pub use kernel::run::{
     run_schema, Actor, AgentDelivery, ApprovalRec, BoundSession, CheckRec, CheckStatus, ConfirmRec, Evidence, Finding, ForcedRec, GateVerdict, History, Lease, ParentRef, Severity,
-    AskRec, DeliveryRec, PauseRec, Phase, ReworkRec, RunQuery, RunRecord, RunStatus, RunSummary, RunView, StationRec,
+    ArchiveRef, AskRec, DeliveryRec, PauseRec, Phase, ReworkRec, RunQuery, RunRecord, RunStatus, RunSummary, RunView, StationRec,
     StationStatus, TaskExitRec, TaskRec, TaskStatus, Trigger, Usage, Votes, Workspace, WorktreeEnd, WorktreeOutcome,
     WorktreeRec, AGENT_KIND, DEVICE_KIND, FLOW_KIND,
 };

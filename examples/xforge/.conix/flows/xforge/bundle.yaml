@@ -13,7 +13,7 @@ commands:
   xspec: {read_only: [list, get, delta, check, pending, help]}
   xarch: {read_only: [modules, list, get, delta, check, pending, help]}
   xledger: {read_only: [list, help]}
-  xpkg: {read_only: [list, help]}
+  xpkg: {read_only: [list, verify-menu, help]}
 # 项目的治理文件（docs/design/xforge.md §1）：启动时读、合并缺省、钉进运行，门禁与命令经 flow.settings 读，
 # 确认出口经 ${settings.review.separate} 读。
 settings:

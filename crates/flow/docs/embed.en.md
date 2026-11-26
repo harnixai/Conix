@@ -592,6 +592,11 @@ is so as not to collide with Harnix's own next one; what changes for a host is l
   **`Engine::task_gate_result`**; `TaskRec::task_exit` (`TaskExitRec`) keeps the hand-in and its checks, event
   `task.checked`. `Gates::run_for_task` (default: `Gates::run`) is a host gate on one task. `Work::Foreach::items`
   is now a `Foreach` (was a `String`); `Mocks::items` mocks a script's items in a dry run.
+- **Archives that can be checked later** (Conix): `record.json` carries `format` and `files: [{path, sha256, size}]`
+  (every other file of the archive), and the ledger records the archive — **`RunRecord::archive`** (`ArchiveRef`:
+  `dir`, `record_sha256`), written through **`Engine::note_archive`** (history op `archived`, no event) by the runner.
+  The `archive` module reads it back: `verify(dir, ledger) -> ArchiveReport`, `ledger_record(engine, dir)`,
+  `list_files`, `hash_file`. Records without `archive` still load.
 
 ### `FLOW_API_VERSION = 1`
 

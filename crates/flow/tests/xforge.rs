@@ -91,7 +91,11 @@ fn the_three_paths_and_every_part_they_name_hold_together() {
         }
         let apply = def.station("apply").unwrap();
         assert_eq!(apply.writes, ["${item.paths}"], "{f}: a package writes its own paths");
-        assert!(matches!(&apply.task_exit[..], [ExitCond::Gate { gate, .. }] if gate.ends_with("package-check")), "{f}");
+        let task_exit: Vec<_> = apply.task_exit.iter().map(|e| match e {
+            ExitCond::Gate { gate, .. } => gate.as_str(),
+            _ => "",
+        }).collect();
+        assert_eq!(task_exit, ["xforge/package-check", "xforge/package-tests"], "{f}: each package's bookkeeping, then its own verification");
         let archive = def.station("archive").unwrap();
         let steps: Vec<_> = archive.tasks.as_ref().unwrap().iter().map(|t| &t.executor).collect();
         assert!(steps.iter().all(|e| matches!(e, Executor::Command { .. })), "{f}: {steps:?}");
@@ -418,6 +422,10 @@ async fn the_projects_verify_is_run_and_its_absence_said() {
     assert_eq!(r["verdict"], "pass", "{r}");
     std::fs::write(root.join("tests/test_broken.py"), "import unittest\nclass T(unittest.TestCase):\n    def test_x(self):\n        self.fail('boom')\n").unwrap();
     assert_eq!(b.ok(TOOL_GATE_TRY, at.clone()).await["verdict"], "fail");
+    // A package's own verification tried outside a run: its plan runs, and says it has no work item to judge.
+    let r = b.ok(TOOL_GATE_TRY, json!({"gate": "xforge/package-tests"})).await;
+    assert_eq!(r["verdict"], "error", "{r}");
+    assert!(r["summary"].as_str().unwrap().contains("params.item"), "{r}");
     std::fs::remove_file(root.join(".conix/governance/verify.sh")).unwrap();
     let r = b.ok(TOOL_GATE_TRY, at).await;
     assert_eq!(r["verdict"], "fail", "{r}");

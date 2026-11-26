@@ -1,7 +1,21 @@
 # xforge 流程包的治理开关（docs/design/xforge.md §1）：哪几条基线由这个项目治理。
-# 运行启动时读一次、钉进运行：改了只管之后启动的运行，在跑的照旧。
+# governance 与 review 在运行启动时读一次、钉进运行：改了只管之后启动的运行，在跑的照旧。verify 菜单例外，见下。
 governance:
   spec: true        # 规格基线：xforge/specs/
   interface: true   # 接口基线：xforge/interfaces/
 review:
   separate: false   # 作者也能批；团队要分开（交付过的人不能确认）就改 true
+
+# 工作包可以选的验证（人声明，进 git）：xpkg plan --verify <名字>[:参数=值] 按名字选，任务交付时门禁 package-tests
+# 照 argv 直接起进程（不经 shell），退出码 0 才过。参数只能填进 {参数} 的位置，值要整串匹配这里的正则。
+verify:
+  unit:
+    description: 全部单测
+    argv: [python3, -m, unittest, discover, -s, tests, -q]
+  test:
+    description: 一个测试文件（tests/<file>.py）
+    argv: [python3, -m, unittest, discover, -s, tests, -q, -p, "{file}.py"]
+    params: {file: "test_[a-z0-9_]+"}
+  compile:
+    description: 源码都能编译
+    argv: [python3, -m, compileall, -q, src]
