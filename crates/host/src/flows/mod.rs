@@ -6,6 +6,7 @@ mod approvals;
 pub(crate) mod authorize;
 pub mod builtin;
 mod frames;
+mod goto;
 mod map;
 pub(crate) mod policy;
 pub(crate) mod session_host;
@@ -15,14 +16,14 @@ mod tests;
 pub(crate) mod tools;
 
 use crate::sync::Locked;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use harnix_flow::author::AuthorTools;
 use harnix_flow::dryrun::{Sandbox, SandboxConfig};
-use harnix_flow::runner::{CatalogPacks, Runner, RunnerConfig};
+use harnix_flow::runner::{CatalogPacks, CommandBy, CommandCall, Runner, RunnerConfig};
 use harnix_flow::{
     Actor, CreateIn, DirPacks, Engine, FileStore, MemPacks, Packs, ProjectLayout, RunQuery,
     RunStatus, Trigger,
@@ -299,10 +300,140 @@ impl Flows {
 
     pub(crate) async fn summaries(&self) -> Vec<port::FlowSummary> {
         let active = self.active_counts().await;
-        harnix_flow::wire::defs_list(self.packs().as_ref())
+        let packs = self.packs();
+        harnix_flow::wire::defs_list(packs.as_ref())
             .into_iter()
-            .map(|d| map::flow_summary(&d, active.get(&d.name).copied().unwrap_or(0)))
+            .map(|d| {
+                let mut s = map::flow_summary(&d, active.get(&d.name).copied().unwrap_or(0));
+                s.bundle = bundle_of(packs.as_ref(), &d.name);
+                s
+            })
             .collect()
+    }
+
+    /// 流程包的目录（`ListBundles`）：每个有 `bundle.yaml` 的包一项。不在包里的流程没有项，TUI 把流程名当包名。
+    pub(crate) fn bundles(&self) -> Vec<port::BundleInfo> {
+        let packs = self.packs();
+        let mut names: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        for flow in packs.flows() {
+            if let Some(b) = bundle_of(packs.as_ref(), &flow) {
+                names.entry(b).or_default().push(flow);
+            }
+        }
+        names
+            .into_iter()
+            .map(|(name, flows)| {
+                let meta: harnix_flow::bundle::BundleMeta = packs
+                    .bundle_file(&name, harnix_flow::bundle::BUNDLE_FILE)
+                    .and_then(|t| serde_yaml::from_str(&t).ok())
+                    .unwrap_or_default();
+                let mut stations: Vec<port::StationId> = vec![];
+                for f in &flows {
+                    for s in packs.flow(f).map(|(d, _)| d.stations).unwrap_or_default() {
+                        let id = port::StationId(s.id);
+                        if !stations.contains(&id) {
+                            stations.push(id);
+                        }
+                    }
+                }
+                port::BundleInfo {
+                    title: if meta.title.is_empty() {
+                        name.clone()
+                    } else {
+                        meta.title.clone()
+                    },
+                    // 包的主流程（`flow.yaml`，以包名出现）的本地名是库的 `MAIN_FLOW`。
+                    // 选路合入后从 bundle.yaml 取 flows 的顺序、triage 与 pace。
+                    flows: flows
+                        .iter()
+                        .map(|f| match harnix_flow::bundle::split(f) {
+                            Some((_, local)) => local.to_string(),
+                            None => harnix_flow::bundle::MAIN_FLOW.to_string(),
+                        })
+                        .collect(),
+                    commands: meta
+                        .commands
+                        .0
+                        .iter()
+                        .map(|(n, d)| port::CommandInfo {
+                            name: n.clone(),
+                            read_only: d.read_only.clone(),
+                            description: d.description.clone(),
+                        })
+                        .collect(),
+                    stations,
+                    triage: false,
+                    pace: port::Pace::Auto,
+                    name,
+                }
+            })
+            .collect()
+    }
+
+    /// 人跑包的命令（`/flow:<包>:<命令> …`）：写的子命令人在运行之外也能跑（模型不能，库按 `by` 拦）。
+    pub(crate) async fn flow_command(
+        &self,
+        bundle: &str,
+        command: &str,
+        args: Vec<String>,
+        run: Option<&str>,
+    ) -> Result<String, PortError> {
+        let by = Self::by();
+        let mut call = CommandCall::new(bundle, command, args, CommandBy::person(by.id));
+        call.run = run.map(str::to_string);
+        call.project_root = Some(PathBuf::from(&self.project));
+        self.runner
+            .run_command(call)
+            .await
+            .map(|r| r.shown())
+            .map_err(PortError::Failed)
+    }
+
+    /// 站操作（[`goto`]）：回做了什么或在等什么。
+    pub(crate) async fn goto(
+        &self,
+        run: &str,
+        station: &str,
+        reason: Option<&str>,
+    ) -> Result<String, PortError> {
+        let view = self.engine.get(run).await.map_err(flow_err)?;
+        let by = Self::by();
+        let e = &self.engine;
+        let said = match goto::plan(&view, station).map_err(PortError::Failed)? {
+            goto::Plan::Say(text) => return Ok(text),
+            goto::Plan::Release => {
+                self.runner
+                    .settle(e.release(run, station, by).await)
+                    .await
+                    .map_err(flow_err)?;
+                format!("released station {station}")
+            }
+            goto::Plan::Retry(tasks) => {
+                for t in &tasks {
+                    self.runner
+                        .settle(e.retry(run, station, t, by.clone()).await)
+                        .await
+                        .map_err(flow_err)?;
+                }
+                format!("retried {} of station {station}", tasks.join(", "))
+            }
+            goto::Plan::RerunGates => {
+                self.runner
+                    .settle(e.rerun_gates(run, station, by).await)
+                    .await
+                    .map_err(flow_err)?;
+                format!("ran the gates of station {station} again")
+            }
+            goto::Plan::Rework => {
+                let reason = reason.unwrap_or("rework from Conix");
+                self.runner
+                    .settle(e.rework(run, station, None, reason, by).await)
+                    .await
+                    .map_err(flow_err)?;
+                format!("sent the run back to station {station}")
+            }
+        };
+        Ok(said)
     }
 
     /// 每个流程还没结束的运行有几个。
@@ -437,9 +568,16 @@ impl Flows {
         let by = Self::by();
         let e = &self.engine;
         let r = match &op {
-            RunOp::Goto { .. } | RunOp::Switch { .. } => {
+            RunOp::Goto { station, reason } => {
+                return self
+                    .goto(run, &station.0, reason.as_deref())
+                    .await
+                    .map(|_| ());
+            }
+            // 换路等选路合入库之后。
+            RunOp::Switch { .. } => {
                 return Err(PortError::Unsupported(
-                    "station operations by address are not supported yet".into(),
+                    "switching flows is not supported yet".into(),
                 ));
             }
             RunOp::Pause => e.pause(run, by).await,
@@ -552,6 +690,16 @@ impl Flows {
     }
 }
 
+/// 流程所在的包：`<包>/<流程>`，或包的主流程（以包名出现、包里有 `bundle.yaml`）。
+fn bundle_of(packs: &dyn Packs, flow: &str) -> Option<String> {
+    match harnix_flow::bundle::split(flow) {
+        Some((b, _)) => Some(b.to_string()),
+        None => packs
+            .bundle_file(flow, harnix_flow::bundle::BUNDLE_FILE)
+            .map(|_| flow.to_string()),
+    }
+}
+
 pub(crate) fn flow_err(e: harnix_flow::FlowError) -> PortError {
     PortError::Failed(e.to_string())
 }
@@ -606,8 +754,23 @@ impl FlowPort for Flows {
     async fn command(&self, cmd: Command) -> Result<Reply, PortError> {
         match cmd {
             Command::ListFlows => Ok(Reply::Flows(self.summaries().await)),
-            // 流程库的包目录与包命令的地址接上之前，TUI 看到的是没有包。
-            Command::ListBundles => Ok(Reply::Bundles(vec![])),
+            Command::ListBundles => Ok(Reply::Bundles(self.bundles())),
+            Command::FlowCommand {
+                bundle,
+                command,
+                args,
+                run,
+            } => Ok(Reply::Text {
+                text: self
+                    .flow_command(&bundle, &command, args, run.as_ref().map(|r| r.0.as_str()))
+                    .await?,
+            }),
+            Command::RunOp {
+                run,
+                op: RunOp::Goto { station, reason },
+            } => Ok(Reply::Text {
+                text: self.goto(&run.0, &station.0, reason.as_deref()).await?,
+            }),
             Command::GetFlow { name } => Ok(Reply::Flow(Box::new(self.detail(&name).await?))),
             Command::ListRuns { flow } => {
                 // 库的列表摘要不带各站，站数要从运行记录算；读不到记录的退回列表摘要。

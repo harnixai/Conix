@@ -9,7 +9,7 @@ use std::sync::{Mutex, Weak};
 
 use async_trait::async_trait;
 use harnix_flow::author::{self, AuthorHost, Notice, RUN_TOOLS};
-use harnix_flow::runner::SessionId;
+use harnix_flow::runner::{self, SessionId};
 use harnix_flow::{Actor, RunStatus};
 use serde_json::{Value, json};
 
@@ -31,6 +31,9 @@ pub(crate) fn declarations() -> Vec<Value> {
     author::tool_specs()
         .into_iter()
         .filter(|t| !PERSONS_ONLY.contains(&t.name.as_str()))
+        // 主会话也要 `flow_command`；运行里的会话不再单带一份（`session_host::options_of` 滤掉），
+        // 一个会话里同名的工具只能有一个。
+        .chain(std::iter::once(runner::command_tool_spec()))
         .map(|t| {
             let mut schema = t.input_schema;
             if let Some(p) = schema.pointer_mut("/properties/flow") {
@@ -91,7 +94,17 @@ pub(crate) async fn call(
 ) -> Option<Result<String, String>> {
     let session: SessionId = rpc.to_string();
     if f.runner.tools().specs().iter().any(|s| s.name == name) {
-        let r = f.runner.tools().call(&session, name, input.clone()).await;
+        // 主会话没有任务可绑，`flow_command` 要靠项目找包（库只认读的子命令给模型）。
+        let r = f
+            .runner
+            .tools()
+            .call_in(
+                &session,
+                name,
+                input.clone(),
+                Some(std::path::Path::new(&f.project)),
+            )
+            .await;
         return Some(if r.is_error { Err(r.text) } else { Ok(r.text) });
     }
     let author = f.author.get()?;

@@ -250,7 +250,16 @@ pub(crate) fn run_view(v: &harnix_flow::RunView) -> port::RunView {
                 usage: r.map(|r| usage(&r.usage())).unwrap_or_default(),
                 unmet: unmet.filter(|u| !u.is_empty()),
                 session: own,
-                votes: None,
+                // 一站通常只有一道确认出口；有几道时界面显示第一道。
+                votes: v
+                    .votes
+                    .get(&s.id)
+                    .and_then(|vs| vs.first())
+                    .map(|c| port::VoteView {
+                        approvals: c.approvals,
+                        rejections: c.rejections,
+                        min: c.min,
+                    }),
             }
         })
         .collect();
