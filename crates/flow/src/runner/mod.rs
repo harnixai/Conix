@@ -36,6 +36,7 @@ pub mod testing;
 mod approvals;
 mod archive;
 mod checks;
+pub(crate) mod commands;
 mod dispatch;
 mod files;
 pub(crate) mod gate;
@@ -77,7 +78,8 @@ pub use hooks::{HookTransport, QUEUE_KEPT};
 pub use state::{Binding, TaskKey};
 pub use testing::{ScriptedHost, Turn};
 pub use hooks::redact_url;
-pub use tools::{tool_specs, FlowTools, ToolReply, TOOL_COMMAND, TOOL_PROPOSE, TOOL_STATE, TOOL_SUBMIT};
+pub use commands::{split_command, ByKind, CommandBy, CommandCall, CommandReply};
+pub use tools::{command_tool_spec, tool_specs, FlowTools, ToolReply, TOOL_COMMAND, TOOL_PROPOSE, TOOL_STATE, TOOL_SUBMIT};
 pub use trust::withheld;
 pub use turns::{NUDGE, NUDGE_STRUCTURED};
 pub use worktree::{info as worktree_info, EndError};
@@ -379,6 +381,12 @@ impl Runner {
             if let Ok(rec) = self.engine.record(run).await {
                 self.state.prune_bindings(run, |b| state::binding_current(&rec, b));
                 if substantive {
+                    // Archiving writes into the bundle's data directory, as its commands do: one
+                    // at a time (`commands::data_lock`).
+                    let _held = match rec.data_dir.as_deref() {
+                        Some(d) if rec.def.bundle.is_some() => Some(commands::data_lock(std::path::Path::new(d)).lock_owned().await),
+                        _ => None,
+                    };
                     project::project_run(&self.engine, &rec);
                 }
             }

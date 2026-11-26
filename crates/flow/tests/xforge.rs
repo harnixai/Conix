@@ -61,7 +61,7 @@ fn both_paths_and_every_part_of_the_bundle_hold_together() {
         assert_eq!(part_problems(PartKind::Gate, &name, &text, &p), Vec::<String>::new(), "{g}");
     }
     let meta: harnix_flow::bundle::BundleMeta = serde_yaml::from_str(&p.bundle_file("xforge", "bundle.yaml").unwrap()).unwrap();
-    for c in &meta.commands {
+    for c in meta.commands.names() {
         let src = p.bundle_file("xforge", &format!("commands/{c}.js")).unwrap_or_else(|| panic!("no command {c}"));
         assert!(src.contains("export default function"), "{c}");
     }

@@ -51,9 +51,150 @@ pub struct BundleMeta {
     pub description: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub version: String,
-    /// The bundle's commands, each `commands/<name>.js`: what its stations' sessions may run.
+    /// The bundle's commands, each `commands/<name>.js`: what sessions, people and stations may run.
+    #[serde(default, skip_serializing_if = "Commands::is_empty")]
+    pub commands: Commands,
+}
+
+/// What `bundle.yaml` says of one command.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(deny_unknown_fields)]
+pub struct CommandDecl {
+    /// The first arguments that only read (`list`, `get`, `help`): a call with one of them gets no
+    /// writer, so it cannot change anything whoever runs it. Every other call counts as writing.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub commands: Vec<String>,
+    pub read_only: Vec<String>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub description: String,
+}
+
+/// A bundle's commands in the order `bundle.yaml` gives them: written as a list of names (every
+/// subcommand writes) or as a map from a name to its [`CommandDecl`]. The list stays a form so
+/// bundles written before the map still read.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Commands(pub Vec<(String, CommandDecl)>);
+
+impl Commands {
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+    pub fn names(&self) -> impl Iterator<Item = &str> {
+        self.0.iter().map(|(n, _)| n.as_str())
+    }
+    pub fn get(&self, name: &str) -> Option<&CommandDecl> {
+        self.0.iter().find(|(n, _)| n == name).map(|(_, d)| d)
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum CommandsForm {
+    List(Vec<String>),
+    // A `Mapping`, not a `BTreeMap`: the order the file gives is the order commands are listed in.
+    Map(serde_yaml::Mapping),
+}
+
+impl<'de> Deserialize<'de> for Commands {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        use serde::de::Error;
+        match CommandsForm::deserialize(d)? {
+            CommandsForm::List(l) => Ok(Commands(l.into_iter().map(|n| (n, CommandDecl::default())).collect())),
+            CommandsForm::Map(m) => m
+                .into_iter()
+                .map(|(k, v)| {
+                    let name = k.as_str().ok_or_else(|| D::Error::custom("a command's name is a string"))?.to_string();
+                    let decl = if v.is_null() { CommandDecl::default() } else { serde_yaml::from_value(v).map_err(D::Error::custom)? };
+                    Ok((name, decl))
+                })
+                .collect::<Result<_, _>>()
+                .map(Commands),
+        }
+    }
+}
+
+impl Serialize for Commands {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::{SerializeMap, SerializeSeq};
+        if self.0.iter().all(|(_, d)| *d == CommandDecl::default()) {
+            let mut q = s.serialize_seq(Some(self.0.len()))?;
+            for (n, _) in &self.0 {
+                q.serialize_element(n)?;
+            }
+            q.end()
+        } else {
+            let mut m = s.serialize_map(Some(self.0.len()))?;
+            for (n, d) in &self.0 {
+                m.serialize_entry(n, d)?;
+            }
+            m.end()
+        }
+    }
+}
+
+/// Whether a call of a command only reads: its first argument is one its declaration lists. `help`
+/// and no argument at all read too: they answer from the file's comment without running it.
+pub fn is_read_only(decl: Option<&CommandDecl>, args: &[String]) -> bool {
+    match args.first().map(String::as_str) {
+        None | Some("help") => true,
+        Some(a) => decl.is_some_and(|d| d.read_only.iter().any(|r| r == a)),
+    }
+}
+
+/// A command's usage: the `//` comment block its file opens with, markers taken off. `None` when
+/// it opens with none.
+pub fn command_help(source: &str) -> Option<String> {
+    let mut lines: Vec<String> = vec![];
+    for l in source.lines() {
+        let t = l.trim_start();
+        if let Some(rest) = t.strip_prefix("//") {
+            lines.push(rest.strip_prefix(' ').unwrap_or(rest).trim_end().to_string());
+        } else if t.is_empty() && lines.is_empty() {
+            continue;
+        } else {
+            break;
+        }
+    }
+    let text = lines.join("\n").trim().to_string();
+    (!text.is_empty()).then_some(text)
+}
+
+/// Names a bundle keeps for itself: `help` and `status` are the address's own, so no flow, command
+/// or station may take them.
+pub const RESERVED: [&str; 2] = ["help", "status"];
+
+/// The problems in a bundle's one namespace: its flows' local names, its commands' names and the
+/// station ids of its flows must not collide across these kinds (a station id repeats across
+/// flows: they are one station at different lengths), and none is reserved. `flows` is each flow's
+/// local name with its station ids. One name, one meaning: `/<bundle>:<name>` cannot be two things.
+pub fn namespace_problems(commands: &[&str], flows: &[(String, Vec<String>)]) -> Vec<String> {
+    let mut out = vec![];
+    let mut seen: std::collections::BTreeMap<String, &'static str> = Default::default();
+    let mut claim = |name: &str, kind: &'static str, out: &mut Vec<String>| {
+        if RESERVED.contains(&name) {
+            out.push(format!("{kind} {name:?}: `{name}` is reserved"));
+        }
+        match seen.get(name) {
+            Some(&k) if k != kind => out.push(format!("{name:?} is both a {k} and a {kind}: a bundle's names are one space")),
+            Some(_) if kind != "station" => out.push(format!("{kind} {name:?} is named twice")),
+            _ => {}
+        }
+        seen.entry(name.to_string()).or_insert(kind);
+    };
+    for (local, _) in flows {
+        claim(local, "flow", &mut out);
+    }
+    for c in commands {
+        claim(c, "command", &mut out);
+    }
+    for (_, stations) in flows {
+        for s in stations {
+            claim(s, "station", &mut out);
+        }
+    }
+    out.sort();
+    out.dedup();
+    out
 }
 
 /// A bundle's name and the local name in a full name: `xforge/solid` → `("xforge", "solid")`.

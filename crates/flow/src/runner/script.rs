@@ -346,11 +346,17 @@ pub(crate) struct Writer {
     pub denied: Vec<std::path::PathBuf>,
     /// What was written, relative to the workspace, in order: told back to the session.
     pub written: Mutex<Vec<String>>,
+    /// A call declared read-only: the functions are there (a command's code does not branch on
+    /// who called it) but every write throws, so the declaration is enforced rather than trusted.
+    pub read_only: bool,
 }
 
 impl Writer {
     fn target(&self, rel: &str) -> Result<std::path::PathBuf, String> {
         use std::path::Component;
+        if self.read_only {
+            return Err(format!("{rel}: this call is declared read-only, it may not write"));
+        }
         let p = std::path::Path::new(rel);
         if p.components().any(|c| matches!(c, Component::ParentDir)) {
             return Err(format!("{rel}: `..` is not written through"));

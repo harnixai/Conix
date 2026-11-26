@@ -382,6 +382,16 @@ Conix 在 Harnix 0.4.7 分叉了这个库，先把站的治理（门禁、确认
 - **包的命令**（`TOOL_COMMAND`，`flow_command {command, args}`）：`bundle.yaml` 的 `commands` 列出的 `commands/<名>.js`，
   随运行钉进 `Pinned::commands`；在库自己的 QuickJS 里跑，`flow` 比脚本门禁的多 `write`、`append`、`remove`、`print`，
   只写得了运行目录（`_run/` 除外）与 `${data_dir}`。它不是只读的工具。
+- **命令成为独立入口**（Conix）：`bundle.yaml` 的 `commands` 写成名字列表（所有子命令都算会写）或映射
+  `{名字: {read_only: [第一个参数…], description}}`（`bundle::Commands`、`CommandDecl`，随运行钉进 `Pinned::command_decls`）；
+  `bundle::is_read_only`、`bundle::command_help`（文件头的 `//` 注释块；`help` 或不带参数时直接回答、不运行命令）、
+  `bundle::namespace_problems` 与 `validate::bundle_problems`（包里的流程名、命令名、站 id 一个空间；`help`、`status` 保留）。
+  `Runner::run_command(CommandCall {bundle, command, args, run?, by: CommandBy{kind: person|model|station, id}, project_root?, …})`
+  有无运行都能跑（没有运行：用当前的包，`output_dir` 为空，只写包的数据目录；第一个参数声明为只读的调用拿到一个一写就抛的
+  writer；运行之外**模型**只能做这些），`Runner::is_read_only`。命令的 `input` 多了 `by`、`run`。
+  `FlowTools::call_in(session, tool, input, project)` 让不服务任务的会话也能用
+  `flow_command {command: "包:名" | "名", args, run?}`；`command_tool_spec()` 只给这一个工具的声明。
+  同一个包数据目录的写入（可能写的命令、归档）跨运行串行。接口变化：`BundleMeta::commands` 现在是 `Commands`（原 `Vec<String>`，用 `.names()`）。
 
 - **试运行用会话所在的流程包**：`Sandbox::start_in(input, by, packs)`；`flow_dry_run` 用会话读的那份（项目的流程、件），
   不再只看应用自己的包——项目里的流程以前试运行时找不到。

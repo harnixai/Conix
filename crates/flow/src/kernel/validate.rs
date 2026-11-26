@@ -162,6 +162,13 @@ pub fn validate(def: &FlowDef, packs: &dyn Packs) -> Vec<Problem> {
     if def.bundle.is_some() && def.output_dir.is_some() {
         c.flow("output_dir: a bundle's flow works in the run's own directory; say where it is archived with archive.name".to_string());
     }
+    // A bundle's flows, commands and stations share one namespace (the address `/<bundle>:<name>`
+    // names any of them); read from the packs, so a flow reports its bundle's collisions too.
+    if let Some(b) = &def.bundle {
+        for m in bundle_problems(b, packs) {
+            c.flow(format!("bundle {b}: {m}"));
+        }
+    }
     if let Some(a) = &def.archive {
         if let Some(t) = &a.name {
             for m in super::output::template_problems(t, &def.inputs) {
@@ -1066,6 +1073,23 @@ pub fn is_part_name(kind: PartKind, name: &str) -> bool {
         PartKind::Skill => is_skill_name(name),
         _ => is_name(name, &[]),
     }
+}
+
+/// The problems in a bundle's one namespace (see [`crate::bundle::namespace_problems`]), read from
+/// the packs: its flows, the commands its `bundle.yaml` declares, their stations. In Conix.
+pub fn bundle_problems(bundle: &str, packs: &dyn Packs) -> Vec<String> {
+    let meta = packs.bundle_file(bundle, crate::bundle::BUNDLE_FILE).and_then(|t| serde_yaml::from_str::<crate::bundle::BundleMeta>(&t).ok());
+    let commands: Vec<&str> = meta.as_ref().map(|m| m.commands.names().collect()).unwrap_or_default();
+    // The bundle's own main flow (`flow.yaml`, offered as the bundle's name) has no local name.
+    let flows: Vec<(String, Vec<String>)> = packs
+        .flows()
+        .into_iter()
+        .filter_map(|n| {
+            let (b, local) = crate::bundle::split(&n)?;
+            (b == bundle).then(|| (local.to_string(), packs.flow(&n).map(|(d, _)| d.stations.iter().map(|s| s.id.clone()).collect()).unwrap_or_default()))
+        })
+        .collect();
+    crate::bundle::namespace_problems(&commands, &flows)
 }
 
 /// Every problem of a part's text on its own (a flow that uses it is judged by [`validate`]);

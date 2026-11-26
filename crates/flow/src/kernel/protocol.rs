@@ -362,7 +362,7 @@ pub fn render(t: &TaskContext) -> String {
     if !t.commands.is_empty() {
         s.push_str(&format!(
             "- The flow's commands: {}. Run one with `flow_command {{command, args}}` (`args` a list of \
-             strings, as on a command line; `help` lists what it does). Structured data the flow keeps \
+             strings, as on a command line; `[\"help\"]` (or no `args`) answers its usage without running it). Structured data the flow keeps \
              (records, ledgers, deltas) is written with them, not by hand.\n",
             t.commands.iter().map(|c| format!("`{c}`")).collect::<Vec<_>>().join(", ")
         ));

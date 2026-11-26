@@ -522,6 +522,18 @@ is so as not to collide with Harnix's own next one; what changes for a host is l
 - **A bundle's commands** (`TOOL_COMMAND`, `flow_command {command, args}`): the `commands/<name>.js` its `bundle.yaml`
   lists, pinned in `Pinned::commands`; run in the library's QuickJS with `write`, `append`, `remove` and `print` besides a
   gate script's `flow`, writing only the run's directory (not `_run/`) and `${data_dir}`. Not a read-only tool.
+- **Commands as an entry of their own** (in Conix): `bundle.yaml`'s `commands` is a list of names (every subcommand
+  writes) or a map `{name: {read_only: [first args…], description}}` (`bundle::Commands`, `CommandDecl`, pinned in
+  `Pinned::command_decls`); `bundle::is_read_only`, `bundle::command_help` (the file's leading `//` block; `help` or no
+  arguments answers it without running), `bundle::namespace_problems` and `validate::bundle_problems` (a bundle's flow
+  names, command names and station ids are one namespace; `help` and `status` reserved). `Runner::run_command(CommandCall
+  {bundle, command, args, run?, by: CommandBy{kind: person|model|station, id}, project_root?, …})` runs one with or
+  without a run (without: the current packs, `output_dir` null, writes only the bundle's data directory; a call whose
+  first argument is declared read-only gets a writer that throws; a **model** outside a run may make only those),
+  `Runner::is_read_only`. The command's `input` gains `by`, `run`. `FlowTools::call_in(session, tool, input, project)`
+  answers `flow_command {command: "bundle:name" | "name", args, run?}` for a session that serves no task too;
+  `command_tool_spec()` is its spec alone. Writes to one bundle's data directory (commands that may write, archiving) are
+  serialized across runs. API note: `BundleMeta::commands` is now `Commands` (was `Vec<String>`; `.names()`).
 
 ### `FLOW_API_VERSION = 1`
 
