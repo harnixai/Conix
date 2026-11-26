@@ -20,7 +20,8 @@ description: 把提案落成技术路径与工作包，逐条对照项目原则�
 
 **台账**：以后要回头看的决定 `xledger add decisions "<决定了什么、为什么>" --ref <需求或元素编号>`，可能出的问题
 `xledger add risks "<风险与对策>" --ref …`。离开前每条都要有结论：`xledger set <种类> <编号> accepted|rejected|resolved|deferred "<说明>"`。
-接口增量里有 `breaking` 的改动时，要一条 accepted 的决定 `--ref` 指向那个元素，启动时的 impact 里也要有 interface。
+接口增量里有 `breaking` 的改动时（门禁 interface-compat 查），启动时的 impact 里要有 interface，还要一条接受了的决定：
+`xledger add decisions "<为什么非破坏不可、调用方怎么办>" --ref <元素编号>`，再 `xledger set decisions <D#> accepted "<说明>"`。
 
 规格之间有矛盾、或提案的目标做不到，不要自己裁决：问题根在提案，用 `flow_propose {kind: rework, to: propose, reason}` 建议打回，
 说清是哪两条、为什么不能两立。

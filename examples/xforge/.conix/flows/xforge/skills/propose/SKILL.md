@@ -24,7 +24,8 @@ description: 把想法收敛成有边界的目标：写提案，把对规格与�
 - 新元素 `xarch add <模块> <种类> <名字> "<签名>" "<说明>"`（缺省 experimental；补登记已经在用的接口加 `--stable`）；
   新模块先 `xarch module <模块> "<标题>" --paths a,b`。
 - 改 `xarch modify <编号> [--signature S] [--description D]`，改 stable 的必须 `--breaking`；不再用的先 `xarch deprecate <编号>`，
-  `remove` 只删已经 deprecated 的；记错了 `xarch revert <编号>`。记完 `xarch check`。
+  `remove` 只删已经 deprecated 的；升成 stable `xarch promote <编号>`；记错了 `xarch revert <编号>`。记完 `xarch check`。
+- 改了 stable 的元素，启动时的 impact 必须有 interface；没有就照上面换路时带上，或停下告诉用户。
 
 **快速变更没有设计站**：这一站顺手划工作包，`xpkg plan <编号> "<标题>" --paths a,b --criteria "判据一;判据二" [--after p1] [--verify "<怎么验证>"]`。
 路径盖住它会改的每个文件，测试也算；判据是能验证的完成条件。交出的 `packages` 就是划的这些：`{id, title, paths, after}`，与 plan 一致。

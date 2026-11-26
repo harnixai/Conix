@@ -1,17 +1,20 @@
-//! The xforge bundle Conix ships (`examples/xforge/.conix/flows/xforge`, in Conix): both its flows and
-//! every part hold together and dry-run to a person's confirmation; each gate passes a good delivery
-//! and fails a bad one; its commands (`xspec`, `xledger`, `xpkg`) keep the change's structured data in
-//! a run of it, and `xspec archive` merges the delta into the specs.
+//! The xforge bundle Conix ships (`examples/xforge/.conix/flows/xforge`, in Conix; its
+//! docs/design/xforge.md §4–§5): its three paths and every part they name hold together; a start
+//! naming the bundle goes by risk, and to triage without one; each path dry-runs through the people
+//! it waits for to its end; the gates on what models write — the proposal's and the design's
+//! sections, the impact, the verification record — pass a good one and fail a bad one. The
+//! commands and their gates have their own files (`xforge_spec.rs`, `xforge_ledger.rs`, …). No model.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 use async_trait::async_trait;
 use harnix_flow::author::*;
-use harnix_flow::dryrun::{Sandbox, SandboxConfig};
-use harnix_flow::runner::{CatalogPacks, Runner, RunnerConfig, ScriptedHost, SessionId, Turn, TOOL_COMMAND};
+use harnix_flow::bundle::BundleMeta;
+use harnix_flow::dryrun::{Sandbox, SandboxConfig, StartIn};
+use harnix_flow::kernel::route::route;
+use harnix_flow::runner::{CatalogPacks, Runner, RunnerConfig, ScriptedHost, SessionId};
 use harnix_flow::*;
 use serde_json::{json, Value};
 
@@ -38,33 +41,156 @@ fn copy_of_example() -> tempfile::TempDir {
     d
 }
 
-const GATES: &[&str] = &[
-    "proposal-sections", "spec-delta-shape", "spec-delta", "design-sections", "constitution", "packages-planned",
-    "packages-planned-quick", "ledgers-settled", "packages-done", "unclaimed", "unit-tests", "verification", "archived",
-];
+const PATHS: [&str; 3] = ["xforge/quick", "xforge/solid", "xforge/major"];
+
+fn stations(p: &DirPacks, flow: &str) -> Vec<String> {
+    p.flow(flow).unwrap().0.stations.iter().map(|s| s.id.clone()).collect()
+}
 
 #[test]
-fn both_paths_and_every_part_of_the_bundle_hold_together() {
+fn the_three_paths_and_every_part_they_name_hold_together() {
     let p = packs();
-    assert_eq!(
-        p.flows().into_iter().filter(|f| f.starts_with("xforge/")).collect::<Vec<_>>(),
-        ["xforge/quick", "xforge/solid"]
-    );
-    for f in ["xforge/solid", "xforge/quick"] {
-        let (def, _) = p.flow(f).unwrap_or_else(|| panic!("no flow {f}"));
-        assert_eq!(validate(&def, &p), Vec::<Problem>::new(), "{f}");
-        assert_eq!(def.bundle.as_deref(), Some("xforge"));
-    }
-    for g in GATES {
-        let name = format!("xforge/{g}");
-        let (text, _) = p.part(PartKind::Gate, &name).unwrap_or_else(|| panic!("no gate {g}"));
-        assert_eq!(part_problems(PartKind::Gate, &name, &text, &p), Vec::<String>::new(), "{g}");
-    }
-    let meta: harnix_flow::bundle::BundleMeta = serde_yaml::from_str(&p.bundle_file("xforge", "bundle.yaml").unwrap()).unwrap();
+    let meta: BundleMeta = serde_yaml::from_str(&p.bundle_file("xforge", "bundle.yaml").unwrap()).unwrap();
+    assert_eq!(meta.flows, ["quick", "solid", "major"]);
+    assert_eq!(meta.start.route, ["quick", "solid", "major"]);
+    assert_eq!(meta.start.triage.as_deref(), Some("triage"));
+    assert_eq!(meta.pace, Some(Pace::Auto));
+    assert_eq!(meta.commands.names().collect::<Vec<_>>(), ["xspec", "xarch", "xledger", "xpkg"]);
+    assert!(meta.commands.get("xspec").unwrap().read_only.contains(&"pending".to_string()));
+    assert_eq!(meta.commands.get("xledger").unwrap().read_only, ["list", "help"]);
     for c in meta.commands.names() {
         let src = p.bundle_file("xforge", &format!("commands/{c}.js")).unwrap_or_else(|| panic!("no command {c}"));
         assert!(src.contains("export default function"), "{c}");
     }
+    assert!(p.skill("xforge/triage").is_some() && p.skill("xforge/clarify").is_some());
+    assert!(p.skill("xforge/archive").is_none(), "archiving is the commands' work, no model's");
+
+    assert_eq!(stations(&p, "xforge/quick"), ["propose", "apply", "verify", "archive"]);
+    assert_eq!(stations(&p, "xforge/solid"), ["propose", "design", "check", "apply", "verify", "archive"]);
+    assert_eq!(stations(&p, "xforge/major"), ["propose", "clarify", "design", "check", "apply", "verify", "archive"]);
+    let mut gates = BTreeSet::new();
+    for f in PATHS {
+        let (def, _) = p.flow(f).unwrap_or_else(|| panic!("no flow {f}"));
+        assert_eq!(validate(&def, &p), Vec::<Problem>::new(), "{f}");
+        assert_eq!(def.bundle.as_deref(), Some("xforge"));
+        // The three take the same inputs; only what risk each accepts differs.
+        assert_eq!(def.inputs.keys().collect::<Vec<_>>(), ["impact", "risk", "title"], "{f}");
+        assert!(def.inputs["risk"].default.is_none(), "{f}: no risk given is what triage is for");
+        assert_eq!(def.inputs["impact"].default, Some(json!([])), "{f}");
+        for s in &def.stations {
+            for e in s.exit.iter().chain(&s.task_exit) {
+                if let ExitCond::Gate { gate, .. } = e {
+                    gates.insert(gate.trim_start_matches("xforge/").to_string());
+                }
+            }
+        }
+        let apply = def.station("apply").unwrap();
+        assert_eq!(apply.writes, ["${item.paths}"], "{f}: a package writes its own paths");
+        assert!(matches!(&apply.task_exit[..], [ExitCond::Gate { gate, .. }] if gate.ends_with("package-check")), "{f}");
+        let archive = def.station("archive").unwrap();
+        let steps: Vec<_> = archive.tasks.as_ref().unwrap().iter().map(|t| &t.executor).collect();
+        assert!(steps.iter().all(|e| matches!(e, Executor::Command { .. })), "{f}: {steps:?}");
+    }
+    for g in &gates {
+        let name = format!("xforge/{g}");
+        let (text, _) = p.part(PartKind::Gate, &name).unwrap_or_else(|| panic!("no gate {g}"));
+        assert_eq!(part_problems(PartKind::Gate, &name, &text, &p), Vec::<String>::new(), "{g}");
+    }
+    for g in ["impact", "design-sections", "interface-delta", "interface-compat", "constitution-reply", "interfaces-archived"] {
+        assert!(gates.contains(g), "{g} is named by some path");
+    }
+}
+
+#[test]
+fn a_start_of_the_bundle_goes_by_risk_and_to_triage_without_it() {
+    let p = packs();
+    let to = |inputs: Value| match route(&p, "xforge", &inputs).unwrap() {
+        Route::Flow { flow, .. } => flow,
+        r => panic!("{r:?}"),
+    };
+    assert_eq!(to(json!({"title": "t", "risk": "low"})), "xforge/quick");
+    assert_eq!(to(json!({"title": "t", "risk": "medium", "impact": ["security"]})), "xforge/solid");
+    assert_eq!(to(json!({"title": "t", "risk": "high", "impact": ["interface", "data-migration"]})), "xforge/major");
+    // Impact does not choose the path; it is judged in the proposal.
+    assert_eq!(to(json!({"title": "t", "risk": "low", "impact": ["interface"]})), "xforge/quick");
+
+    let Route::Triage { skill, candidates, .. } = route(&p, "xforge", &json!({"title": "t"})).unwrap() else { panic!() };
+    assert_eq!(skill, "xforge/triage");
+    assert_eq!(candidates.iter().map(|c| c.flow.as_str()).collect::<Vec<_>>(), PATHS);
+    assert_eq!(candidates[2].inputs["properties"]["risk"]["enum"], json!(["low", "medium", "high"]));
+    let e = route(&p, "xforge", &json!({"title": "t", "risk": "low", "impact": ["ui"]})).unwrap_err().to_string();
+    assert!(e.contains("no flow of bundle xforge takes these inputs"), "{e}");
+    // Named, a path takes only the risks it accepts.
+    assert!(packs().flow("xforge/solid").unwrap().0.apply_inputs(&json!({"title": "t", "risk": "high"})).is_err());
+}
+
+fn sandbox() -> Sandbox {
+    Sandbox::new(Arc::new(packs()), SandboxConfig { guarded: vec![], submit_scenes: vec!["code".into()], main_scene: Some("code".into()) })
+}
+
+fn person() -> Actor {
+    Actor::new("person", "owner")
+}
+
+/// A dry run of `flow` with `mocks`, confirmed at each station of `people` in turn: after each
+/// run of work it must be waiting at that station. Then it must be finished. The run's record.
+async fn dry_through(flow: &str, risk: &str, mocks: Value, people: &[&str]) -> RunRecord {
+    let sb = sandbox();
+    let start = StartIn {
+        flow: Some(flow.into()),
+        inputs: json!({"title": "truncate", "risk": risk}),
+        mocks: serde_json::from_value(mocks).unwrap(),
+        ..Default::default()
+    };
+    let run = sb.start(start, person()).await.unwrap();
+    sb.run(&run).await.unwrap();
+    let eng = sb.engine_for(&run).await.unwrap();
+    for at in people {
+        let rec = eng.record(&run).await.unwrap();
+        assert_eq!(rec.stations[*at].status, StationStatus::Working, "{flow}: waits at {at}: {:?}", rec.stations);
+        let waiting: Vec<_> = rec.stations.iter().filter(|(_, s)| s.status.is_open()).map(|(k, _)| k.as_str()).collect();
+        assert_eq!(waiting, [*at], "{flow}");
+        let o = eng.confirm(&run, at, true, None, person()).await.unwrap();
+        sb.absorb(&run, o).await.unwrap();
+        sb.run(&run).await.unwrap();
+    }
+    let rec = eng.record(&run).await.unwrap();
+    assert_eq!(rec.status, RunStatus::Finished, "{flow}: {:?}", rec.stations);
+    rec
+}
+
+fn packages() -> Value {
+    json!([
+        {"id": "core", "title": "加 truncate", "paths": ["src/textkit/**"]},
+        {"id": "tests", "title": "测 truncate", "paths": ["tests/**"], "after": ["core"]},
+    ])
+}
+
+fn ends() -> Value {
+    json!({
+        "apply": {"package": "core", "status": "done", "summary": "s"},
+        "verify": {"summary": "s"},
+        "archive": {"specs": {"merged": 1}, "interfaces": {"merged": 0}},
+    })
+}
+
+#[tokio::test]
+async fn each_path_dry_runs_through_the_people_it_waits_for_to_its_end() {
+    let mut m = ends();
+    m["propose"] = json!({"summary": "s", "packages": packages()});
+    let rec = dry_through("xforge/quick", "low", json!({"stations": m}), &["verify"]).await;
+    let apply = &rec.stations["apply"];
+    assert_eq!(apply.tasks.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(), ["core", "tests"], "a task per package");
+
+    let mut m = ends();
+    m["propose"] = json!({"summary": "s"});
+    m["design"] = json!({"summary": "s", "packages": packages()});
+    m["check"] = json!({"summary": "s", "ready": true});
+    let rec = dry_through("xforge/solid", "medium", json!({"stations": m.clone()}), &["check", "verify"]).await;
+    assert_eq!(rec.stations["archive"].tasks.len(), 2, "xspec archive and xarch archive");
+
+    m["clarify"] = json!({"summary": "s", "questions": 1});
+    dry_through("xforge/major", "high", json!({"stations": m}), &["clarify", "check", "verify"]).await;
 }
 
 #[derive(Default)]
@@ -116,210 +242,130 @@ impl Bench {
         assert!(!r.is_error, "{tool}: {}", r.text);
         serde_json::from_str(&r.text).unwrap_or(Value::String(r.text))
     }
-    /// The gate's verdict on a sample, the run's directory `out` and the bundle's data `data`.
-    async fn verdict(&self, gate: &str, files: Value, outputs: Value) -> Value {
+    /// The gate's verdict on a sample `files`, the run's directory `out`, the bundle's data `data`.
+    async fn verdict(&self, gate: &str, files: Value, inputs: Value) -> Value {
         let r = self
-            .ok(TOOL_GATE_TRY, json!({"gate": format!("xforge/{gate}"), "files": files, "output_dir": "out", "data_dir": "data", "outputs": outputs}))
+            .ok(TOOL_GATE_TRY, json!({"gate": format!("xforge/{gate}"), "files": files, "output_dir": "out", "data_dir": "data", "inputs": inputs}))
             .await;
         assert_eq!(r["tried"], true, "{gate}: {r}");
         r
     }
 }
 
-fn spec() -> String {
-    std::fs::read_to_string(example().join("xforge/specs/textkit.md")).unwrap()
-}
-
-const DELTA: &str = "added:\n  - {id: TK-R3, title: 截断, text: \"truncate(text, n) 超过 n 个字符时截到 n-1 个再加 …\"}\nmodified:\n  - {id: TK-R2, text: \"word_count(text) 返回以空白分隔的非空片段个数；None 视为空文本，返回 0。\"}\n";
-
-#[tokio::test]
-async fn the_solid_path_dry_runs_to_the_reviewer_and_the_quick_one_to_the_owner() {
-    let b = bench();
-    let pkgs = json!([{"id": "truncate", "title": "加 truncate"}]);
-    let dry = b
-        .ok(TOOL_DRY_RUN, json!({"flow": "xforge/solid", "inputs": {"title": "truncate"}, "mocks": {"stations": {
-            "propose": {"summary": "s"}, "design": {"summary": "s", "packages": pkgs}, "check": {"summary": "s", "ready": true}}}}))
-        .await;
-    assert_eq!(dry["stations"]["check"], "working", "{dry}");
-    let dry = b
-        .ok(TOOL_DRY_RUN, json!({"flow": "xforge/quick", "inputs": {"title": "t"}, "mocks": {"stations": {
-            "propose": {"summary": "s", "packages": pkgs}, "apply": {"summary": "s"}, "verify": {"summary": "s"}}}}))
-        .await;
-    assert_eq!(dry["stations"]["verify"], "working", "{dry}");
+fn proposal(impact: &str) -> String {
+    format!(
+        "# 加 truncate\n\n## 背景\n标题太长，列表里放不下。\n\n## 目标\n能把文本截到给定长度。\n\n## 非目标\n不按词边界截。\n\n\
+         ## 改什么\n新增 TK-R3。\n\n## 影响面\n{impact}\n\n## 为什么选这条流程\n只加一个函数，好回退：low。\n"
+    )
 }
 
 #[tokio::test]
-async fn the_declared_gates_judge_documents_ledgers_and_packages() {
+async fn the_proposal_is_judged_by_its_sections_and_its_impact_by_what_the_start_declared() {
     let b = bench();
-    let good = "# 加 truncate\n\n## 为什么\n标题太长。\n\n## 改什么\n新增 truncate。\n\n## 不改什么\nslugify 不变。\n";
-    assert_eq!(b.verdict("proposal-sections", json!({"out/proposal.md": good}), json!({})).await["verdict"], "pass");
-    assert_eq!(b.verdict("proposal-sections", json!({"out/proposal.md": "## 为什么\nTODO\n"}), json!({})).await["verdict"], "fail");
-    assert_eq!(b.verdict("spec-delta-shape", json!({"out/spec-delta.yaml": DELTA}), json!({})).await["verdict"], "pass");
-    assert_eq!(b.verdict("spec-delta-shape", json!({"out/spec-delta.yaml": "added: []\n"}), json!({})).await["verdict"], "fail");
-    let ledger = "entries:\n  - {id: D1, text: 用省略号截断, conclusion: accepted}\n";
-    assert_eq!(b.verdict("ledgers-settled", json!({"out/ledgers/decisions.yaml": ledger}), json!({})).await["verdict"], "pass");
-    let open = json!({"out/ledgers/findings.yaml": "entries:\n  - {id: F1, text: 没测空串, conclusion: open}\n"});
-    assert_eq!(b.verdict("ledgers-settled", open, json!({})).await["verdict"], "fail");
-    let plan = "packages:\n  - {id: truncate, title: t, paths: [src/textkit/**, tests/**], status: done}\n";
-    assert_eq!(b.verdict("packages-done", json!({"out/work-packages.yaml": plan}), json!({})).await["verdict"], "pass");
-    let r = b.verdict("packages-done", json!({"out/work-packages.yaml": plan.replace("done", "planned")}), json!({})).await;
+    let at = |text: String| json!({"out/proposal.md": text});
+    assert_eq!(b.verdict("proposal-sections", at(proposal("- 无")), json!({})).await["verdict"], "pass");
+    let r = b.verdict("proposal-sections", at(proposal("- 无").replace("## 非目标\n不按词边界截。\n\n", "")), json!({})).await;
     assert_eq!(r["verdict"], "fail", "{r}");
-    let handed = json!({"design": {"summary": "s", "packages": [{"id": "truncate", "title": "t"}]}});
-    assert_eq!(b.verdict("packages-planned", json!({"out/work-packages.yaml": plan}), handed.clone()).await["verdict"], "pass");
-    let other = json!({"design": {"summary": "s", "packages": [{"id": "other", "title": "t"}]}});
-    let r = b.verdict("packages-planned", json!({"out/work-packages.yaml": plan}), other).await;
-    assert_eq!(r["verdict"], "fail", "{r}");
-    assert!(r["findings"].to_string().contains("other") && r["findings"].to_string().contains("truncate"), "{r}");
-}
+    assert!(r["findings"].to_string().contains("非目标"), "{r}");
+    assert_eq!(b.verdict("proposal-sections", at(proposal("TODO")), json!({})).await["verdict"], "fail");
 
-#[tokio::test]
-async fn the_script_gates_judge_against_the_specs_the_principles_and_the_tests() {
-    let b = bench();
-    let with_spec = |k: &str, v: &str| json!({"data/specs/textkit.md": spec(), k: v});
-    assert_eq!(b.verdict("spec-delta", with_spec("out/spec-delta.yaml", DELTA), json!({})).await["verdict"], "pass");
-    let bad = "added:\n  - {id: TK-R1, title: x, text: 已经有的编号}\nmodified:\n  - {id: TK-R9, text: 不存在的需求}\n";
-    let r = b.verdict("spec-delta", with_spec("out/spec-delta.yaml", bad), json!({})).await;
-    assert_eq!(r["verdict"], "fail", "{r}");
-    assert!(r["findings"].to_string().contains("TK-R9"), "{r}");
-
-    let c = std::fs::read_to_string(example().join(".conix/governance/constitution.yaml")).unwrap();
-    let design = "## 原则对照\n- P1：只用 str 的切片，不引入依赖。\n- P2：TK-R3 与 TK-R2 各加一条用例。\n- P3：slugify 与 word_count 的签名不变。\n- P4：一个工作包，只碰 src 与 tests。\n";
-    let r = b.verdict("constitution", json!({".conix/governance/constitution.yaml": c, "out/design.md": design}), json!({})).await;
+    let none = json!({"impact": []});
+    assert_eq!(b.verdict("impact", at(proposal("无")), none.clone()).await["verdict"], "pass");
+    let r = b.verdict("impact", at(proposal("- 接口：加 truncate")), none.clone()).await;
+    assert_eq!(r["verdict"], "fail", "nothing declared, the proposal must say none: {r}");
+    let iface = json!({"impact": ["interface"]});
+    let r = b.verdict("impact", at(proposal("- 接口：textkit 多一个公开函数 truncate，已有的不变")), iface.clone()).await;
     assert_eq!(r["verdict"], "pass", "{r}");
-    let r = b.verdict("constitution", json!({".conix/governance/constitution.yaml": c, "out/design.md": design.replace("- P3：slugify 与 word_count 的签名不变。\n", "")}), json!({})).await;
+    let r = b.verdict("impact", at(proposal("- interface")), iface.clone()).await;
+    assert_eq!(r["verdict"], "fail", "a name alone says nothing: {r}");
+    let r = b.verdict("impact", at(proposal("无")), json!({"impact": ["interface", "security"]})).await;
     assert_eq!(r["verdict"], "fail", "{r}");
-    let r = b.verdict("constitution", json!({"out/design.md": design}), json!({})).await;
-    assert_eq!(r["verdict"], "pass", "a project without principles is reminded, not held: {r}");
+    assert!(r["findings"].to_string().contains("security"), "{r}");
+    let r = b.verdict("impact", at(proposal("- 无；infra 照旧")), none).await;
+    assert_eq!(r["verdict"], "pass", "only a reminder: {r}");
     assert!(r["findings"].to_string().contains("warn"), "{r}");
-
-    let tests = "def test_truncate(self):  # TK-R3\n    pass\ndef test_none(self):  # TK-R2\n    pass\n";
-    let record = "- TK-R3 通过：跑了单测\n- TK-R2 未验证：没有 None 的调用方\n";
-    let r = b.verdict("verification", json!({"out/spec-delta.yaml": DELTA, "out/verification.md": record, "tests/test_textkit.py": tests}), json!({})).await;
-    assert_eq!(r["verdict"], "pass", "{r}");
-    let r = b.verdict("verification", json!({"out/spec-delta.yaml": DELTA, "out/verification.md": "- TK-R3 未通过\n", "tests/test_textkit.py": "x"}), json!({})).await;
+    let r = b.verdict("impact", at(proposal("无").replace("## 影响面\n无\n\n", "")), iface).await;
     assert_eq!(r["verdict"], "fail", "{r}");
+}
 
-    let merged = spec().replace("`word_count(text)` 返回以空白分隔的非空片段个数；全是空白时为 0。", "word_count(text) 返回以空白分隔的非空片段个数；None 视为空文本，返回 0。")
-        + "\n### TK-R3 截断\ntruncate(text, n) 超过 n 个字符时截到 n-1 个再加 …\n";
-    assert_eq!(b.verdict("archived", json!({"out/spec-delta.yaml": DELTA, "data/specs/textkit.md": merged}), json!({})).await["verdict"], "pass");
-    assert_eq!(b.verdict("archived", with_spec("out/spec-delta.yaml", DELTA), json!({})).await["verdict"], "fail");
+const DESIGN: &str = "# 加 truncate：设计\n\n## 做法\n在 textkit 里加 truncate(text, n)。\n\n## 集成点\n无调用方，只是新函数。\n\n\
+    ## 失败模式\nn 小于 1 时抛 ValueError。\n\n## 迁移与回滚\n纯新增，删掉函数即回滚。\n\n## 被否决的方案\n- 按词截断：中文没有空格，截不准。\n\n\
+    ## 原则对照\n- P1：只用 str 切片。\n\n## 工作包\n一个包 core。\n";
+
+#[tokio::test]
+async fn the_design_has_every_section_and_a_rejected_alternative_with_its_reason() {
+    let b = bench();
+    let at = |text: &str| json!({"out/design.md": text});
+    let r = b.verdict("design-sections", at(DESIGN), json!({})).await;
+    assert_eq!(r["verdict"], "pass", "{r}");
+    assert_eq!(r["metrics"]["rejected"], 1);
+    let r = b.verdict("design-sections", at(&DESIGN.replace("## 失败模式\nn 小于 1 时抛 ValueError。\n\n", "")), json!({})).await;
+    assert_eq!(r["verdict"], "fail", "{r}");
+    assert!(r["findings"].to_string().contains("失败模式"), "{r}");
+    let r = b.verdict("design-sections", at(&DESIGN.replace("纯新增，删掉函数即回滚。", "<!-- 已有数据怎么过渡 -->")), json!({})).await;
+    assert_eq!(r["verdict"], "fail", "a template's comment is no text: {r}");
+    let r = b.verdict("design-sections", at(&DESIGN.replace("- 按词截断：中文没有空格，截不准。", "考虑过按词截断。")), json!({})).await;
+    assert_eq!(r["verdict"], "fail", "an alternative is `- 方案：为什么不选`: {r}");
+    let r = b.verdict("design-sections", at(&DESIGN.replace("一个包 core。", "TBD")), json!({})).await;
+    assert_eq!(r["verdict"], "fail", "{r}");
+}
+
+const SPEC_DELTA: &str = "added:\n  - {id: TK-R3, title: 截断, text: \"- WHEN 文本超过 n 个字符\\n- THEN 截到 n-1 个再加 …\"}\n";
+const IFACE_DELTA: &str = "added:\n  - {id: fn:textkit.truncate, signature: \"truncate(text: str, n: int) -> str\", description: 截断, stability: experimental}\n";
+const TESTS: &str = "def test_truncate(self):  # TK-R3\n    pass\ndef test_signature(self):  # fn:textkit.truncate\n    pass\n";
+
+fn record(coverage: &str) -> String {
+    format!("# 验证\n\n## 覆盖\n{coverage}\n\n## 连贯性\n提案、规格、实现一致。\n\n## 还剩的风险\n无。\n")
 }
 
 #[tokio::test]
-async fn the_command_gates_check_the_scope_with_sh_and_git_and_run_the_projects_verify() {
+async fn the_verification_record_covers_every_item_of_both_deltas_with_a_conclusion_and_a_test() {
+    let b = bench();
+    let both = "governance: {spec: true, interface: true}\n";
+    let sample = |rec: String, tests: &str, gov: &str| {
+        json!({"out/spec-delta.yaml": SPEC_DELTA, "out/interface-delta.yaml": IFACE_DELTA, "out/verification.md": rec,
+               "tests/test_textkit.py": tests, ".conix/governance/xforge.yaml": gov})
+    };
+    let rows = "- TK-R3 通过：tests/test_textkit.py#test_truncate\n- fn:textkit.truncate 通过：签名与登记的一致";
+    let r = b.verdict("verification", sample(record(rows), TESTS, both), json!({})).await;
+    assert_eq!(r["verdict"], "pass", "{r}");
+    assert_eq!(r["metrics"]["items"], 2);
+    // The interface element is owed only when the interface baseline is governed.
+    let r = b.verdict("verification", sample(record("- TK-R3 通过：单测"), TESTS, both), json!({})).await;
+    assert_eq!(r["verdict"], "fail", "{r}");
+    assert!(r["findings"].to_string().contains("fn:textkit.truncate"), "{r}");
+    let r = b.verdict("verification", sample(record("- TK-R3 通过：单测"), TESTS, "governance: {interface: false}\n"), json!({})).await;
+    assert_eq!(r["verdict"], "pass", "{r}");
+    // A conclusion outside 覆盖 is no coverage; 未通过 fails, 未验证 is the owner's to judge.
+    let outside = format!("# 验证\n\n- TK-R3 通过\n- fn:textkit.truncate 通过\n\n## 覆盖\n见上\n\n## 连贯性\n一致。\n");
+    assert_eq!(b.verdict("verification", sample(outside, TESTS, both), json!({})).await["verdict"], "fail");
+    let failed = "- TK-R3 未通过：多截了一个字\n- fn:textkit.truncate 通过：一致";
+    assert_eq!(b.verdict("verification", sample(record(failed), TESTS, both), json!({})).await["verdict"], "fail");
+    let unverified = "- TK-R3 未验证：没有环境\n- fn:textkit.truncate 通过：一致";
+    let r = b.verdict("verification", sample(record(unverified), TESTS, both), json!({})).await;
+    assert_eq!(r["verdict"], "pass", "{r}");
+    assert!(r["findings"].to_string().contains("warn"), "{r}");
+    // Every item has a test tagged with it; TK-R30 is not TK-R3.
+    let r = b.verdict("verification", sample(record(rows), "def test_x(self):  # TK-R30\n", both), json!({})).await;
+    assert_eq!(r["verdict"], "fail", "{r}");
+    assert_eq!(r["findings"].as_array().unwrap().iter().filter(|f| f["rule"] == "tested").count(), 2, "{r}");
+    // Coherence is a section of its own, not empty.
+    let r = b.verdict("verification", sample(record(rows).replace("提案、规格、实现一致。", ""), TESTS, both), json!({})).await;
+    assert_eq!(r["verdict"], "fail", "{r}");
+    assert!(r["findings"].to_string().contains("连贯性"), "{r}");
+}
+
+#[tokio::test]
+async fn the_projects_verify_is_run_and_its_absence_said() {
     let b = bench();
     let root = b.project.path();
-    let out = root.join("xforge/runs/r1");
-    std::fs::create_dir_all(&out).unwrap();
-    std::fs::write(out.join("packages.paths"), "src/textkit/**\ntests/**\n").unwrap();
-    let at = |g: &str| json!({"gate": format!("xforge/{g}"), "output_dir": out.to_string_lossy()});
-    std::fs::write(root.join("src/textkit/__init__.py"), std::fs::read_to_string(example().join("src/textkit/__init__.py")).unwrap() + "\n\ndef truncate(text, n):\n    return text if len(text) <= n else text[: n - 1] + \"…\"\n").unwrap();
-    let r = b.ok(TOOL_GATE_TRY, at("unclaimed")).await;
-    assert_eq!(r["verdict"], "pass", "the run's own directory does not count: {r}");
-    assert_eq!(r["metrics"]["changed"], 1, "{r}");
-    let r = b.ok(TOOL_GATE_TRY, at("unit-tests")).await;
+    let at = json!({"gate": "xforge/unit-tests"});
+    let r = b.ok(TOOL_GATE_TRY, at.clone()).await;
     assert_eq!(r["verdict"], "pass", "{r}");
-    std::fs::write(root.join("README.md"), "changed").unwrap();
-    let r = b.ok(TOOL_GATE_TRY, at("unclaimed")).await;
-    assert_eq!(r["verdict"], "fail", "{r}");
-    assert!(r["findings"].to_string().contains("README.md"), "{r}");
     std::fs::write(root.join("tests/test_broken.py"), "import unittest\nclass T(unittest.TestCase):\n    def test_x(self):\n        self.fail('boom')\n").unwrap();
-    let r = b.ok(TOOL_GATE_TRY, at("unit-tests")).await;
+    assert_eq!(b.ok(TOOL_GATE_TRY, at.clone()).await["verdict"], "fail");
+    std::fs::remove_file(root.join(".conix/governance/verify.sh")).unwrap();
+    let r = b.ok(TOOL_GATE_TRY, at).await;
     assert_eq!(r["verdict"], "fail", "{r}");
-}
-
-/// A run of `xforge/solid` in a copy of the example, its main session played by hand: the
-/// commands the stations' sessions run.
-#[tokio::test]
-async fn the_commands_keep_the_changes_data_and_archive_merges_the_delta() {
-    let project = copy_of_example();
-    let root = project.path().canonicalize().unwrap();
-    let data = tempfile::tempdir().unwrap();
-    let cfg = RunnerConfig { command_gates: true, profiles: vec!["code".into()], submit_profiles: ["code".to_string()].into(), main_profile: Some("code".into()), ..Default::default() };
-    let packs = CatalogPacks::over(&cfg, vec![], Arc::new(packs()));
-    let layout = ProjectLayout::new(".conix", data.path().join("w"), "conix/flow").with_artifacts_dir("xforge");
-    packs.set_layout(layout.clone());
-    let engine = Arc::new(
-        Engine::new(Arc::new(MemStore::new()), Arc::new(packs))
-            .with_submit_scenes(cfg.profiles.clone())
-            .with_main_scene("code")
-            .with_workspaces(data.path().join("ws"))
-            .with_layout(layout),
-    );
-    let host = ScriptedHost::new();
-    host.main(vec![Turn::Runs]);
-    // The example carries the bundle in its own `.conix/flows/`: there it is the project's.
-    host.trust(&root, true);
-    let rn = Runner::new(engine.clone(), host.clone(), cfg);
-    rn.start().await;
-    let o = rn
-        .start_run(
-            CreateIn { flow: "xforge/solid".into(), subject: "加 truncate".into(), inputs: json!({"title": "truncate"}), project_root: Some(root.to_string_lossy().into()), ..Default::default() },
-            Actor::device("d"),
-        )
-        .await
-        .unwrap();
-    let run = o.value["run"].as_str().unwrap().to_string();
-    rn.apply(o).await;
-    let rec = engine.record(&run).await.unwrap();
-    assert_eq!(rec.data_dir.as_deref().map(Path::new), Some(root.join("xforge").as_path()), "the artifacts are named as the bundle: its data is them");
-    let out = PathBuf::from(rec.output_dir.unwrap());
-    let sid = tokio::time::timeout(Duration::from_secs(20), async {
-        loop {
-            if let Some(m) = host.opened().into_iter().find(|s| s.main) {
-                if let Some(id) = host.session_of(&m.key) {
-                    if !host.sent_to(&id).is_empty() {
-                        return id;
-                    }
-                }
-            }
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
-    })
-    .await
-    .expect("the proposal was sent");
-    assert!(std::fs::read_to_string(out.join("proposal.md")).unwrap().contains("conix:template"));
-    let run_cmd = async |cmd: &str, args: &[&str]| {
-        let r = rn.tools().call(&sid, TOOL_COMMAND, json!({"command": cmd, "args": args})).await;
-        (r.is_error, r.text)
-    };
-
-    // xspec: the delta, numbered after the specs; checked; merged.
-    let (e, t) = run_cmd("xspec", &["list"]).await;
-    assert!(!e && t.contains("textkit（TK）：2 条"), "{t}");
-    let (e, t) = run_cmd("xspec", &["add", "textkit", "截断", "truncate(text, n) 超过 n 个字符时截到 n-1 个再加 …"]).await;
-    assert!(!e && t.contains("TK-R3"), "{t}");
-    let (e, t) = run_cmd("xspec", &["modify", "TK-R2", "word_count(text) 返回以空白分隔的非空片段个数；None 视为空文本，返回 0。"]).await;
-    assert!(!e, "{t}");
-    let (e, t) = run_cmd("xspec", &["modify", "TK-R9", "nothing"]).await;
-    assert!(e && t.contains("没有需求 TK-R9"), "{t}");
-    let (e, t) = run_cmd("xspec", &["check"]).await;
-    assert!(!e && t.contains("对得上基线"), "{t}");
-    let delta = std::fs::read_to_string(out.join("spec-delta.yaml")).unwrap();
-    assert!(delta.contains("TK-R3") && delta.contains("TK-R2"), "{delta}");
-
-    // xledger and xpkg: what the gates read, in the shapes they read.
-    let (e, t) = run_cmd("xledger", &["add", "decisions", "用", "U+2026", "作省略号"]).await;
-    assert!(!e && t.contains("D1"), "{t}");
-    let (e, _) = run_cmd("xledger", &["set", "decisions", "D1", "accepted", "与", "提案一致"]).await;
-    assert!(!e);
-    let (e, t) = run_cmd("xledger", &["set", "decisions", "D1", "maybe"]).await;
-    assert!(e && t.contains("结论是"), "{t}");
-    let (e, t) = run_cmd("xpkg", &["plan", "truncate", "加 truncate", "--paths", "src/textkit/**,tests/**", "--verify", "单测"]).await;
-    assert!(!e, "{t}");
-    assert_eq!(std::fs::read_to_string(out.join("packages.paths")).unwrap(), "src/textkit/**\ntests/**\n");
-    let (e, _) = run_cmd("xpkg", &["done", "truncate", "加了函数与三条用例", "--files", "src/textkit/__init__.py"]).await;
-    assert!(!e);
-    let ledger: Value = serde_yaml::from_str(&std::fs::read_to_string(out.join("ledgers/decisions.yaml")).unwrap()).unwrap();
-    assert_eq!(ledger["entries"][0]["conclusion"], "accepted", "{ledger}");
-    let plan: Value = serde_yaml::from_str(&std::fs::read_to_string(out.join("work-packages.yaml")).unwrap()).unwrap();
-    assert_eq!(plan["packages"][0]["status"], "done", "{plan}");
-
-    // Archive: the delta merged into the specs, in the bundle's data.
-    let (e, t) = run_cmd("xspec", &["archive"]).await;
-    assert!(!e, "{t}");
-    let merged = std::fs::read_to_string(root.join("xforge/specs/textkit.md")).unwrap();
-    assert!(merged.contains("### TK-R3 截断\ntruncate(text, n)") && merged.contains("None 视为空文本") && !merged.contains("全是空白时为 0"), "{merged}");
-    let (_, t) = run_cmd("xspec", &["list", "textkit"]).await;
-    assert!(t.contains("TK-R3 截断"), "{t}");
+    assert!(r.to_string().contains("verify.sh"), "{r}");
 }
