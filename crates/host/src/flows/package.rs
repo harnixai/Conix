@@ -1,6 +1,7 @@
-//! 流程包的导出与导入（docs/design/flows.md §7.12）：一个流程包（目录）打成 `<包>-<版本>.zip`，带一份生成的
-//! `MANIFEST.yaml`（导出它的 Conix 版本、要求、每个文件的 SHA-256）；导入时先在暂存目录里解开、逐项核对、
-//! 用流程库校验，都过了才装进项目的 `.conix/flows/`。命令行（不需要实例）与实例共用这里。
+//! 流程包与包文件（docs/design/flows.md §7.12）：一个流程包（目录）打成 `<包>-<版本>.zip`，带一份生成的
+//! `MANIFEST.yaml`（导出它的 Conix 版本、要求、每个文件的 SHA-256）；包的摘要（[`digest_of`]）就是这份文件清单的摘要。
+//! 往全局库或项目里写一个包，不论来自包文件、另一处的目录还是内置的，都先在暂存目录里放好、逐项核对、用流程库校验
+//! （[`stage`]），过了才换上（[`place`]）。管理的规矩在 [`super::manage`]。
 //!
 //! 包是别人给的：解包前不信任里面的任何路径与大小，所以不用 `extract`，逐个条目自己读、自己写。
 
@@ -17,7 +18,33 @@ use harnix_flow::{
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use port::{FlowExported, FlowImported, FlowPackageInfo};
+/// `MANIFEST.yaml` 里给人看的那部分：导出的结果、导入的报告、`conix flow inspect` 都用它。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FlowPackageInfo {
+    pub name: String,
+    pub version: String,
+    pub title: String,
+    pub description: String,
+    /// 导出它的 Conix：`x.y.z` 与完整的构建号。
+    pub conix_version: String,
+    pub conix_build: String,
+    pub exported_at: String,
+    /// 要求的最低 Conix（`>=x.y.z`）。
+    pub requires_conix: String,
+    pub files: u32,
+    /// 带的流程（全名）与命令。
+    pub flows: Vec<String>,
+    pub commands: Vec<String>,
+    /// 其中 `command` 类门禁的个数：它们只在受信任的项目里跑。
+    pub command_gates: u32,
+}
+
+/// 导出的结果：写出的文件。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FlowExported {
+    pub file: String,
+    pub package: FlowPackageInfo,
+}
 
 /// `MANIFEST.yaml` 的格式。
 pub const FORMAT: u32 = 1;
@@ -30,7 +57,7 @@ pub const PROJECT_FLOWS: &str = ".conix/flows";
 /// 覆盖时旧的那份移到这里（相对项目根）。
 pub const BACKUPS: &str = ".conix/state/conix/flow-backups";
 /// 暂存目录的父目录（相对项目根）：与 `.conix/flows/` 同一个文件系统，最后一步才是 rename。
-const STATE: &str = ".conix/state/conix";
+pub const STATE: &str = ".conix/state/conix";
 
 /// 正在运行的 Conix 的完整版本（`x.y.z-YYYYMMDDNN`）。
 pub const BUILD: &str = env!("CARGO_PKG_VERSION");
@@ -97,50 +124,21 @@ pub fn default_catalog() -> Catalog {
         .catalog()
 }
 
-// ── 来源 ────────────────────────────────────────────────────────────────────
+// ── 内容与摘要 ──────────────────────────────────────────────────────────────
 
-/// 流程包从哪来：与流程库读的顺序一致（项目 > 插件 > 内置）。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Source {
-    Project,
-    Plugin(String),
-    Builtin,
-}
-
-/// 找一个流程包的目录。`plugin_dirs` 是启用着的插件的流程目录（按插件名）；没有实例时给空。
-pub fn locate(
-    project: &Path,
-    plugin_dirs: &[(String, PathBuf)],
-    builtin_dir: Option<&Path>,
-    name: &str,
-) -> Option<(PathBuf, Source)> {
-    if let Some(d) = bundle::bundle_in(&project.join(PROJECT_FLOWS), name) {
-        return Some((d, Source::Project));
-    }
-    let mut plugins: Vec<&(String, PathBuf)> = plugin_dirs.iter().collect();
-    plugins.sort();
-    if let Some((p, d)) = plugins
-        .into_iter()
-        .find_map(|(p, d)| bundle::bundle_in(d, name).map(|d| (p, d)))
-    {
-        return Some((d, Source::Plugin(p.clone())));
-    }
-    builtin_dir
-        .and_then(|b| bundle::bundle_in(b, name))
-        .map(|d| (d, Source::Builtin))
-}
-
-// ── 导出 ────────────────────────────────────────────────────────────────────
+/// 包的内容：相对包目录的路径（`/` 分隔、排好序）与字节。
+pub type Files = Vec<(String, Vec<u8>)>;
 
 /// 包里放什么：除了生成的 MANIFEST、点开头的、`__pycache__`、用户自己的 `skills/*/local.md`。
-fn excluded(rel: &[&str]) -> bool {
+pub fn excluded(rel: &[&str]) -> bool {
     rel.iter()
         .any(|c| c.starts_with('.') || *c == "__pycache__")
         || rel == [MANIFEST]
         || (rel.len() == 3 && rel[0] == PartKind::Skill.dir() && rel[2] == bundle::LOCAL_SKILL)
 }
 
-fn collect(dir: &Path) -> Result<Vec<(String, Vec<u8>)>, String> {
+/// 读一个包目录里进包的文件（[`excluded`] 之外的），超限、符号链接都报错。
+pub fn collect(dir: &Path) -> Result<Files, String> {
     fn walk(base: &Path, dir: &Path, out: &mut Vec<(String, PathBuf)>) -> Result<(), String> {
         let entries = std::fs::read_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
         for e in entries.flatten() {
@@ -198,13 +196,50 @@ fn collect(dir: &Path) -> Result<Vec<(String, Vec<u8>)>, String> {
     Ok(out)
 }
 
+fn listing(files: &[(String, Vec<u8>)]) -> Vec<ManifestFile> {
+    files
+        .iter()
+        .map(|(p, b)| ManifestFile {
+            path: p.clone(),
+            sha256: sha256(b),
+            size: b.len() as u64,
+        })
+        .collect()
+}
+
+/// 包的摘要：MANIFEST 的文件清单按路径排好，每个文件一行 `<sha256> <size> <path>`，整段取 SHA-256。
+/// 只看进包的文件，所以 `local.md` 改了不算包改了；同样的内容不论来自目录、包文件还是内置的，摘要都一样。
+pub fn digest_of_listing(files: &[ManifestFile]) -> String {
+    let mut lines: Vec<String> = files
+        .iter()
+        .map(|f| format!("{} {} {}\n", f.sha256.to_lowercase(), f.size, f.path))
+        .collect();
+    lines.sort_by(|a, b| a.split(' ').nth(2).cmp(&b.split(' ').nth(2)));
+    sha256(lines.concat().as_bytes())
+}
+
+pub fn digest_of(files: &[(String, Vec<u8>)]) -> String {
+    digest_of_listing(&listing(files))
+}
+
+/// 一个包目录的摘要。
+pub fn dir_digest(dir: &Path) -> Result<String, String> {
+    Ok(digest_of(&collect(dir)?))
+}
+
+impl Manifest {
+    pub fn digest(&self) -> String {
+        digest_of_listing(&self.files)
+    }
+}
+
 /// 包文件的缺省名字。
 pub fn default_file_name(dir: &Path) -> Result<String, String> {
     let m = bundle::meta(dir)?;
     Ok(format!("{}-{}.zip", m.name, version_of(&m)))
 }
 
-fn version_of(m: &bundle::BundleMeta) -> String {
+pub fn version_of(m: &bundle::BundleMeta) -> String {
     if m.version.is_empty() {
         "0.0.0".into()
     } else {
@@ -212,23 +247,25 @@ fn version_of(m: &bundle::BundleMeta) -> String {
     }
 }
 
-/// 把流程包目录导出成 zip。`out` 省略 = 在 `default_dir` 里用缺省名字；是个存在的目录 = 在那里用缺省名字。
-pub fn export(dir: &Path, out: Option<&Path>, default_dir: &Path) -> Result<FlowExported, String> {
-    let meta = bundle::meta(dir)?;
-    let files = collect(dir)?;
-    if !files.iter().any(|(p, _)| p == bundle::BUNDLE_FILE) {
-        return Err(format!("{}: no {}", dir.display(), bundle::BUNDLE_FILE));
+/// 包要求的 Conix：`bundle.yaml` 的 `requires.conix`，没写就是这个版本。
+fn requires_of(meta: &bundle::BundleMeta) -> ManifestRequires {
+    ManifestRequires {
+        conix: meta
+            .requires
+            .as_ref()
+            .and_then(|r| r.conix.clone())
+            .unwrap_or_else(|| format!(">={}", conix_version())),
+        flow_definition_format: DEFINITION_FORMAT,
+        flow_api: FLOW_API_VERSION,
     }
-    let requires = meta
-        .requires
-        .as_ref()
-        .and_then(|r| r.conix.clone())
-        .unwrap_or_else(|| format!(">={}", conix_version()));
-    let manifest = Manifest {
+}
+
+fn manifest_for(meta: &bundle::BundleMeta, files: &[(String, Vec<u8>)]) -> Manifest {
+    Manifest {
         format: FORMAT,
         bundle: ManifestBundle {
             name: meta.name.clone(),
-            version: version_of(&meta),
+            version: version_of(meta),
             title: meta.title.clone(),
             description: meta.description.clone(),
         },
@@ -237,20 +274,21 @@ pub fn export(dir: &Path, out: Option<&Path>, default_dir: &Path) -> Result<Flow
             build: BUILD.into(),
             exported_at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
         },
-        requires: ManifestRequires {
-            conix: requires,
-            flow_definition_format: DEFINITION_FORMAT,
-            flow_api: FLOW_API_VERSION,
-        },
-        files: files
-            .iter()
-            .map(|(p, b)| ManifestFile {
-                path: p.clone(),
-                sha256: sha256(b),
-                size: b.len() as u64,
-            })
-            .collect(),
-    };
+        requires: requires_of(meta),
+        files: listing(files),
+    }
+}
+
+// ── 导出 ────────────────────────────────────────────────────────────────────
+
+/// 把流程包目录导出成 zip。`out` 省略 = 在 `default_dir` 里用缺省名字；是个存在的目录 = 在那里用缺省名字。
+pub fn export(dir: &Path, out: Option<&Path>, default_dir: &Path) -> Result<FlowExported, String> {
+    let meta = bundle::meta(dir)?;
+    let files = collect(dir)?;
+    if !files.iter().any(|(p, _)| p == bundle::BUNDLE_FILE) {
+        return Err(format!("{}: no {}", dir.display(), bundle::BUNDLE_FILE));
+    }
+    let manifest = manifest_for(&meta, &files);
     let text = serde_yaml::to_string(&manifest).map_err(|e| e.to_string())?;
     let mut all = vec![(MANIFEST.to_string(), text.into_bytes())];
     all.extend(files);
@@ -289,15 +327,6 @@ fn info(m: &Manifest, dir: &Path) -> FlowPackageInfo {
     let flows = bundle::flow_names(&m.bundle.name, dir)
         .into_iter()
         .collect();
-    let command_gates = std::fs::read_dir(dir.join(PartKind::Gate.dir()))
-        .map(|rd| {
-            rd.flatten()
-                .filter_map(|e| std::fs::read_to_string(e.path()).ok())
-                .filter_map(|t| serde_yaml::from_str::<serde_yaml::Value>(&t).ok())
-                .filter(|v| v["kind"].as_str() == Some("command"))
-                .count() as u32
-        })
-        .unwrap_or(0);
     FlowPackageInfo {
         name: m.bundle.name.clone(),
         version: m.bundle.version.clone(),
@@ -312,8 +341,30 @@ fn info(m: &Manifest, dir: &Path) -> FlowPackageInfo {
         commands: meta
             .map(|m| m.commands.names().map(String::from).collect())
             .unwrap_or_default(),
-        command_gates,
+        command_gates: command_gates(dir),
     }
+}
+
+/// 包里 `command` 类门禁的个数。
+pub fn command_gates(dir: &Path) -> u32 {
+    std::fs::read_dir(dir.join(PartKind::Gate.dir()))
+        .map(|rd| {
+            rd.flatten()
+                .filter_map(|e| std::fs::read_to_string(e.path()).ok())
+                .filter_map(|t| serde_yaml::from_str::<serde_yaml::Value>(&t).ok())
+                .filter(|v| v["kind"].as_str() == Some("command"))
+                .count() as u32
+        })
+        .unwrap_or(0)
+}
+
+/// 一个包目录的概要（`conix flow show`）：按目录读，没有导出那一项。
+pub fn describe(dir: &Path) -> Result<FlowPackageInfo, String> {
+    let meta = bundle::meta(dir)?;
+    let files = collect(dir)?;
+    let mut m = manifest_for(&meta, &files);
+    m.conix.exported_at.clear();
+    Ok(info(&m, dir))
 }
 
 // ── 读与核对 ─────────────────────────────────────────────────────────────────
@@ -365,6 +416,16 @@ fn entry_name_ok(name: &str) -> Result<(), String> {
 pub struct Package {
     pub manifest: Manifest,
     pub files: BTreeMap<String, Vec<u8>>,
+}
+
+impl Package {
+    /// 包的内容，按路径排好。
+    pub fn contents(&self) -> Files {
+        self.files
+            .iter()
+            .map(|(p, b)| (p.clone(), b.clone()))
+            .collect()
+    }
 }
 
 /// `MANIFEST.yaml` 的原文（能读出来就给，核对不核对都行）。
@@ -488,11 +549,12 @@ pub fn read_package(file: &Path) -> Result<Package, String> {
     })
 }
 
-/// 这个 Conix 与流程库能不能跑它。
-fn check_compatible(m: &Manifest, meta: &bundle::BundleMeta) -> Result<(), String> {
+/// 这个 Conix 与流程库能不能跑它：`requires` 是包文件的 MANIFEST 说的（目录来的就照 `bundle.yaml` 算），
+/// `bundle.yaml` 自己写的 `requires.conix` 也要满足。
+fn check_compatible(requires: &ManifestRequires, meta: &bundle::BundleMeta) -> Result<(), String> {
     let running = bundle::parse_version(BUILD).ok_or("this build has no version")?;
     let declared = meta.requires.as_ref().and_then(|r| r.conix.as_deref());
-    for req in std::iter::once(m.requires.conix.as_str()).chain(declared) {
+    for req in std::iter::once(requires.conix.as_str()).chain(declared) {
         let need = bundle::parse_requirement(req).map_err(|e| format!("requires.conix: {e}"))?;
         if running < need {
             return Err(format!(
@@ -504,16 +566,16 @@ fn check_compatible(m: &Manifest, meta: &bundle::BundleMeta) -> Result<(), Strin
             ));
         }
     }
-    if m.requires.flow_definition_format > DEFINITION_FORMAT {
+    if requires.flow_definition_format > DEFINITION_FORMAT {
         return Err(format!(
             "the package's flow definitions are format {}, this Conix reads up to {DEFINITION_FORMAT}",
-            m.requires.flow_definition_format
+            requires.flow_definition_format
         ));
     }
-    if m.requires.flow_api > FLOW_API_VERSION {
+    if requires.flow_api > FLOW_API_VERSION {
         return Err(format!(
             "the package needs flow API {}, this Conix has {FLOW_API_VERSION}",
-            m.requires.flow_api
+            requires.flow_api
         ));
     }
     Ok(())
@@ -565,28 +627,66 @@ pub fn validate_bundle(dir: &Path, catalog: Catalog) -> Vec<String> {
     out
 }
 
-/// 解开并核对过的包：暂存目录在，`dir` 是 `<暂存>/<包名>`。
-pub struct Verified {
+/// 暂存目录里放好、核对过的包：暂存目录在，`dir` 是 `<暂存>/<包名>`。
+pub struct Staged {
     _tmp: tempfile::TempDir,
     pub dir: PathBuf,
-    pub manifest: Manifest,
     pub meta: bundle::BundleMeta,
+    /// 放进去的内容的摘要（[`digest_of`]）。
+    pub digest: String,
+}
+
+impl Staged {
+    pub fn version(&self) -> String {
+        version_of(&self.meta)
+    }
+}
+
+/// 解开并核对过的包文件。
+pub struct Verified {
+    pub staged: Staged,
+    pub manifest: Manifest,
 }
 
 impl Verified {
     pub fn info(&self) -> FlowPackageInfo {
-        info(&self.manifest, &self.dir)
+        info(&self.manifest, &self.staged.dir)
     }
 }
 
-/// 读、核对、解到暂存目录（`stage_in` 里；省略 = 系统临时目录）、查兼容、校验。
-pub fn verify(file: &Path, stage_in: Option<&Path>, catalog: Catalog) -> Result<Verified, String> {
-    let pkg = read_package(file)?;
-    let name = pkg.manifest.bundle.name.clone();
-    if !bundle::is_bundle_name(&name) {
+/// 把一份包内容放进暂存目录（`stage_in` 里；省略 = 系统临时目录）并核对：名字、路径、数量与大小、
+/// `bundle.yaml` 说的名字、兼容（`requires` 省略 = 按 `bundle.yaml` 算）、流程库校验。
+pub fn stage(
+    name: &str,
+    files: &[(String, Vec<u8>)],
+    requires: Option<&ManifestRequires>,
+    stage_in: Option<&Path>,
+    catalog: Catalog,
+) -> Result<Staged, String> {
+    if !bundle::is_bundle_name(name) {
         return Err(format!(
             "the bundle name {name:?} is not one a bundle can have"
         ));
+    }
+    if files.len() > MAX_FILES {
+        return Err(format!(
+            "{} files: a package holds at most {MAX_FILES}",
+            files.len()
+        ));
+    }
+    let mut total = 0u64;
+    for (rel, bytes) in files {
+        safe_rel(rel)?;
+        if bytes.len() as u64 > MAX_FILE {
+            return Err(format!(
+                "{rel}: {} bytes, a package file is at most {MAX_FILE}",
+                bytes.len()
+            ));
+        }
+        total += bytes.len() as u64;
+    }
+    if total > MAX_TOTAL {
+        return Err(format!("a package is at most {MAX_TOTAL} bytes"));
     }
     let tmp = match stage_in {
         Some(p) => {
@@ -598,8 +698,9 @@ pub fn verify(file: &Path, stage_in: Option<&Path>, catalog: Catalog) -> Result<
         None => tempfile::Builder::new().prefix("conix-flow-").tempdir(),
     }
     .map_err(|e| e.to_string())?;
-    let dir = tmp.path().join(&name);
-    for (rel, bytes) in &pkg.files {
+    let dir = tmp.path().join(name);
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    for (rel, bytes) in files {
         let to = rel.split('/').fold(dir.clone(), |p, c| p.join(c));
         if let Some(parent) = to.parent() {
             std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
@@ -607,16 +708,8 @@ pub fn verify(file: &Path, stage_in: Option<&Path>, catalog: Catalog) -> Result<
         std::fs::write(&to, bytes).map_err(|e| format!("{rel}: {e}"))?;
     }
     let meta = bundle::meta(&dir)?;
-    if meta.name != name || version_of(&meta) != pkg.manifest.bundle.version {
-        return Err(format!(
-            "{MANIFEST} says {name} {}, {} says {} {}",
-            pkg.manifest.bundle.version,
-            bundle::BUNDLE_FILE,
-            meta.name,
-            version_of(&meta)
-        ));
-    }
-    check_compatible(&pkg.manifest, &meta)?;
+    let own = requires_of(&meta);
+    check_compatible(requires.unwrap_or(&own), &meta)?;
     let problems = validate_bundle(&dir, catalog);
     if !problems.is_empty() {
         return Err(format!(
@@ -628,22 +721,41 @@ pub fn verify(file: &Path, stage_in: Option<&Path>, catalog: Catalog) -> Result<
                 .join("\n")
         ));
     }
-    Ok(Verified {
+    Ok(Staged {
         _tmp: tmp,
         dir,
-        manifest: pkg.manifest,
         meta,
+        digest: digest_of(files),
     })
 }
 
-// ── 导入 ────────────────────────────────────────────────────────────────────
-
-pub struct ImportOptions<'a> {
-    pub force: bool,
-    pub catalog: Catalog,
-    /// 启用着的插件的流程目录：只用来提醒"遮住了插件的同名流程包"。
-    pub plugin_dirs: &'a [(String, PathBuf)],
+/// 读、核对、解到暂存目录、查兼容、校验。
+pub fn verify(file: &Path, stage_in: Option<&Path>, catalog: Catalog) -> Result<Verified, String> {
+    let pkg = read_package(file)?;
+    let name = pkg.manifest.bundle.name.clone();
+    let staged = stage(
+        &name,
+        &pkg.contents(),
+        Some(&pkg.manifest.requires),
+        stage_in,
+        catalog,
+    )?;
+    if staged.meta.name != name || staged.version() != pkg.manifest.bundle.version {
+        return Err(format!(
+            "{MANIFEST} says {name} {}, {} says {} {}",
+            pkg.manifest.bundle.version,
+            bundle::BUNDLE_FILE,
+            staged.meta.name,
+            staged.version()
+        ));
+    }
+    Ok(Verified {
+        staged,
+        manifest: pkg.manifest,
+    })
 }
+
+// ── 换上 ────────────────────────────────────────────────────────────────────
 
 fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
     std::fs::create_dir_all(to)?;
@@ -673,63 +785,56 @@ fn carry_local(old: &Path, new: &Path) {
     }
 }
 
-/// 装进项目的 `.conix/flows/<包名>/`。
-pub fn import(file: &Path, project: &Path, o: &ImportOptions) -> Result<FlowImported, String> {
-    if !project.is_dir() {
-        return Err(format!("{}: not a project directory", project.display()));
+/// `backups/<包>-<时刻>`；同一秒里第二次就加序号。
+pub fn backup_path(backups: &Path, name: &str) -> PathBuf {
+    let stamp = chrono::Utc::now().format("%Y%m%dT%H%M%SZ");
+    let base = backups.join(format!("{name}-{stamp}"));
+    if std::fs::symlink_metadata(&base).is_err() {
+        return base;
     }
-    let v = verify(file, Some(&project.join(STATE)), o.catalog.clone())?;
-    let name = v.manifest.bundle.name.clone();
-    let flows = project.join(PROJECT_FLOWS);
-    let target = flows.join(&name);
-    let exists = std::fs::symlink_metadata(&target).is_ok();
-    if exists && !o.force {
-        return Err(format!(
-            "{} already exists in the project; --force replaces it (the old one is kept in {BACKUPS}/)",
-            target.display()
-        ));
+    (2..)
+        .map(|i| backups.join(format!("{name}-{stamp}-{i}")))
+        .find(|p| std::fs::symlink_metadata(p).is_err())
+        .unwrap_or(base)
+}
+
+/// 把 `target` 整个移进备份目录；回备份到了哪（没有就是 `None`）。
+pub fn back_up(target: &Path, backups: &Path, name: &str) -> Result<Option<PathBuf>, String> {
+    if std::fs::symlink_metadata(target).is_err() {
+        return Ok(None);
     }
-    std::fs::create_dir_all(&flows).map_err(|e| format!("{}: {e}", flows.display()))?;
-    let mut backup = None;
-    if exists {
-        carry_local(&target, &v.dir);
-        let stamp = chrono::Utc::now().format("%Y%m%dT%H%M%SZ");
-        let b = project.join(BACKUPS).join(format!("{name}-{stamp}"));
-        std::fs::create_dir_all(b.parent().unwrap_or(project)).map_err(|e| e.to_string())?;
-        std::fs::rename(&target, &b).map_err(|e| format!("backing up the old {name}: {e}"))?;
-        backup = Some(b);
+    let b = backup_path(backups, name);
+    std::fs::create_dir_all(backups).map_err(|e| format!("{}: {e}", backups.display()))?;
+    std::fs::rename(target, &b).map_err(|e| format!("backing up the old {name}: {e}"))?;
+    Ok(Some(b))
+}
+
+/// 把暂存好的包换到 `target`：旧的（有就）先整个移进 `backups/`，`carry` 时旧的 `local.md` 带过去。
+/// 换不上就把旧的放回去。回旧的备份到了哪。
+pub fn place(
+    staged: Staged,
+    target: &Path,
+    backups: &Path,
+    carry: bool,
+) -> Result<Option<PathBuf>, String> {
+    let name = staged.meta.name.clone();
+    if let Some(parent) = target.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
     }
+    if carry && target.is_dir() {
+        carry_local(target, &staged.dir);
+    }
+    let backup = back_up(target, backups, &name)?;
     // 暂存目录与目标同一个文件系统时 rename 一步到位；不是就复制，失败了把旧的放回去。
-    let placed = std::fs::rename(&v.dir, &target).or_else(|_| copy_tree(&v.dir, &target));
+    let placed = std::fs::rename(&staged.dir, target).or_else(|_| copy_tree(&staged.dir, target));
     if let Err(e) = placed {
-        let _ = std::fs::remove_dir_all(&target);
+        let _ = std::fs::remove_dir_all(target);
         if let Some(b) = &backup {
-            let _ = std::fs::rename(b, &target);
+            let _ = std::fs::rename(b, target);
         }
         return Err(format!("installing {name}: {e}"));
     }
-    let shadows = o
-        .plugin_dirs
-        .iter()
-        .find(|(_, d)| bundle::bundle_in(d, &name).is_some())
-        .map(|(p, _)| format!("plugin {p}"))
-        .or_else(|| {
-            super::builtin::bundles()
-                .contains(&name.as_str())
-                .then(|| "builtin".to_string())
-        });
-    Ok(FlowImported {
-        package: info(&v.manifest, &target),
-        installed: target.to_string_lossy().into_owned(),
-        backup: backup.map(|b| b.to_string_lossy().into_owned()),
-        shadows,
-    })
-}
-
-/// `conix flow inspect`：MANIFEST 原文（读得出来就给）与核对的结果。
-pub struct Inspected {
-    pub manifest: Option<String>,
-    pub verified: Result<FlowPackageInfo, String>,
+    Ok(backup)
 }
 
 /// 归档的事后核对（layout.md §3）：`runs_dir` 是项目的运行账本目录。直接读账本、不经实例：实例开着也只是
@@ -748,6 +853,12 @@ pub fn verify_archive(runs_dir: &Path, dir: &Path) -> harnix_flow::archive::Arch
     harnix_flow::archive::verify(dir, ledger.as_ref())
 }
 
+/// `conix flow inspect`：MANIFEST 原文（读得出来就给）与核对的结果。
+pub struct Inspected {
+    pub manifest: Option<String>,
+    pub verified: Result<FlowPackageInfo, String>,
+}
+
 pub fn inspect(file: &Path) -> Inspected {
     Inspected {
         manifest: manifest_text(file).ok(),
@@ -755,38 +866,48 @@ pub fn inspect(file: &Path) -> Inspected {
     }
 }
 
-/// 没有实例时导出：项目的与内置的流程包（内置的先写到临时目录）；插件的要在实例里导。
-pub fn export_offline(
-    project: &Path,
-    bundle_name: &str,
-    out: Option<&Path>,
-    default_dir: &Path,
-) -> Result<FlowExported, String> {
-    if let Some((dir, _)) = locate(project, &[], None, bundle_name) {
-        return export(&dir, out, default_dir);
-    }
-    if super::builtin::bundles().contains(&bundle_name) {
-        let tmp = tempfile::tempdir().map_err(|e| e.to_string())?;
-        super::builtin::write(tmp.path()).map_err(|e| e.to_string())?;
-        if let Some(dir) = bundle::bundle_in(tmp.path(), bundle_name) {
-            return export(&dir, out, default_dir);
-        }
-    }
-    Err(format!(
-        "no flow bundle {bundle_name} in {} or built in (a plugin's bundle is exported from a running instance: /flow:export)",
-        project.join(PROJECT_FLOWS).display()
-    ))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn xforge_zip(dir: &Path) -> PathBuf {
-        export_offline(dir, "xforge", Some(&dir.join("x.zip")), dir)
+        let src = dir.join("src");
+        super::super::builtin::write(&src).unwrap();
+        export(&src.join("xforge"), Some(&dir.join("x.zip")), dir)
             .unwrap()
             .file
             .into()
+    }
+
+    /// 在项目里 `.conix/flows/<包>/` 下的包导出。
+    fn export_offline(
+        project: &Path,
+        name: &str,
+        out: Option<&Path>,
+        default_dir: &Path,
+    ) -> Result<FlowExported, String> {
+        export(&project.join(PROJECT_FLOWS).join(name), out, default_dir)
+    }
+
+    #[derive(Debug)]
+    struct Imported {
+        package: FlowPackageInfo,
+        backup: Option<String>,
+    }
+
+    /// 直接装进项目（`conix flow import --project` 的那一半，不记 lock）。
+    fn import(file: &Path, project: &Path, force: &bool) -> Result<Imported, String> {
+        let v = verify(file, Some(&project.join(STATE)), default_catalog())?;
+        let target = project.join(PROJECT_FLOWS).join(&v.manifest.bundle.name);
+        if target.exists() && !*force {
+            return Err("already in the project; --force replaces it".into());
+        }
+        let package = v.info();
+        let backup = place(v.staged, &target, &project.join(BACKUPS), true)?;
+        Ok(Imported {
+            package,
+            backup: backup.map(|b| b.to_string_lossy().into_owned()),
+        })
     }
 
     fn project() -> tempfile::TempDir {
@@ -811,12 +932,8 @@ mod tests {
         std::fs::write(file, write_zip(&all).unwrap()).unwrap();
     }
 
-    fn opts(force: bool) -> ImportOptions<'static> {
-        ImportOptions {
-            force,
-            catalog: default_catalog(),
-            plugin_dirs: &[],
-        }
+    fn opts(force: bool) -> bool {
+        force
     }
 
     fn tree(dir: &Path) -> BTreeMap<String, Vec<u8>> {
@@ -866,7 +983,6 @@ mod tests {
         );
         assert!(r.package.commands.contains(&"xspec".to_string()));
         assert!(r.package.command_gates > 0);
-        assert_eq!(r.shadows.as_deref(), Some("builtin"));
         assert!(r.backup.is_none());
         let src = tempfile::tempdir().unwrap();
         super::super::builtin::write(src.path()).unwrap();
@@ -879,6 +995,13 @@ mod tests {
         );
         assert_eq!(installed, built);
         assert!(!installed.contains_key(MANIFEST));
+        // 同样的内容，摘要都一样：内置的、导出的 MANIFEST、装好的目录。
+        let shipped = super::super::builtin::package("xforge").unwrap();
+        assert_eq!(shipped.digest, manifest.digest());
+        assert_eq!(
+            shipped.digest,
+            dir_digest(&b.path().join(PROJECT_FLOWS).join("xforge")).unwrap()
+        );
         let again = import(&z, b.path(), &opts(false)).unwrap_err();
         assert!(again.contains("--force"), "{again}");
         let seen = inspect(&z);
@@ -1114,7 +1237,7 @@ mod tests {
             serde_yaml::from_str(&manifest_text(Path::new(&e.file)).unwrap()).unwrap();
         assert_eq!(m.requires.conix, ">=0.1.0");
         for n in bundle::RESERVED_BUNDLES {
-            assert!(locate(a.path(), &[], None, n).is_none());
+            assert!(stage(n, &[], None, None, default_catalog()).is_err());
         }
     }
 }

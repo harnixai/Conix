@@ -67,12 +67,12 @@ bundles:
     triage: true
 
 flows:
-  - summary: {name: xforge/quick, title: XForge 快速, origin: builtin, active_runs: 0, bundle: xforge}
+  - summary: {name: xforge/quick, title: XForge 快速, origin: project, active_runs: 0, bundle: xforge}
     stations:
       - {"id": "spec", "title": "规格", "work": "session", "exit": ["output"], "status": "pending"}
       - {"id": "apply", "title": "实施", "work": "agent × 2", "exit": ["output", "gate: verify"], "status": "pending"}
       - {"id": "archive", "title": "归档", "work": "command", "exit": ["output"], "status": "pending"}
-  - summary: {name: xforge/solid, title: XForge 稳妥, origin: builtin, active_runs: 0, bundle: xforge}
+  - summary: {name: xforge/solid, title: XForge 稳妥, origin: project, active_runs: 0, bundle: xforge}
     stations:
       - {"id": "spec", "title": "规格", "work": "session", "exit": ["output"], "status": "pending"}
       - {"id": "design", "title": "设计", "work": "session", "exit": ["output"], "status": "pending"}

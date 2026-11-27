@@ -40,5 +40,3 @@ chat_update:
   trusted: "已信任这个项目：它自己的设置与流程从下一轮起生效"
   untrusted: "已不再信任这个项目"
   permission_clamped: "设置不允许这个模式，实际是：{mode}"
-  cmd_flow_export: "把流程包导出成 zip：/flow:export <包> [文件]"
-  cmd_flow_import: "把流程包的 zip 装进项目：/flow:import <文件> [--force]"

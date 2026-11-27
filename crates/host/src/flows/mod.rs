@@ -7,6 +7,8 @@ pub(crate) mod authorize;
 pub mod builtin;
 mod frames;
 mod goto;
+pub mod library;
+pub mod manage;
 mod map;
 pub mod package;
 pub(crate) mod policy;
@@ -26,8 +28,8 @@ use harnix_flow::author::AuthorTools;
 use harnix_flow::dryrun::{Sandbox, SandboxConfig};
 use harnix_flow::runner::{CatalogPacks, CommandBy, CommandCall, Runner, RunnerConfig};
 use harnix_flow::{
-    Actor, CreateIn, DirPacks, Engine, FileStore, MemPacks, Packs, ProjectLayout, RunQuery,
-    RunStatus, Trigger,
+    Actor, CreateIn, DirPacks, Engine, FileStore, Packs, ProjectLayout, RunQuery, RunStatus,
+    Trigger,
 };
 use port::{Command, Event, Job, PortError, Reply, RunId, RunOp};
 use serde_json::Value;
@@ -67,8 +69,9 @@ pub struct FlowsConfig {
     pub command_gates: bool,
     /// 项目的制品目录名（docs/design/layout.md）：运行的目录、流程包的数据与归档都在它下面；`None` 是流程库原来的布局。
     pub artifacts_dir: Option<String>,
-    /// 随 Conix 内置的流程包写到这里再读（[`builtin`]）；`None` 不带内置的包。
-    pub builtin_dir: Option<PathBuf>,
+    /// 全局目录（`~/.conix`）：它下面的流程库（[`library`]）不参与运行，只用来在找不到包时提示
+    /// `conix flow install`；`None` 不提示。
+    pub library_home: Option<PathBuf>,
 }
 
 /// 制品目录缺省的名字。
@@ -146,18 +149,14 @@ pub struct Flows {
     plugin_map: Arc<std::sync::RwLock<crate::plugins::PluginMap>>,
     /// 插件之间同名、没提供出来的流程与件。
     shadowed: std::sync::Mutex<Vec<harnix_flow::Shadowing>>,
-    /// 内置流程包写在哪（[`FlowsConfig::builtin_dir`]）：插件启停重建流程包时还要垫上它。
-    builtin_dir: Option<PathBuf>,
+    /// 全局流程库（[`FlowsConfig::library_dir`]）。
+    library: Option<library::Library>,
 }
 
-/// 垫在项目下面的流程包：插件（按名字）> 库自带的示例包，都只读。没有全局可写层：流程与作业只在项目里，
-/// 存的都进项目自己的 `.conix/flows/`（architecture §8.1）。插件带来的门禁与步骤名进目录，流程只能用目录里有的名字。
-fn build_packs(
-    mounted: &[crate::plugins::Mounted],
-    map: &crate::plugins::PluginMap,
-    builtin: Option<&Path>,
-) -> DirPacks {
-    let mut dir = DirPacks::new(builtin.map(Path::to_path_buf)).with_builtin(MemPacks::examples());
+/// 垫在项目下面的流程包：只有插件的（按名字），都只读。没有内置层、也不读全局库：项目跑的只有装进项目的
+/// `.conix/flows/` 与插件带的（architecture §8.1、flows.md §7.12）。插件带来的门禁与步骤名进目录，流程只能用目录里有的名字。
+fn build_packs(mounted: &[crate::plugins::Mounted], map: &crate::plugins::PluginMap) -> DirPacks {
+    let mut dir = DirPacks::new(Vec::<PathBuf>::new());
     for m in mounted {
         if let Some(d) = m.flows_dir() {
             dir = dir.with_plugin(m.name.clone(), d);
@@ -192,12 +191,7 @@ pub async fn start(hub: &Hub, cfg: FlowsConfig) -> anyhow::Result<Arc<Flows>> {
     };
     let mounted = hub.mounted_plugins().await;
     let map = crate::plugins::PluginMap::build(&mounted);
-    if let Some(d) = &cfg.builtin_dir
-        && let Err(e) = builtin::write(d)
-    {
-        tracing::warn!(dir = %d.display(), error = %e, "the built-in flow bundles were not written");
-    }
-    let dir = build_packs(&mounted, &map, cfg.builtin_dir.as_deref());
+    let dir = build_packs(&mounted, &map);
     let shadowed = dir.shadowed();
     let swap = Arc::new(swap::SwapPacks::new(Arc::new(dir)));
     let plugin_map = Arc::new(std::sync::RwLock::new(map));
@@ -266,7 +260,7 @@ pub async fn start(hub: &Hub, cfg: FlowsConfig) -> anyhow::Result<Arc<Flows>> {
         swap,
         plugin_map,
         shadowed: std::sync::Mutex::new(shadowed),
-        builtin_dir: cfg.builtin_dir.clone(),
+        library: cfg.library_home.as_deref().map(library::Library::new),
     });
     let _ = flows.author.set(AuthorTools::new(
         &runner,
@@ -540,9 +534,7 @@ impl Flows {
 
     pub(crate) async fn detail(&self, name: &str) -> Result<port::FlowDetail, PortError> {
         let packs = self.packs();
-        let (def, _) = packs
-            .flow(name)
-            .ok_or_else(|| PortError::Failed(format!("no flow {name}")))?;
+        let (def, _) = packs.flow(name).ok_or_else(|| self.missing(name))?;
         let summary = self
             .summary_of(name)
             .await
@@ -629,6 +621,10 @@ impl Flows {
         trigger: Option<Trigger>,
         step: bool,
     ) -> Result<port::RunSummary, PortError> {
+        let bundle = flow.split('/').next().unwrap_or(flow);
+        if self.packs().flow(flow).is_none() && self.library_only().iter().any(|n| n == bundle) {
+            return Err(self.missing(flow));
+        }
         let input = CreateIn {
             flow: flow.to_string(),
             subject: subject.to_string(),
@@ -729,71 +725,69 @@ impl Flows {
         }
     }
 
-    /// 启用着的插件的流程目录（按插件名）：导出找来源、导入提醒遮住了谁。
-    async fn plugin_flow_dirs(&self) -> Vec<(String, PathBuf)> {
-        let Some(hub) = self.hub.upgrade() else {
+    /// 全局库里有、项目里没装的包：流程标签与地址找不到包时据此提示 `conix flow install`。
+    pub(crate) fn library_only(&self) -> Vec<String> {
+        let Some(lib) = &self.library else {
             return vec![];
         };
-        hub.mounted_plugins()
-            .await
-            .iter()
-            .filter_map(|m| m.flows_dir().map(|d| (m.name.clone(), d)))
+        let installed: BTreeSet<String> = self.bundles().into_iter().map(|b| b.name).collect();
+        let flows = self.packs().flows();
+        lib.names()
+            .into_iter()
+            .filter(|n| !installed.contains(n) && !flows.iter().any(|f| f == n))
             .collect()
     }
 
-    /// `/flow:export`：项目的、插件的、内置的流程包都能导出；文件省略就写在项目根下。
-    async fn export_bundle(
-        &self,
-        bundle: &str,
-        file: Option<String>,
-    ) -> Result<port::FlowExported, PortError> {
-        let project = Path::new(&self.project);
-        let plugins = self.plugin_flow_dirs().await;
-        let (dir, _) = package::locate(project, &plugins, self.builtin_dir.as_deref(), bundle)
-            .ok_or_else(|| PortError::Failed(format!("no flow bundle {bundle} in this project")))?;
-        let out = file.as_deref().map(|f| project.join(f));
-        let project = project.to_path_buf();
-        tokio::task::spawn_blocking(move || package::export(&dir, out.as_deref(), &project))
-            .await
-            .map_err(|e| PortError::Failed(e.to_string()))?
-            .map_err(PortError::Failed)
+    /// 找不到的流程或包：全局库里有就提示怎么装。
+    fn missing(&self, name: &str) -> PortError {
+        let bundle = name.split('/').next().unwrap_or(name);
+        if self.library_only().iter().any(|n| n == bundle) {
+            return PortError::Failed(format!(
+                "no flow {name} in this project: the flow bundle {bundle} is in the global library but not installed here; run `conix flow install {bundle}` in a terminal"
+            ));
+        }
+        PortError::Failed(format!("no flow {name}"))
     }
 
-    /// `/flow:import`：装进项目、再让列表跟着变。
-    async fn import_package(
-        &self,
-        file: &str,
-        force: bool,
-    ) -> Result<port::FlowImported, PortError> {
-        let project = PathBuf::from(&self.project);
-        let from = project.join(file);
-        let plugins = self.plugin_flow_dirs().await;
-        let catalog = self.packs().catalog();
-        let done = tokio::task::spawn_blocking({
-            let project = project.clone();
-            move || {
-                package::import(
-                    &from,
-                    &project,
-                    &package::ImportOptions {
-                        force,
-                        catalog,
-                        plugin_dirs: &plugins,
-                    },
-                )
+    /// 实例起来时：进行中的运行用的包不在项目里了（比如以前直接用内置的 xforge）——定义与门禁钉在运行里，
+    /// skill 与模板不钉，跑下去会断。回给人看的提示。
+    pub async fn orphaned_runs(&self) -> Vec<String> {
+        let packs = self.packs();
+        let flows = packs.flows();
+        let mut missing: std::collections::BTreeMap<String, Vec<String>> = Default::default();
+        for r in self
+            .engine
+            .list(RunQuery {
+                status: Some(RunStatus::Active),
+                project: Some(self.project.clone()),
+                ..RunQuery::default()
+            })
+            .await
+            .unwrap_or_default()
+        {
+            let bundle = r.flow.split('/').next().unwrap_or(&r.flow).to_string();
+            let present = flows
+                .iter()
+                .any(|f| f == &r.flow || f.split('/').next() == Some(&bundle));
+            if !present {
+                missing.entry(bundle).or_default().push(r.id);
             }
-        })
-        .await
-        .map_err(|e| PortError::Failed(e.to_string()))?
-        .map_err(PortError::Failed)?;
-        self.flows_changed().await;
-        Ok(done)
+        }
+        missing
+            .into_iter()
+            .map(|(b, runs)| {
+                format!(
+                    "runs in flight use the flow bundle {b}, which is not in this project ({}): run `conix flow install {b}` in a terminal, or `conix flow doctor --fix`",
+                    runs.join(", ")
+                )
+            })
+            .collect()
     }
 
     /// 启用着的插件变了：重建流程包、换上新的门禁与步骤，列表跟着刷新。在跑的运行不受影响。
     pub(crate) async fn set_plugins(&self, mounted: &[crate::plugins::Mounted]) {
         let map = crate::plugins::PluginMap::build(mounted);
-        let dir = build_packs(mounted, &map, self.builtin_dir.as_deref());
+        let dir = build_packs(mounted, &map);
         *self.shadowed.locked() = dir.shadowed();
         self.swap.set(Arc::new(dir));
         *self.plugin_map.write().unwrap_or_else(|e| e.into_inner()) = map;
@@ -978,12 +972,11 @@ impl FlowPort for Flows {
                 self.op(&run.0, op).await?;
                 Ok(Reply::Ok)
             }
-            Command::ExportFlow { bundle, file } => Ok(Reply::FlowExported(
-                self.export_bundle(&bundle, file).await?,
-            )),
-            Command::ImportFlow { file, force } => Ok(Reply::FlowImported(
-                self.import_package(&file, force).await?,
-            )),
+            Command::ReloadFlows => {
+                self.flows_changed().await;
+                Ok(Reply::Ok)
+            }
+            Command::ListLibrary => Ok(Reply::Library(self.library_only())),
             other => Err(PortError::Unsupported(other.name().into())),
         }
     }

@@ -19,6 +19,8 @@ pub struct Seed {
     pub flows: Vec<FlowSeed>,
     /// 流程包的目录（`ListBundles`）；不在包里的流程不进来。
     pub bundles: Vec<port::BundleInfo>,
+    /// 全局流程库里有、项目没装的包（`ListLibrary`）。
+    pub library: Vec<String>,
     pub runs: Vec<RunView>,
     pub jobs: Vec<JobSeed>,
     /// 可装的插件包；装好的不进种子，从 `nothing installed` 起步。

@@ -40,5 +40,3 @@ chat_update:
   trusted: "This project is trusted now: its own settings and flows apply from the next turn"
   untrusted: "This project is no longer trusted"
   permission_clamped: "The settings do not allow that mode; it is: {mode}"
-  cmd_flow_export: "Export a flow bundle as a zip: /flow:export <bundle> [file]"
-  cmd_flow_import: "Install a flow bundle zip into the project: /flow:import <file> [--force]"

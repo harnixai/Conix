@@ -458,6 +458,34 @@ impl Drop for Live {
     }
 }
 
+/// 流程库自带的示例流程 `example-review`（平铺布局，连同它的 skill、规则、策略）放进项目自己的 `.conix/flows/`：
+/// 项目只跑装进项目的流程（flows.md §7.12），没有内置层了。项目受信才读。
+pub fn install_example_review(project: &std::path::Path) {
+    let root = project.join(".conix/flows");
+    for (rel, text) in [
+        (
+            "example-review.yaml",
+            include_str!("../../../flow/packs/examples/flows/example-review.yaml"),
+        ),
+        (
+            "skills/review/SKILL.md",
+            include_str!("../../../flow/packs/examples/skills/review/SKILL.md"),
+        ),
+        (
+            "rules/review-honest.md",
+            include_str!("../../../flow/packs/examples/rules/review-honest.md"),
+        ),
+        (
+            "policies/read-only.yaml",
+            include_str!("../../../flow/packs/examples/policies/read-only.yaml"),
+        ),
+    ] {
+        let p = root.join(rel);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, text).unwrap();
+    }
+}
+
 /// 一个 git 示例项目：有一个文件、提交过一次。
 fn read_json_file(p: &std::path::Path) -> serde_json::Value {
     let text = std::fs::read_to_string(p).unwrap_or_else(|e| panic!("{}：{e}", p.display()));

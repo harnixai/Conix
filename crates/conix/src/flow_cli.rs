@@ -1,56 +1,152 @@
-//! `conix flow export | import | inspect`：流程包与包文件互转（docs/design/flows.md §7.12）。不需要实例：
-//! 项目的与内置的流程包在这里直接读；插件的流程包要在实例里导（`/flow:export`）。
+//! `conix flow …`：流程包的管理，只在命令行（docs/design/flows.md §7.12）。全局库在 `~/.conix/flows/`，
+//! 项目跑的是装进项目 `.conix/flows/` 的；规矩在 `host::flows::manage`，这里只管参数、给人看计划、确认、
+//! 做完后告诉在跑的实例重读流程。不需要实例。
 
+use std::io::{BufRead as _, IsTerminal as _, Write as _};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result, bail};
-use host::flows::package::{self, ImportOptions};
+use host::flows::library::{BootNote, BuiltinState, Library};
+use host::flows::manage::{self, Action, Ctx, Plan, Status, Where};
+use host::flows::package;
+
+#[derive(clap::Args)]
+pub struct FlowArgs {
+    #[command(subcommand)]
+    pub cmd: FlowCmd,
+    /// 项目目录；省略则是当前目录所在的项目。
+    #[arg(short = 'C', long, global = true, value_name = "DIR")]
+    pub project_dir: Option<PathBuf>,
+    /// 不问，直接做。
+    #[arg(short, long, global = true)]
+    pub yes: bool,
+    /// 只列出要做什么，不做。
+    #[arg(long, global = true)]
+    pub dry_run: bool,
+}
 
 #[derive(clap::Subcommand)]
 pub enum FlowCmd {
-    /// 把流程包导出成 zip。
-    Export {
-        /// 流程包的名字（项目里的或内置的）。
-        bundle: String,
-        /// 写到哪：文件，或已有的目录；省略则写在当前目录。
-        #[arg(short, long)]
-        output: Option<PathBuf>,
+    /// 列出流程包与状态：项目的（缺省）、全局的、两边对照。
+    List {
+        #[arg(long, conflicts_with = "all")]
+        global: bool,
         #[arg(long)]
-        project: Option<PathBuf>,
+        all: bool,
     },
-    /// 把包文件装进项目的 `.conix/flows/`。
-    Import {
-        file: PathBuf,
-        /// 已有同名的流程包就覆盖（旧的先备份）。
+    /// 一个包的说明、流程、命令、版本、要求的 Conix、来源。
+    Show {
+        bundle: String,
+        #[arg(long)]
+        global: bool,
+    },
+    /// 从全局库装进项目。
+    Install {
+        bundle: String,
         #[arg(long)]
         force: bool,
+    },
+    /// 用全局库里的更新项目里装的。
+    Update {
+        bundle: Option<String>,
+        #[arg(long, conflicts_with = "bundle")]
+        all: bool,
         #[arg(long)]
-        project: Option<PathBuf>,
+        force: bool,
+    },
+    /// 删掉项目的（缺省）或全局库的，都先备份。
+    Remove {
+        bundle: String,
+        #[arg(long)]
+        global: bool,
+        #[arg(long)]
+        force: bool,
+    },
+    /// 把全局库里的内置包恢复成这个 Conix 带的那版。
+    Reset {
+        bundle: Option<String>,
+        #[arg(long, conflicts_with = "bundle")]
+        all: bool,
+    },
+    /// 把流程包导出成 zip。
+    Export {
+        bundle: String,
+        #[arg(long)]
+        global: bool,
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+    },
+    /// 把包文件导入全局库（缺省）或项目。
+    Import {
+        file: PathBuf,
+        #[arg(long)]
+        project: bool,
+        #[arg(long)]
+        force: bool,
     },
     /// 看包里的 MANIFEST 并核对：不装。
     Inspect { file: PathBuf },
     /// 核对一份归档：文件与 record.json 的清单、证据与确认的摘要、record.json 与运行账本。
     Verify {
-        dir: PathBuf,
-        #[arg(long)]
-        project: Option<PathBuf>,
+        #[arg(required_unless_present = "all")]
+        dir: Option<PathBuf>,
+        #[arg(long, conflicts_with = "dir")]
+        all: bool,
     },
 }
 
 /// 帮助文字按当前语言重写（见 `main::localized_command`）。
 pub fn localize(c: clap::Command) -> clap::Command {
+    let force = |c: clap::Command| c.mut_arg("force", |a| a.help(i18n::t!("app.cli.flow_force")));
+    let bundle =
+        |c: clap::Command| c.mut_arg("bundle", |a| a.help(i18n::t!("app.cli.flow_bundle")));
+    let global = |c: clap::Command, key: &str| c.mut_arg("global", |a| a.help(i18n::tr(key)));
     c.about(i18n::t!("app.cli.flow"))
+        .mut_arg("project_dir", |a| a.help(i18n::t!("app.cli.flow_project")))
+        .mut_arg("yes", |a| a.help(i18n::t!("app.cli.flow_yes")))
+        .mut_arg("dry_run", |a| a.help(i18n::t!("app.cli.flow_dry_run")))
+        .mut_subcommand("list", |c| {
+            c.about(i18n::t!("app.cli.flow_list"))
+                .mut_arg("global", |a| a.help(i18n::t!("app.cli.flow_list_global")))
+                .mut_arg("all", |a| a.help(i18n::t!("app.cli.flow_list_all")))
+        })
+        .mut_subcommand("show", |c| {
+            global(
+                bundle(c.about(i18n::t!("app.cli.flow_show"))),
+                "app.cli.flow_in_global",
+            )
+        })
+        .mut_subcommand("install", |c| {
+            force(bundle(c.about(i18n::t!("app.cli.flow_install"))))
+        })
+        .mut_subcommand("update", |c| {
+            force(bundle(c.about(i18n::t!("app.cli.flow_update"))))
+                .mut_arg("all", |a| a.help(i18n::t!("app.cli.flow_update_all")))
+        })
+        .mut_subcommand("remove", |c| {
+            global(
+                force(bundle(c.about(i18n::t!("app.cli.flow_remove")))),
+                "app.cli.flow_in_global",
+            )
+            .mut_arg("force", |a| a.help(i18n::t!("app.cli.flow_remove_force")))
+        })
+        .mut_subcommand("reset", |c| {
+            bundle(c.about(i18n::t!("app.cli.flow_reset")))
+                .mut_arg("all", |a| a.help(i18n::t!("app.cli.flow_reset_all")))
+        })
         .mut_subcommand("export", |c| {
-            c.about(i18n::t!("app.cli.flow_export"))
-                .mut_arg("bundle", |a| a.help(i18n::t!("app.cli.flow_bundle")))
-                .mut_arg("output", |a| a.help(i18n::t!("app.cli.flow_output")))
-                .mut_arg("project", |a| a.help(i18n::t!("app.cli.flow_project")))
+            global(
+                bundle(c.about(i18n::t!("app.cli.flow_export"))),
+                "app.cli.flow_in_global",
+            )
+            .mut_arg("output", |a| a.help(i18n::t!("app.cli.flow_output")))
         })
         .mut_subcommand("import", |c| {
-            c.about(i18n::t!("app.cli.flow_import"))
+            force(c.about(i18n::t!("app.cli.flow_import")))
                 .mut_arg("file", |a| a.help(i18n::t!("app.cli.flow_file")))
-                .mut_arg("force", |a| a.help(i18n::t!("app.cli.flow_force")))
-                .mut_arg("project", |a| a.help(i18n::t!("app.cli.flow_project")))
+                .mut_arg("project", |a| {
+                    a.help(i18n::t!("app.cli.flow_import_project"))
+                })
         })
         .mut_subcommand("inspect", |c| {
             c.about(i18n::t!("app.cli.flow_inspect"))
@@ -59,8 +155,26 @@ pub fn localize(c: clap::Command) -> clap::Command {
         .mut_subcommand("verify", |c| {
             c.about(i18n::t!("app.cli.flow_verify"))
                 .mut_arg("dir", |a| a.help(i18n::t!("app.cli.flow_archive_dir")))
-                .mut_arg("project", |a| a.help(i18n::t!("app.cli.flow_project")))
+                .mut_arg("all", |a| a.help(i18n::t!("app.cli.flow_verify_all")))
         })
+}
+
+/// 起来时把内置包解进全局库、升级没改过的（flows.md §7.12）；每件事一行提示，写到 stderr。
+pub fn bootstrap(home: &Path) {
+    for n in Library::new(home).bootstrap() {
+        let line = match n {
+            BootNote::Extracted { name, version } => {
+                i18n::t!("flowlib.boot_extracted", name = name, version = version)
+            }
+            BootNote::Upgraded { name, from, to } => {
+                i18n::t!("flowlib.boot_upgraded", name = name, from = from, to = to)
+            }
+            BootNote::Failed { name, error } => {
+                i18n::t!("flowlib.boot_failed", name = name, error = error)
+            }
+        };
+        eprintln!("{line}");
+    }
 }
 
 fn project_of(given: Option<PathBuf>, here: impl FnOnce() -> Result<PathBuf>) -> Result<PathBuf> {
@@ -78,18 +192,95 @@ fn join(v: &[String]) -> String {
     }
 }
 
-/// 跑一条子命令；`here` 给出没写 `--project` 时的项目（和直接运行 `conix` 一样）。
-pub fn run(cmd: FlowCmd, here: impl FnOnce() -> Result<PathBuf>) -> Result<()> {
-    match cmd {
+fn err(e: String) -> anyhow::Error {
+    anyhow::Error::msg(e)
+}
+
+/// 跑一条子命令；`here` 给出没写 `-C` 时的项目（和直接运行 `conix` 一样），`home` 是全局目录。
+pub fn run(args: FlowArgs, home: &Path, here: impl FnOnce() -> Result<PathBuf>) -> Result<()> {
+    let project = project_of(args.project_dir, here)?;
+    let ctx = Ctx::new(&project, home);
+    let confirm = Confirm {
+        yes: args.yes,
+        dry_run: args.dry_run,
+    };
+    match args.cmd {
+        FlowCmd::List { global, all } => list(&ctx, global, all),
+        FlowCmd::Show { bundle, global } => show(&ctx, &bundle, global),
+        FlowCmd::Install { bundle, force } => {
+            let plan = manage::plan_install(&ctx, &bundle, force).map_err(err)?;
+            change(&ctx, home, vec![plan], vec![], &confirm)
+        }
+        FlowCmd::Update { bundle, all, force } => {
+            let names = match (bundle, all) {
+                (Some(b), _) => vec![b],
+                (None, true) => {
+                    let lock = manage::read_lock(&project).map_err(err)?;
+                    lock.bundles
+                        .keys()
+                        .filter(|n| ctx.project_dir(n).is_some())
+                        .cloned()
+                        .collect()
+                }
+                (None, false) => bail!("{}", i18n::t!("flowlib.cli_update_which")),
+            };
+            let (mut plans, mut errors) = (vec![], vec![]);
+            for n in names {
+                match manage::plan_update(&ctx, &n, force) {
+                    Ok(p) => plans.push(p),
+                    Err(e) => errors.push(e),
+                }
+            }
+            change(&ctx, home, plans, errors, &confirm)
+        }
+        FlowCmd::Remove {
+            bundle,
+            global,
+            force,
+        } => {
+            let plan = manage::plan_remove(&ctx, &bundle, global, force).map_err(err)?;
+            change(&ctx, home, vec![plan], vec![], &confirm)
+        }
+        FlowCmd::Reset { bundle, all } => {
+            let names: Vec<String> = match (bundle, all) {
+                (Some(b), _) => vec![b],
+                (None, true) => host::flows::builtin::bundles()
+                    .into_iter()
+                    .map(String::from)
+                    .collect(),
+                (None, false) => bail!("{}", i18n::t!("flowlib.cli_reset_which")),
+            };
+            let (mut plans, mut errors) = (vec![], vec![]);
+            for n in names {
+                match manage::plan_reset(&ctx, &n) {
+                    Ok(p) => plans.push(p),
+                    Err(e) => errors.push(e),
+                }
+            }
+            change(&ctx, home, plans, errors, &confirm)
+        }
         FlowCmd::Export {
             bundle,
+            global,
             output,
-            project,
         } => {
-            let project = project_of(project, here)?;
+            let dir = if global {
+                ctx.library.dir(&bundle)
+            } else {
+                ctx.project_dir(&bundle)
+            };
+            let Some(dir) = dir else {
+                bail!(
+                    "{}",
+                    if global {
+                        i18n::t!("flowlib.no_global", name = bundle)
+                    } else {
+                        i18n::t!("flowlib.not_in_project", name = bundle)
+                    }
+                );
+            };
             let cwd = std::env::current_dir()?;
-            let e = package::export_offline(&project, &bundle, output.as_deref(), &cwd)
-                .map_err(anyhow::Error::msg)?;
+            let e = package::export(&dir, output.as_deref(), &cwd).map_err(err)?;
             println!(
                 "{}",
                 i18n::t!(
@@ -101,57 +292,15 @@ pub fn run(cmd: FlowCmd, here: impl FnOnce() -> Result<PathBuf>) -> Result<()> {
                     file = e.file
                 )
             );
+            Ok(())
         }
         FlowCmd::Import {
             file,
-            force,
             project,
+            force,
         } => {
-            let project = project_of(project, here)?;
-            let r = package::import(
-                &file,
-                &project,
-                &ImportOptions {
-                    force,
-                    catalog: package::default_catalog(),
-                    plugin_dirs: &[],
-                },
-            )
-            .map_err(anyhow::Error::msg)?;
-            let p = &r.package;
-            println!(
-                "{}",
-                i18n::t!(
-                    "app.flow_imported",
-                    name = p.name,
-                    version = p.version,
-                    conix = p.conix_version
-                )
-            );
-            println!(
-                "{}",
-                i18n::t!("app.flow_imported_flows", flows = join(&p.flows))
-            );
-            println!(
-                "{}",
-                i18n::t!("app.flow_imported_commands", commands = join(&p.commands))
-            );
-            println!(
-                "{}",
-                i18n::t!("app.flow_imported_installed", dir = r.installed)
-            );
-            if let Some(b) = r.backup {
-                eprintln!("{}", i18n::t!("app.flow_warn_backup", dir = b));
-            }
-            if let Some(by) = r.shadows {
-                eprintln!(
-                    "{}",
-                    i18n::t!("app.flow_warn_shadows", name = p.name, by = by)
-                );
-            }
-            if p.command_gates > 0 {
-                eprintln!("{}", i18n::t!("app.flow_warn_gates", n = p.command_gates));
-            }
+            let plan = manage::plan_import(&ctx, &file, project, force).map_err(err)?;
+            change(&ctx, home, vec![plan], vec![], &confirm)
         }
         FlowCmd::Inspect { file } => {
             let seen = package::inspect(Path::new(&file));
@@ -165,19 +314,388 @@ pub fn run(cmd: FlowCmd, here: impl FnOnce() -> Result<PathBuf>) -> Result<()> {
                     bail!("{}", i18n::t!("app.flow_inspect_failed", reason = reason))
                 }
             }
+            Ok(())
         }
-        FlowCmd::Verify { dir, project } => {
-            let project = project_of(project, here)?;
+        FlowCmd::Verify { dir, all: _ } => {
             let runs = client::layout::ProjectState::new(&project).flow_runs();
+            let Some(dir) = dir else {
+                bail!("{}", i18n::t!("flowlib.cli_verify_which"));
+            };
             let r = package::verify_archive(&runs, &dir);
             print_report(&r);
             if !r.ok {
                 bail!("{}", i18n::t!("app.flow_verify_failed"));
             }
             println!("{}", i18n::t!("app.flow_verify_ok", n = r.checked));
+            Ok(())
         }
     }
+}
+
+// ── 看 ──────────────────────────────────────────────────────────────────────
+
+fn status_text(s: &Status) -> String {
+    match s {
+        Status::Installed => i18n::t!("flowlib.st_installed"),
+        Status::Modified => i18n::t!("flowlib.st_modified"),
+        Status::Update(v) => i18n::t!("flowlib.st_update", version = v),
+        Status::ProjectOnly => i18n::t!("flowlib.st_project_only"),
+        Status::NotInstalled => i18n::t!("flowlib.st_not_installed"),
+    }
+}
+
+fn builtin_text(b: Option<BuiltinState>, newer: Option<&str>) -> Option<String> {
+    let s = match b? {
+        BuiltinState::Pristine => i18n::t!("flowlib.bi_pristine"),
+        BuiltinState::Modified => i18n::t!("flowlib.bi_modified"),
+        BuiltinState::Removed => i18n::t!("flowlib.bi_removed"),
+        BuiltinState::Missing => i18n::t!("flowlib.bi_missing"),
+    };
+    Some(match newer {
+        Some(v) => format!("{s}{}", i18n::t!("flowlib.bi_newer", version = v)),
+        None => s,
+    })
+}
+
+/// 这个 Conix 带的内置版比库里那份的底子新：回新的版本。
+fn newer_shipped(row: &manage::Row) -> Option<String> {
+    let b = host::flows::builtin::package(&row.name)?;
+    let base = row.entry.as_ref()?.shipped.as_ref()?;
+    let newer = host::flows::library::version_key(&b.version)
+        > host::flows::library::version_key(&base.version);
+    (newer && row.builtin == Some(BuiltinState::Modified)).then_some(b.version)
+}
+
+fn global_text(row: &manage::Row) -> String {
+    let mut parts = vec![];
+    if let Some(g) = &row.global {
+        parts.push(g.version.clone());
+    }
+    if let Some(e) = &row.entry {
+        parts.push(e.source.as_str().to_string());
+    }
+    if let Some(b) = builtin_text(row.builtin, newer_shipped(row).as_deref()) {
+        parts.push(b);
+    }
+    if parts.is_empty() {
+        "-".into()
+    } else {
+        parts.join("  ")
+    }
+}
+
+fn list(ctx: &Ctx, global: bool, all: bool) -> Result<()> {
+    let rows = manage::rows(ctx).map_err(err)?;
+    let width = rows.iter().map(|r| r.name.len()).max().unwrap_or(4).max(4);
+    let pv = |r: &manage::Row| {
+        r.project
+            .as_ref()
+            .map(|p| p.version.clone())
+            .unwrap_or_else(|| "-".into())
+    };
+    let st = |r: &manage::Row| {
+        r.statuses()
+            .iter()
+            .map(status_text)
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let mut any = false;
+    for r in &rows {
+        if global {
+            if r.global.is_none() && r.entry.is_none() {
+                continue;
+            }
+            println!("{:<width$}  {}", r.name, global_text(r));
+        } else if all {
+            println!(
+                "{:<width$}  {}  {:<10}  {}  {}",
+                r.name,
+                i18n::t!("flowlib.col_project"),
+                format!("{} {}", pv(r), st(r)),
+                i18n::t!("flowlib.col_global"),
+                global_text(r)
+            );
+        } else {
+            if r.project.is_none() && r.lock.is_none() {
+                continue;
+            }
+            let s = if r.project.is_none() {
+                i18n::t!("flowlib.st_gone")
+            } else {
+                st(r)
+            };
+            println!("{:<width$}  {:<8}  {s}", r.name, pv(r));
+        }
+        any = true;
+    }
+    if !any {
+        println!(
+            "{}",
+            if global {
+                i18n::t!("flowlib.list_none_global")
+            } else {
+                i18n::t!("flowlib.list_none_project")
+            }
+        );
+    }
     Ok(())
+}
+
+fn show(ctx: &Ctx, name: &str, global: bool) -> Result<()> {
+    let row = manage::row(ctx, name).map_err(err)?;
+    let side = if global { &row.global } else { &row.project };
+    let Some(side) = side else {
+        bail!(
+            "{}",
+            if global {
+                i18n::t!("flowlib.no_global", name = name)
+            } else {
+                i18n::t!("flowlib.not_in_project", name = name)
+            }
+        );
+    };
+    let info = package::describe(&side.dir).map_err(err)?;
+    println!("{} {}  {}", info.name, info.version, info.title);
+    if !info.description.is_empty() {
+        println!("{}", info.description);
+    }
+    println!(
+        "{}",
+        i18n::t!("flowlib.show_requires", requires = info.requires_conix)
+    );
+    println!(
+        "{}",
+        i18n::t!("app.flow_imported_flows", flows = join(&info.flows))
+    );
+    println!(
+        "{}",
+        i18n::t!(
+            "app.flow_imported_commands",
+            commands = join(&info.commands)
+        )
+    );
+    if info.command_gates > 0 {
+        println!("{}", i18n::t!("flowlib.note_gates", n = info.command_gates));
+    }
+    let source = if global {
+        global_text(&row)
+    } else {
+        match &row.lock {
+            Some(l) => format!(
+                "{}  {}",
+                i18n::t!("flowlib.show_from_global", version = l.version, at = l.at),
+                row.statuses()
+                    .iter()
+                    .map(status_text)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+            None => i18n::t!("flowlib.st_project_only"),
+        }
+    };
+    println!("{}", i18n::t!("flowlib.show_source", source = source));
+    println!("{}", i18n::t!("flowlib.show_dir", dir = side.dir.display()));
+    Ok(())
+}
+
+// ── 改 ──────────────────────────────────────────────────────────────────────
+
+struct Confirm {
+    yes: bool,
+    dry_run: bool,
+}
+
+fn where_text(w: Where) -> String {
+    match w {
+        Where::Project => i18n::t!("flowlib.where_project"),
+        Where::Global => i18n::t!("flowlib.where_global"),
+    }
+}
+
+const SHOWN: usize = 12;
+
+fn print_files(mark: &str, files: &[String]) {
+    for f in files.iter().take(SHOWN) {
+        println!("    {mark} {f}");
+    }
+    if files.len() > SHOWN {
+        println!(
+            "    {}",
+            i18n::t!("flowlib.and_more", n = files.len() - SHOWN).trim()
+        );
+    }
+}
+
+fn print_plan(p: &Plan) {
+    if p.action == Action::Clean {
+        println!(
+            "{}",
+            i18n::t!("flowlib.plan_clean", place = where_text(p.target))
+        );
+        for path in &p.paths {
+            println!("    - {}", path.display());
+        }
+        for o in &p.orphans {
+            println!("    {}", i18n::t!("flowlib.plan_orphan", name = o));
+        }
+        if let Some(n) = &p.noop {
+            println!("  {n}");
+        }
+        return;
+    }
+    let versions = match (&p.from, &p.to) {
+        (Some(a), Some(b)) => format!("{a} → {b}"),
+        (None, Some(b)) => b.clone(),
+        (Some(a), None) => a.clone(),
+        (None, None) => String::new(),
+    };
+    println!(
+        "{}",
+        i18n::t!(
+            "flowlib.plan_head",
+            action = p.action.as_str(),
+            name = p.bundle,
+            versions = versions,
+            place = where_text(p.target)
+        )
+    );
+    if let Some(n) = &p.noop {
+        println!("  {n}");
+        return;
+    }
+    let c = &p.changes;
+    if !c.is_empty() {
+        println!(
+            "  {}",
+            i18n::t!(
+                "flowlib.plan_files",
+                added = c.added.len(),
+                changed = c.changed.len(),
+                removed = c.removed.len()
+            )
+        );
+        print_files("+", &c.added);
+        print_files("~", &c.changed);
+        print_files("-", &c.removed);
+    }
+    if let Some(b) = &p.backup {
+        println!("  {}", i18n::t!("flowlib.plan_backup", dir = b.display()));
+    }
+    for n in &p.notes {
+        println!("  {n}");
+    }
+}
+
+/// 列出计划、确认、照做；做完了项目的告诉在跑的实例。`errors` 是计划不出来的那几个，最后报错退出。
+fn change(
+    ctx: &Ctx,
+    home: &Path,
+    plans: Vec<Plan>,
+    errors: Vec<String>,
+    c: &Confirm,
+) -> Result<()> {
+    for e in &errors {
+        eprintln!("{e}");
+    }
+    for p in &plans {
+        print_plan(p);
+    }
+    let todo: Vec<&Plan> = plans.iter().filter(|p| !p.is_noop()).collect();
+    let finish = |errors: &[String]| -> Result<()> {
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            bail!("{}", i18n::t!("flowlib.cli_some_failed", n = errors.len()))
+        }
+    };
+    if todo.is_empty() || c.dry_run {
+        if c.dry_run && !todo.is_empty() {
+            println!("{}", i18n::t!("flowlib.cli_dry_run"));
+        }
+        return finish(&errors);
+    }
+    if !c.yes {
+        if !std::io::stdin().is_terminal() {
+            bail!("{}", i18n::t!("flowlib.cli_need_yes"));
+        }
+        print!("{} ", i18n::t!("flowlib.cli_ask"));
+        std::io::stdout().flush()?;
+        let mut answer = String::new();
+        std::io::stdin().lock().read_line(&mut answer)?;
+        if !matches!(answer.trim(), "y" | "Y" | "yes" | "YES" | "Yes") {
+            println!("{}", i18n::t!("flowlib.cli_cancelled"));
+            return Ok(());
+        }
+    }
+    let mut errors = errors;
+    let mut touched_project = false;
+    for p in todo {
+        match manage::apply(ctx, p) {
+            Ok(done) => {
+                touched_project |= p.target == Where::Project;
+                println!(
+                    "{}",
+                    i18n::t!("flowlib.done", action = p.action.as_str(), name = p.bundle)
+                );
+                if let Some(b) = done.backup {
+                    println!("  {}", i18n::t!("flowlib.done_backup", dir = b.display()));
+                }
+            }
+            Err(e) => {
+                eprintln!("{e}");
+                errors.push(e);
+            }
+        }
+    }
+    if touched_project && let Some(name) = notify_instance(home, &ctx.project) {
+        println!("{}", i18n::t!("flowlib.notified", name = name));
+    }
+    finish(&errors)
+}
+
+/// 这个项目若有实例在跑，经它的 socket 让它重读流程（尽力而为：不在、连不上都不算错）。回实例名。
+fn notify_instance(home: &Path, project: &Path) -> Option<String> {
+    use std::os::unix::net::UnixStream;
+    use std::time::Duration;
+    let layout = client::Layout::new(home);
+    let want = project
+        .canonicalize()
+        .unwrap_or_else(|_| project.to_path_buf());
+    for e in std::fs::read_dir(layout.instances()).ok()?.flatten() {
+        let Some(name) = e.file_name().into_string().ok() else {
+            continue;
+        };
+        let Some(f) = client::layout::read_json::<client::InstanceFile>(&layout.discovery(&name))
+        else {
+            continue;
+        };
+        if f.project.as_deref().map(Path::new) != Some(want.as_path()) || !client::pid_alive(f.pid)
+        {
+            continue;
+        }
+        let Ok(mut s) = UnixStream::connect(layout.socket(&name)) else {
+            continue;
+        };
+        let _ = s.set_read_timeout(Some(Duration::from_secs(5)));
+        let _ = s.set_write_timeout(Some(Duration::from_secs(5)));
+        let frame = port::link::ClientFrame {
+            id: 1,
+            cmd: port::Command::ReloadFlows,
+        };
+        let Ok(mut line) = serde_json::to_string(&frame) else {
+            continue;
+        };
+        line.push('\n');
+        if s.write_all(line.as_bytes()).is_err() {
+            continue;
+        }
+        let mut reply = String::new();
+        if std::io::BufReader::new(&s).read_line(&mut reply).is_ok() && !reply.is_empty() {
+            return Some(name);
+        }
+    }
+    None
 }
 
 fn print_report(r: &package::archive::ArchiveReport) {

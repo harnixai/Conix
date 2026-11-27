@@ -73,6 +73,39 @@ async fn rig() -> Rig {
     rig_in(PROJECT).await
 }
 
+/// 一个项目，里面放着流程库自带的示例流程（`example-review` 与一条两站的）：没有内置层了，项目跑的只有项目里的。
+fn example_project(dir: &std::path::Path) -> std::path::PathBuf {
+    let project = dir.join("p");
+    let flows = project.join(".conix/flows");
+    for (rel, text) in [
+        (
+            "example-review.yaml",
+            include_str!("../../../flow/packs/examples/flows/example-review.yaml"),
+        ),
+        (
+            "skills/review/SKILL.md",
+            include_str!("../../../flow/packs/examples/skills/review/SKILL.md"),
+        ),
+        (
+            "rules/review-honest.md",
+            include_str!("../../../flow/packs/examples/rules/review-honest.md"),
+        ),
+        (
+            "policies/read-only.yaml",
+            include_str!("../../../flow/packs/examples/policies/read-only.yaml"),
+        ),
+        (
+            "two-step.yaml",
+            "name: two-step\nstations:\n  - {id: a, exit: [{kind: confirm}]}\n",
+        ),
+    ] {
+        let p = flows.join(rel);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, text).unwrap();
+    }
+    project
+}
+
 async fn rig_in(project: &str) -> Rig {
     let fake = Arc::new(Fake {
         calls: Mutex::default(),
@@ -261,8 +294,9 @@ async fn a_closed_session_is_gone_and_its_stream_ends() {
 /// 流程作业的流程：`#n` 按流程列表认成名字，名字照认，不在的说清楚，inputs 要合流程的 schema。
 #[tokio::test]
 async fn a_flow_jobs_flow_is_resolved_and_its_inputs_checked() {
-    let r = rig().await;
     let dir = tempfile::tempdir().unwrap();
+    let project = example_project(dir.path());
+    let r = rig_in(project.to_str().unwrap()).await;
     let flows = super::start(
         &r.hub,
         super::FlowsConfig {
@@ -272,7 +306,7 @@ async fn a_flow_jobs_flow_is_resolved_and_its_inputs_checked() {
             policies_file: None,
             command_gates: true,
             artifacts_dir: None,
-            builtin_dir: None,
+            library_home: None,
         },
     )
     .await
@@ -305,8 +339,7 @@ async fn a_flow_jobs_flow_is_resolved_and_its_inputs_checked() {
 #[tokio::test]
 async fn project_runs_span_flows_and_an_ended_run_is_run_again() {
     let dir = tempfile::tempdir().unwrap();
-    let project = dir.path().join("p");
-    std::fs::create_dir_all(&project).unwrap();
+    let project = example_project(dir.path());
     let r = rig_in(project.to_str().unwrap()).await;
     let flows = super::start(
         &r.hub,
@@ -317,7 +350,7 @@ async fn project_runs_span_flows_and_an_ended_run_is_run_again() {
             policies_file: None,
             command_gates: true,
             artifacts_dir: None,
-            builtin_dir: None,
+            library_home: None,
         },
     )
     .await
@@ -384,7 +417,7 @@ fn the_shipped_xforge_flows_and_gates_hold_together() {
         section,
     }];
     let map = crate::plugins::PluginMap::build(&mounted);
-    let packs = super::build_packs(&mounted, &map, None).with_catalog(harnix_flow::Catalog {
+    let packs = super::build_packs(&mounted, &map).with_catalog(harnix_flow::Catalog {
         scenes: [super::SCENE.to_string()].into(),
         gates: map.gates.keys().cloned().collect(),
         steps: map.steps.keys().cloned().collect(),
@@ -493,7 +526,7 @@ async fn bundle_rig() -> BundleRig {
             policies_file: None,
             command_gates: true,
             artifacts_dir: Some("conix".into()),
-            builtin_dir: None,
+            library_home: None,
         },
     )
     .await
@@ -858,4 +891,65 @@ async fn a_run_switches_to_another_flow_of_its_bundle_while_its_first_station_is
         .is_err()
     );
     t.flows.stop().await;
+}
+
+/// 全局流程库不参与项目的运行（flows.md §7.12）：库里的 xforge 不在流程列表里，起不了运行，找它时说怎么装；
+/// 装进项目、重读之后才有。
+#[tokio::test]
+async fn the_global_library_is_not_run_until_a_bundle_is_installed() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join("home");
+    let project = dir.path().join("p");
+    std::fs::create_dir_all(&project).unwrap();
+    super::library::Library::new(&home).bootstrap();
+    let r = rig_in(project.to_str().unwrap()).await;
+    let flows = super::start(
+        &r.hub,
+        super::FlowsConfig {
+            runs_dir: dir.path().join("runs"),
+            worktrees_dir: dir.path().join(".wkts"),
+            workspaces_dir: dir.path().join("ws"),
+            policies_file: None,
+            command_gates: true,
+            artifacts_dir: Some("conix".into()),
+            library_home: Some(home.clone()),
+        },
+    )
+    .await
+    .unwrap();
+    use crate::hub::FlowPort;
+    assert!(
+        !flows
+            .summaries()
+            .await
+            .iter()
+            .any(|f| f.name.starts_with("xforge/")),
+        "no built-in layer"
+    );
+    let port::Reply::Library(lib) = flows.command(port::Command::ListLibrary).await.unwrap() else {
+        panic!("library")
+    };
+    assert_eq!(lib, ["xforge"]);
+    let e = flows
+        .start_run("xforge/quick", "s", json!({}), None)
+        .await
+        .unwrap_err();
+    assert!(e.to_string().contains("conix flow install xforge"), "{e}");
+
+    let ctx = super::manage::Ctx::new(&project, &home);
+    let plan = super::manage::plan_install(&ctx, "xforge", false).unwrap();
+    super::manage::apply(&ctx, &plan).unwrap();
+    flows.command(port::Command::ReloadFlows).await.unwrap();
+    assert!(
+        flows
+            .summaries()
+            .await
+            .iter()
+            .any(|f| f.name == "xforge/quick" && f.origin == port::FlowOrigin::Project)
+    );
+    let port::Reply::Library(lib) = flows.command(port::Command::ListLibrary).await.unwrap() else {
+        panic!("library")
+    };
+    assert!(lib.is_empty(), "{lib:?}");
+    flows.stop().await;
 }

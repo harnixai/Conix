@@ -1,6 +1,6 @@
 //! 随 Conix 内置的流程包：`examples/xforge/.conix/flows/` 下带 `bundle.yaml` 的每个目录（docs/design/layout.md）。
-//! 演示项目就是它们的源头，改那里就是改内置的；这里把每个文件编进二进制（`builtin_bundles.rs`），实例起来时
-//! 写到项目的 `.conix/state/conix/flows-builtin/` 再读（`flows::builtin`）。
+//! 演示项目就是它们的源头，改那里就是改内置的；这里把每个文件编进二进制（`builtin_bundles.rs`），`conix` 起来时
+//! 解进全局库 `~/.conix/flows/`（`flows::builtin`、`flows::library`）。
 
 use std::path::{Path, PathBuf};
 

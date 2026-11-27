@@ -57,11 +57,8 @@ enum Cmd {
     Start { name: String },
     /// 停止实例。
     Stop { name: String },
-    /// 流程包：导出成 zip、从 zip 导入、查看。
-    Flow {
-        #[command(subcommand)]
-        cmd: flow_cli::FlowCmd,
-    },
+    /// 流程包：全局库与项目里的装、更新、回填、导入导出、体检。
+    Flow(flow_cli::FlowArgs),
     /// 实例进程的入口，由 new / start 拉起，用户不直接调用。
     #[command(hide = true)]
     Host {
@@ -108,14 +105,18 @@ async fn main() -> Result<()> {
     let cli = Cli::from_arg_matches(&localized_command().get_matches())?;
     // 作业的"下次触发"、触发记录的时刻按本地时间显示；调度器本身就按本地时区算。
     model::set_utc_offset(chrono::Local::now().offset().local_minus_utc());
+    // 任何一条 conix 起来时把内置的流程包解进全局库、升级没改过的（flows.md §7.12）；mock 不碰真实的目录。
+    if cli.mock.is_none() {
+        flow_cli::bootstrap(&config::home());
+    }
     if let Some(Cmd::Host { name, project }) = cli.command {
         if std::env::var_os(supervise::CHILD_ENV).is_some() {
             return host_main::run(name, project).await;
         }
         return supervise::run(name, project).await;
     }
-    if let Some(Cmd::Flow { cmd }) = cli.command {
-        return flow_cli::run(cmd, || project_here(&cfg));
+    if let Some(Cmd::Flow(args)) = cli.command {
+        return flow_cli::run(args, &config::home(), || project_here(&cfg));
     }
     let (settings, more) = cfg.settings();
     problems.extend(more);
@@ -189,7 +190,7 @@ async fn main() -> Result<()> {
             println!("{}", i18n::t!("app.stopped", name = name));
             return Ok(());
         }
-        Some(Cmd::List { .. } | Cmd::Host { .. } | Cmd::Flow { .. }) => unreachable!(),
+        Some(Cmd::List { .. } | Cmd::Host { .. } | Cmd::Flow(_)) => unreachable!(),
         None => {
             let all = instances.list(true).await?;
             let running: Vec<_> = all

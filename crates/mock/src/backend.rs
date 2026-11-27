@@ -503,54 +503,8 @@ impl ScriptedBackend {
                 .find(|f| &f.summary.name == name)
                 .map(|f| Reply::Flow(Box::new(f.detail())))
                 .ok_or_else(|| PortError::Failed(format!("没有流程 {name}"))),
-            ExportFlow { bundle, file } => {
-                let known = st()
-                    .flows
-                    .iter()
-                    .any(|f| f.summary.name.split('/').next() == Some(bundle.as_str()));
-                if !known {
-                    return Err(PortError::Failed(format!("没有流程包 {bundle}")));
-                }
-                Ok(Reply::FlowExported(port::FlowExported {
-                    file: file
-                        .clone()
-                        .unwrap_or_else(|| format!("{bundle}-0.0.0.zip")),
-                    package: port::FlowPackageInfo {
-                        name: bundle.clone(),
-                        version: "0.0.0".into(),
-                        ..Default::default()
-                    },
-                }))
-            }
-            ImportFlow { file, .. } => {
-                // 文件名约定 `<包>-<版本>.zip`；mock 只认这个，装一个同名的空流程。
-                let stem = file.rsplit('/').next().unwrap_or(file);
-                let Some(stem) = stem.strip_suffix(".zip") else {
-                    return Err(PortError::Failed(format!("没有这个包文件 {file}")));
-                };
-                let (name, version) = stem.rsplit_once('-').unwrap_or((stem, "0.0.0"));
-                if effects {
-                    self.emit_now(Event::FlowUpserted(port::FlowSummary {
-                        name: format!("{name}/main"),
-                        title: name.to_string(),
-                        origin: port::FlowOrigin::Project,
-                        active_runs: 0,
-                        source: None,
-                        bundle: None,
-                    }));
-                }
-                Ok(Reply::FlowImported(port::FlowImported {
-                    package: port::FlowPackageInfo {
-                        name: name.to_string(),
-                        version: version.to_string(),
-                        flows: vec![format!("{name}/main")],
-                        ..Default::default()
-                    },
-                    installed: format!(".conix/flows/{name}"),
-                    backup: None,
-                    shadows: None,
-                }))
-            }
+            ReloadFlows => Ok(Reply::Ok),
+            ListLibrary => Ok(Reply::Library(st().library.clone())),
             ListRuns { flow } => {
                 let mut runs: Vec<_> = st()
                     .runs

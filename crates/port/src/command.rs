@@ -189,18 +189,11 @@ pub enum Command {
         op: RunOp,
     },
 
-    /// 把一个流程包（项目的、插件的或内置的）导出成包文件。`file` 省略 = 写在项目根下，名字是 `<包>-<版本>.zip`；给了相对路径就相对项目根。
-    ExportFlow {
-        bundle: String,
-        #[serde(default)]
-        file: Option<String>,
-    },
-    /// 把包文件装进项目的 `.conix/flows/`；已有同名的，`force` 才覆盖（旧的先备份）。
-    ImportFlow {
-        file: String,
-        #[serde(default)]
-        force: bool,
-    },
+    /// 项目的流程包在实例之外变了（`conix flow install` 等）：重列流程。命令行可以不接入、只发这一帧
+    /// 当连接的第一帧（architecture §8.3），回 `Ok` 就断开。
+    ReloadFlows,
+    /// 全局流程库里有、这个项目没装的包名（flows.md §7.12）：找不到包时提示 `conix flow install`。
+    ListLibrary,
 
     // 作业
     ListJobs,
@@ -310,8 +303,8 @@ impl Command {
             Command::RunOp { .. } => "run_op",
             Command::ListBundles => "list_bundles",
             Command::FlowCommand { .. } => "flow_command",
-            Command::ExportFlow { .. } => "export_flow",
-            Command::ImportFlow { .. } => "import_flow",
+            Command::ReloadFlows => "reload_flows",
+            Command::ListLibrary => "list_library",
             Command::ListJobs => "list_jobs",
             Command::SaveJob { .. } => "save_job",
             Command::DeleteJob { .. } => "delete_job",
@@ -431,8 +424,8 @@ pub enum Reply {
     Flow(Box<FlowDetail>),
     Runs(Vec<RunSummary>),
     Run(Box<RunView>),
-    FlowExported(crate::FlowExported),
-    FlowImported(crate::FlowImported),
+    /// `ListLibrary`。
+    Library(Vec<String>),
     RunStarted(RunSummary),
     /// `StartRun` 只给了包、输入定不了路：分诊在 `session` 里开始了，选了流程后模型自己再起运行。
     Triage {

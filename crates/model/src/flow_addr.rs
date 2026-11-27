@@ -198,10 +198,6 @@ pub(crate) fn route(s: &mut State, name: &str, arg: &str) -> Option<Vec<Effect>>
         return Some(list_bundles(s));
     }
     if let Some(addr) = name.strip_prefix("flow:") {
-        // `export` 与 `import` 是包的保留名（bundle::RESERVED_BUNDLES）：不会是哪个包，在查包之前接下。
-        if matches!(addr, "export" | "import") {
-            return Some(crate::flows::package_command(s, name, arg));
-        }
         return Some(global(s, addr, arg));
     }
     let (b, seg) = match name.split_once(':') {
@@ -277,22 +273,30 @@ fn context(
     })
 }
 
+/// 找不到包时的一句：全局库里有（`library`）就说怎么装，没有就列项目里有的。
+pub(crate) fn no_bundle_text(name: &str, names: &str, library: &[String]) -> String {
+    if library.iter().any(|n| n == name) {
+        i18n::t!("flow_addr.not_installed", name = name)
+    } else {
+        i18n::t!("flow_addr.no_bundle", name = name, names = names)
+    }
+}
+
 fn global(s: &mut State, addr: &str, arg: &str) -> Vec<Effect> {
     let (b, seg) = match addr.split_once(':') {
         Some((b, seg)) => (b, Some(seg)),
         None => (addr, None),
     };
     let Some(cat) = s.bundle_info(b) else {
-        let names: Vec<String> = bundle_names(s);
-        s.notice(
-            i18n::t!(
-                "flow_addr.no_bundle",
-                name = b,
-                names = names.join(&i18n::t!("flows.sep"))
-            ),
-            true,
-        );
-        return vec![];
+        // 项目里没有：可能在全局库里、没装（flows.md §7.12），问一下实例再说怎么办。
+        let names = bundle_names(s).join(&i18n::t!("flows.sep"));
+        return vec![s.call(
+            Pending::NoBundle {
+                name: b.to_string(),
+                names,
+            },
+            Command::ListLibrary,
+        )];
     };
     let Some(seg) = seg else {
         if arg.trim().is_empty() {
@@ -603,23 +607,11 @@ pub(crate) fn candidates(s: &State, prefix: &str) -> Option<Vec<SlashCommand>> {
     };
     if let Some(rest) = prefix.strip_prefix("flow:") {
         return Some(match rest.split_once(':') {
-            None => ["export", "import"]
-                .into_iter()
-                .filter(|w| w.starts_with(rest))
-                .map(|w| {
-                    mk(
-                        format!("flow:{w}"),
-                        i18n::tr(&format!("chat_update.cmd_flow_{w}")),
-                        "conix",
-                    )
-                })
-                .chain(
-                    bundle_names(s)
-                        .iter()
-                        .filter_map(|n| s.bundle_info(n))
-                        .filter(|b| b.name.starts_with(rest))
-                        .map(|b| mk(format!("flow:{}", b.name), b.title, SRC_BUNDLE)),
-                )
+            None => bundle_names(s)
+                .iter()
+                .filter_map(|n| s.bundle_info(n))
+                .filter(|b| b.name.starts_with(rest))
+                .map(|b| mk(format!("flow:{}", b.name), b.title, SRC_BUNDLE))
                 .collect(),
             Some((b, tail)) => {
                 let cat = s.bundle_info(b)?;

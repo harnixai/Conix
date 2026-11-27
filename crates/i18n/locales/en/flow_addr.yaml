@@ -2,6 +2,7 @@
 flow_addr:
   global_hint: "/{name} is not in a flow, so it went to Agix; to act on the flow bundle write /flow:{name} here"
   no_bundle: "No flow bundle \"{name}\"; there are: {names}"
+  not_installed: "The flow bundle \"{name}\" is in the global library but not installed in this project: run conix flow install {name} in a terminal"
   unknown_name: "\"{bundle}\" has no flow, station or command called {name}"
   no_active_run: "{bundle} has no active run: a station operation needs one"
   which_run: "{bundle} has several active runs ({runs}); give the run id or select it in the Flows tab"

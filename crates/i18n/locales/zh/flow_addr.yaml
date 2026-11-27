@@ -2,6 +2,7 @@
 flow_addr:
   global_hint: "/{name} 不在流程里，交给了 Agix；要对流程包操作，全局里写 /flow:{name}"
   no_bundle: "没有流程包「{name}」；有：{names}"
+  not_installed: "流程包「{name}」在全局库里、没装进这个项目：在终端里运行 conix flow install {name}"
   unknown_name: "「{bundle}」里没有叫 {name} 的流程、站或命令"
   no_active_run: "{bundle} 没有在跑的运行：站操作要有运行"
   which_run: "{bundle} 有几个在跑的运行（{runs}），写运行的 id 或在流程标签里选中它"

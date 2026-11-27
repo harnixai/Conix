@@ -118,13 +118,19 @@ pub async fn run(name: String, project: PathBuf) -> Result<()> {
                     .filter(|a| host::flows::artifacts_dir_ok(a))
                     .unwrap_or_else(|| host::flows::ARTIFACTS_DIR.to_string()),
             ),
-            builtin_dir: Some(state.dir().join("flows-builtin")),
+            library_home: Some(layout.home().to_path_buf()),
         },
     )
     .await;
     // 流程起不来不拖累实例：会话与作业照常，流程标签说明没有接上。
     let flows = match flows {
-        Ok(f) => Some(f),
+        Ok(f) => {
+            for text in f.orphaned_runs().await {
+                tracing::warn!("{text}");
+                hub.notice_on_attach(text);
+            }
+            Some(f)
+        }
         Err(e) => {
             tracing::error!("flows not started: {e:#}");
             hub.notice_on_attach(format!("flows are unavailable in this instance: {e:#}"));

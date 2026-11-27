@@ -1,4 +1,4 @@
-//! LIVE：流程（architecture §8.6）——内置的示例流程、在用户会话里经 `flow_*` 写流程、一次运行
+//! LIVE：流程（architecture §8.6）——项目里的示例流程、在用户会话里经 `flow_*` 写流程、一次运行
 //! 从头跑到尾、取消、有运行时不许改、运行里的会话动不了别的流程。
 
 mod live;
@@ -133,15 +133,16 @@ async fn ask(c: &mut live::Client, text: &str) -> live::TurnOutcome {
 
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "live"]
-async fn the_builtin_example_flow_is_offered() {
+async fn the_example_flow_put_in_the_project_is_offered() {
     let lv = Live::new();
-    let c = lv.start().await;
+    live::install_example_review(lv.project.path());
+    let c = lv.start_trusted().await;
     let all = flows(&c).await;
     let ex = all
         .iter()
         .find(|f| f.name == "example-review")
         .unwrap_or_else(|| panic!("{all:?}"));
-    assert_eq!(ex.origin, FlowOrigin::Builtin);
+    assert_eq!(ex.origin, FlowOrigin::Project);
     let Reply::Flow(d) = c
         .ok(Command::GetFlow {
             name: "example-review".into(),
@@ -756,11 +757,11 @@ async fn run_ops_release_pause_resume_rework_force_and_confirm() {
     .await;
 }
 
-/// 流程只在项目里：项目的标 Project；内置的标 Builtin、各项目都有；项目里放一份与内置同名的就取代它，
-/// 来源是 Project。以前的全局目录 `~/.conix/flows/` 不再读。
+/// 流程只在项目里：项目的标 Project；全局流程库里的包（内置的 xforge 起来时就放进去了）不在项目里就没有，
+/// `conix flow install` 装进来、实例被通知重读之后才有。以前的全局目录 `~/.conix/flows/flows/` 也不读。
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "live"]
-async fn flows_live_in_the_project_and_a_projects_same_named_flow_replaces_a_builtin_one() {
+async fn flows_live_in_the_project_and_the_global_library_is_not_run_until_installed() {
     let lv = Live::new();
     let old = lv.home.path().join("flows/flows");
     std::fs::create_dir_all(&old).unwrap();
@@ -775,30 +776,57 @@ async fn flows_live_in_the_project_and_a_projects_same_named_flow_replaces_a_bui
     let find = |all: &[port::FlowSummary], name: &str| all.iter().find(|f| f.name == name).cloned();
     let mine = find(&all, "live-echo").expect("项目的流程列得出");
     assert_eq!(mine.origin, FlowOrigin::Project, "{mine:?}");
-    let builtin = find(&all, "example-review").expect("内置的列得出");
     assert!(
-        builtin.origin == FlowOrigin::Builtin && builtin.origin.is_shared(),
-        "{builtin:?}"
+        find(&all, "example-review").is_none(),
+        "没有内置层了：{all:?}"
     );
-    assert!(find(&all, "live-old").is_none(), "全局目录不再读：{all:?}");
+    assert!(
+        find(&all, "live-old").is_none(),
+        "旧的全局目录不读：{all:?}"
+    );
+    assert!(
+        lv.home.path().join("flows/xforge/bundle.yaml").is_file(),
+        "实例起来时内置的 xforge 进了全局库"
+    );
+    assert!(
+        find(&all, "xforge/solid").is_none(),
+        "全局库里的不跑：{all:?}"
+    );
+    let Reply::Library(lib) = c.ok(Command::ListLibrary).await else {
+        panic!("list_library")
+    };
+    assert!(lib.contains(&"xforge".to_string()), "{lib:?}");
+    let e = c
+        .call(Command::StartRun {
+            flow: "xforge/quick".into(),
+            subject: "x".into(),
+            inputs: serde_json::Value::Null,
+            step: false,
+            session: None,
+        })
+        .await
+        .unwrap_err();
+    assert!(e.to_string().contains("conix flow install xforge"), "{e}");
 
-    // 项目里放一份同名的：流程库在实例启动时读，重启之后看到的是项目的那份。
-    install(
-        &lv,
-        &[(
-            "example-review",
-            &ONE_STATION
-                .replace("name: live-echo", "name: example-review")
-                .replace("title: Live echo", "title: Project review"),
-        )],
+    // 命令行装进来：实例被通知重读，流程出现。
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_conix"))
+        .args([
+            "flow",
+            "install",
+            "xforge",
+            "--yes",
+            "-C",
+            &lv.project_path(),
+        ])
+        .env("CONIX_HOME", lv.home.path())
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
     );
-    drop(c);
-    let c = lv.restart().await;
     let all = flows(&c).await;
-    let replaced = find(&all, "example-review").unwrap();
-    assert_eq!(
-        (replaced.origin, replaced.title.as_str()),
-        (FlowOrigin::Project, "Project review"),
-        "项目的那份取代内置的：{all:?}"
-    );
+    let solid = find(&all, "xforge/solid").expect("装进来就有");
+    assert_eq!(solid.origin, FlowOrigin::Project);
 }

@@ -190,6 +190,16 @@ async fn connection(sh: Arc<Shared>, stream: UnixStream, conn: u64) {
             id,
             cmd: Command::Hello { client, force },
         }) => (id, client, force),
+        // `conix flow …` 改了项目的流程包：不接入、不踢人，做完回一句就断开。
+        Ok(ClientFrame {
+            id,
+            cmd: Command::ReloadFlows,
+        }) => {
+            let r = sh.svc.handle(Command::ReloadFlows).await;
+            let _ = write_frame(&mut wr, &reply(id, r)).await;
+            let _ = wr.shutdown().await;
+            return;
+        }
         _ => {
             if let Ok(IdOnly { id }) = serde_json::from_str(&line) {
                 let err = PortError::Failed("first frame must be hello".into());

@@ -120,9 +120,11 @@ pub(crate) enum Pending {
     Notified,
     /// `/doctor`：自检。
     Doctor,
-    /// `/flow:export`、`/flow:import`：导出的文件、导入的报告。
-    FlowExported,
-    FlowImported,
+    /// `/flow:<包>` 找不到包：问实例全局库里有没有它，有就提示 `conix flow install`（`names` 是项目里有的）。
+    NoBundle {
+        name: String,
+        names: String,
+    },
     /// `/model` 不带参数：列出可选的模型。
     Models,
     /// `/plugin`：列表。
@@ -1344,6 +1346,11 @@ fn reply(s: &mut State, id: ReqId, r: Result<Reply, PortError>) -> Vec<Effect> {
                 s.domain.tasks_loaded.insert(sid);
                 return vec![];
             }
+            // 实例回答不了全局库（旧的实例）：照没有这个包说。
+            if let Pending::NoBundle { name, names } = what {
+                s.notice(crate::flow_addr::no_bundle_text(&name, &names, &[]), true);
+                return vec![];
+            }
             let tab = match what {
                 Pending::Sessions => Some(Tab::Sessions),
                 Pending::Flows => Some(Tab::Flows),
@@ -1402,6 +1409,10 @@ fn reply(s: &mut State, id: ReqId, r: Result<Reply, PortError>) -> Vec<Effect> {
         }
         (Pending::Bundles, Reply::Bundles(v)) => {
             d.bundles = v;
+        }
+        (Pending::NoBundle { name, names }, Reply::Library(lib)) => {
+            let text = crate::flow_addr::no_bundle_text(&name, &names, &lib);
+            s.notice(text, true);
         }
         (Pending::FlowText(title), Reply::Text { text }) => {
             if text.contains('\n') {

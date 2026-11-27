@@ -816,6 +816,8 @@ flows:
           executor: {kind: program, program: notify}
           exit: [{kind: output}]
 
+# 全局流程库里有、这个项目没装的包：`/flow:review` 提示 `conix flow install review`。
+library: [review]
 runs:
   - summary:
       id: "r1"

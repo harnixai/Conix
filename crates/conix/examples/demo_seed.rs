@@ -242,6 +242,32 @@ async fn main() {
     println!("  • 每日依赖检查（已立即触发一次） · 半小时巡检（停用）");
 
     println!("流程：");
+    // 项目只跑装进项目的流程（flows.md §7.12）：把流程库自带的示例流程放进项目，项目受信才读。
+    let flows = project.join(".conix/flows");
+    for (rel, text) in [
+        (
+            "example-review.yaml",
+            include_str!("../../flow/packs/examples/flows/example-review.yaml"),
+        ),
+        (
+            "skills/review/SKILL.md",
+            include_str!("../../flow/packs/examples/skills/review/SKILL.md"),
+        ),
+        (
+            "rules/review-honest.md",
+            include_str!("../../flow/packs/examples/rules/review-honest.md"),
+        ),
+        (
+            "policies/read-only.yaml",
+            include_str!("../../flow/packs/examples/policies/read-only.yaml"),
+        ),
+    ] {
+        let p = flows.join(rel);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, text).unwrap();
+    }
+    call(&b, Command::TrustProject { trusted: true }).await;
+    call(&b, Command::ReloadFlows).await;
     match b
         .call(Command::StartRun {
             flow: "example-review".into(),
@@ -252,7 +278,7 @@ async fn main() {
         })
         .await
     {
-        Ok(_) => println!("  • 内置流程 example-review：审查完停在“待确认”那一站"),
+        Ok(_) => println!("  • 示例流程 example-review：审查完停在“待确认”那一站"),
         Err(e) => println!("  流程没起来：{e}"),
     }
 

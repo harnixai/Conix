@@ -17,26 +17,18 @@ const BASICS: &str = "^G 切块 · ^N 标签 · ^B 切栏 · ^X 退出 · ^H 帮
 #[ignore = "live"]
 async fn the_keys_walk_the_workbench_of_a_real_instance() {
     let lv = Live::new();
+    live::install_example_review(lv.project.path());
     let mut t = Tui::create(&lv).await;
     assert!(t.core.state.ui.chat.is_none(), "启动是草稿");
     assert_eq!(t.core.state.ui.focus, Focus::Composer);
     assert!(t.last_line().ends_with(BASICS), "{}", t.last_line());
 
-    // ^N 轮换标签，焦点进右上；流程标签里有内置的示例流程（真实例的流程库给的）。
+    // ^N 轮换标签，焦点进右上。
     t.keys("^N").await;
     assert_eq!(
         (t.core.state.ui.tab, t.core.state.ui.focus),
         (Tab::Flows, Focus::SideUpper)
     );
-    t.until("示例流程", QUICK, |t| {
-        t.core
-            .state
-            .domain
-            .flows
-            .iter()
-            .any(|f| f.name == "example-review")
-    })
-    .await;
     t.keys("^N").await;
     assert_eq!(t.core.state.ui.tab, Tab::Jobs);
     t.keys("^N").await;
@@ -82,6 +74,16 @@ async fn the_keys_walk_the_workbench_of_a_real_instance() {
             .notice
             .as_ref()
             .is_some_and(|n| !n.error && n.text.contains("已信任"))
+    })
+    .await;
+    // 信任之后，项目里放着的示例流程出现在流程标签里（真实例的流程库给的）。
+    t.until("示例流程", QUICK, |t| {
+        t.core
+            .state
+            .domain
+            .flows
+            .iter()
+            .any(|f| f.name == "example-review")
     })
     .await;
 
