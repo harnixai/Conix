@@ -943,6 +943,23 @@ async fn the_global_library_is_not_run_until_a_bundle_is_installed() {
         .await
         .unwrap_err();
     assert!(e.to_string().contains("conix flow install xforge"), "{e}");
+    // 经端口（TUI 与 LIVE 走的那条）：先选路，选路也要先给这条提示。
+    for flow in ["xforge/quick", "xforge"] {
+        let e = flows
+            .command(port::Command::StartRun {
+                flow: flow.into(),
+                subject: "s".into(),
+                inputs: json!({}),
+                step: false,
+                session: None,
+            })
+            .await
+            .unwrap_err();
+        assert!(
+            e.to_string().contains("conix flow install xforge"),
+            "{flow}: {e}"
+        );
+    }
 
     let ctx = super::manage::Ctx::new(&project, &home);
     let plan = super::manage::plan_install(&ctx, "xforge", false).unwrap();

@@ -636,10 +636,7 @@ impl Flows {
         trigger: Option<Trigger>,
         step: bool,
     ) -> Result<port::RunSummary, PortError> {
-        let bundle = flow.split('/').next().unwrap_or(flow);
-        if self.packs().flow(flow).is_none() && self.library_only().iter().any(|n| n == bundle) {
-            return Err(self.missing(flow));
-        }
+        self.installed_or_hint(flow)?;
         let input = CreateIn {
             flow: flow.to_string(),
             subject: subject.to_string(),
@@ -826,6 +823,15 @@ impl Flows {
         let flows = Path::new(&self.project).join(package::PROJECT_FLOWS);
         harnix_flow::bundle::bundle_in(&flows, bundle).is_some()
             || flows.join(format!("{bundle}.yaml")).is_file()
+    }
+
+    /// 流程（或包名）在项目里找不到、而它的包在全局库里：回提示怎么装的错。别的情形交给流程库自己判。
+    fn installed_or_hint(&self, flow: &str) -> Result<(), PortError> {
+        let bundle = flow.split('/').next().unwrap_or(flow);
+        if self.packs().flow(flow).is_none() && self.library_only().iter().any(|n| n == bundle) {
+            return Err(self.missing(flow));
+        }
+        Ok(())
     }
 
     /// 找不到的流程或包：全局库里有就提示怎么装。
@@ -1036,6 +1042,8 @@ impl FlowPort for Flows {
                 step,
                 session,
             } => {
+                // 选路先于开运行，库在选路时就报找不到：全局库里有的包要在这之前说怎么装。
+                self.installed_or_hint(&flow)?;
                 // 只给包、输入定不了路：不开运行，让主会话里的模型读项目、判输入，再 `flow_start`。
                 if let harnix_flow::kernel::route::Route::Triage {
                     bundle,
