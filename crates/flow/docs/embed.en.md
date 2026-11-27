@@ -645,6 +645,12 @@ is so as not to collide with Harnix's own next one; what changes for a host is l
   Option<&DoctorExec>)`** offers it to a doctor (**`DoctorExec`**: `exec`, `refused`, `env_deny`; profile `Read`, recorded
   in the log); `doctor` is `doctor_with(…, None)`, where `flow.exec` throws. **`runner::exec_record(what, &req, &got)`**
   is the record's shape, for a host that records processes of its own.
+- **A bundle's suggested jobs**: `bundle.yaml` gains `jobs: [{id, name, cron, kind, catch_up?, guard?}]`
+  (**`BundleMeta::jobs`**, **`bundle::JobDecl`**, **`JobKindDecl`** — `Simple(SimpleJobDecl)` / `Flow(FlowJobDecl)`, written
+  `{simple: …}` / `{flow: …}` — and `JOB_GUARD_KEYS`). The library does not run them; it checks their shape
+  (**`BundleMeta::jobs_problems`**, part of `start_problems`: ids, five cron fields, a flow job names only this bundle's
+  flows), and **`JobDecl::flow_of`** gives a flow job's full flow name. Parsing the cron and adding them to a project is
+  the host's.
 
 ### `FLOW_API_VERSION = 1`
 

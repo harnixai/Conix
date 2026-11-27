@@ -81,6 +81,119 @@ pub struct BundleMeta {
     /// Absent: neither.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exec: Option<ExecDecl>,
+    /// Jobs the bundle suggests (in Conix; docs/design/flows.md §7.1): offered when it is installed
+    /// into a project, added there disabled if a person says so. The library reads only their shape;
+    /// the host that installs them checks the rest (the cron, its own fields).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub jobs: Vec<JobDecl>,
+}
+
+/// One job a bundle suggests: the shape of an entry of a Conix project's `.conix/jobs.json`, less
+/// what is the project's or the machine's (`project`, `enabled`, times).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct JobDecl {
+    /// Kept as it is in the project: the file name of its history, so `[A-Za-z0-9_-]+`.
+    pub id: String,
+    pub name: String,
+    /// Five fields (minute hour day month weekday); the host parses it.
+    pub cron: String,
+    pub kind: JobKindDecl,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub catch_up: bool,
+    /// A mapping of the host's guard settings; absent, the host's defaults.
+    #[serde(default, skip_serializing_if = "Value::is_null")]
+    pub guard: Value,
+}
+
+/// What a suggested job does when it fires: written `{simple: {…}}` or `{flow: {…}}`, as in
+/// `jobs.json`. Read through [`JobKindForm`]: serde_yaml takes an enum's variant from a YAML tag
+/// (`!simple`), which is not how the JSON this mirrors is written.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(try_from = "JobKindForm", into = "JobKindForm")]
+pub enum JobKindDecl {
+    /// A turn in an unattended session.
+    Simple(SimpleJobDecl),
+    /// A run of one of this bundle's flows.
+    Flow(FlowJobDecl),
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SimpleJobDecl {
+    pub prompt: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skills: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FlowJobDecl {
+    pub flow: String,
+    /// Absent: the job's name.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub subject: String,
+    #[serde(default, skip_serializing_if = "Value::is_null")]
+    pub inputs: Value,
+}
+
+/// How a [`JobKindDecl`] is written: one key of the two.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct JobKindForm {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    simple: Option<SimpleJobDecl>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    flow: Option<FlowJobDecl>,
+}
+
+impl TryFrom<JobKindForm> for JobKindDecl {
+    type Error = String;
+    fn try_from(f: JobKindForm) -> Result<Self, String> {
+        match (f.simple, f.flow) {
+            (Some(s), None) => Ok(JobKindDecl::Simple(s)),
+            (None, Some(f)) => Ok(JobKindDecl::Flow(f)),
+            _ => Err("a job's kind is one of {simple: {prompt}} and {flow: {flow, subject?, inputs?}}".into()),
+        }
+    }
+}
+
+impl From<JobKindDecl> for JobKindForm {
+    fn from(k: JobKindDecl) -> Self {
+        match k {
+            JobKindDecl::Simple(s) => JobKindForm { simple: Some(s), flow: None },
+            JobKindDecl::Flow(f) => JobKindForm { simple: None, flow: Some(f) },
+        }
+    }
+}
+
+/// The guard keys a suggested job may set: a host's guard has these and no other, and a key it does
+/// not know would be dropped without a word.
+pub const JOB_GUARD_KEYS: [&str; 5] = ["timeout_ms", "max_tokens", "overlap", "disable_after", "network"];
+
+impl JobDecl {
+    /// The full name of the flow a `flow` job of bundle `bundle` starts, given the stems of its
+    /// flows: `<bundle>/<stem>` as written, or `<bundle>` meaning its own flow (`flow.yaml`) or, when
+    /// it has one flow only, that one. `None` for a simple job, or a flow that is not the bundle's.
+    pub fn flow_of(&self, bundle: &str, stems: &BTreeSet<String>) -> Option<String> {
+        let JobKindDecl::Flow(FlowJobDecl { flow, .. }) = &self.kind else { return None };
+        if flow == bundle {
+            if stems.contains(MAIN_FLOW) {
+                return Some(bundle.to_string());
+            }
+            let mut flows = stems.iter().filter(|s| *s != MAIN_FLOW);
+            return match (flows.next(), flows.next()) {
+                (Some(only), None) => Some(qualified(bundle, only)),
+                _ => None,
+            };
+        }
+        match split(flow) {
+            Some((b, s)) if b == bundle && s != MAIN_FLOW && stems.contains(s) => Some(flow.clone()),
+            _ => None,
+        }
+    }
 }
 
 /// What `bundle.yaml` says of the processes the bundle starts (`exec`): declared, so that what a
@@ -337,6 +450,57 @@ impl BundleMeta {
         }
         if let Some(e) = &self.exec {
             out.extend(e.problems().into_iter().map(|m| format!("{BUNDLE_FILE}: exec: {m}")));
+        }
+        out.extend(self.jobs_problems(stems));
+        out
+    }
+
+    /// What is wrong with its `jobs`, given the stems of its flows: ids unique and fit for a file
+    /// name, a name, five cron fields, a prompt, a flow of this bundle, mappings where mappings go.
+    /// Whether the cron parses is the host's to say: the library has no cron parser.
+    pub fn jobs_problems(&self, stems: &BTreeSet<String>) -> Vec<String> {
+        let mut out = vec![];
+        let mut ids = BTreeSet::new();
+        for (i, j) in self.jobs.iter().enumerate() {
+            let at = format!("{BUNDLE_FILE}: jobs[{i}]");
+            if j.id.is_empty() || !j.id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+                out.push(format!("{at}: id {:?} is [A-Za-z0-9_-]+", j.id));
+            } else if !ids.insert(j.id.as_str()) {
+                out.push(format!("{at}: id {} is given twice", j.id));
+            }
+            if j.name.trim().is_empty() {
+                out.push(format!("{at}: name is empty"));
+            }
+            let fields = j.cron.split_whitespace().count();
+            if fields != 5 {
+                out.push(format!("{at}: cron {:?} has {fields} fields, not 5 (minute hour day month weekday)", j.cron));
+            }
+            match &j.kind {
+                JobKindDecl::Simple(s) if s.prompt.trim().is_empty() => out.push(format!("{at}: prompt is empty")),
+                JobKindDecl::Simple(_) => {}
+                JobKindDecl::Flow(FlowJobDecl { flow, inputs, .. }) => {
+                    if j.flow_of(&self.name, stems).is_none() {
+                        out.push(format!(
+                            "{at}: flow {flow} is not a flow of this bundle: write {}/<flow> ({}), or {} when it has one flow",
+                            self.name,
+                            self.flow_order(stems).join(", "),
+                            self.name
+                        ));
+                    }
+                    if !(inputs.is_null() || inputs.is_object()) {
+                        out.push(format!("{at}: inputs is a mapping"));
+                    }
+                }
+            }
+            match &j.guard {
+                Value::Null => {}
+                Value::Object(m) => {
+                    for k in m.keys().filter(|k| !JOB_GUARD_KEYS.contains(&k.as_str())) {
+                        out.push(format!("{at}: guard has no {k} ({})", JOB_GUARD_KEYS.join(", ")));
+                    }
+                }
+                _ => out.push(format!("{at}: guard is a mapping")),
+            }
         }
         out
     }
@@ -938,6 +1102,35 @@ mod tests {
         assert_eq!(meta(&b).unwrap().requires.unwrap().conix.as_deref(), Some(">=0.1.10"));
         assert_eq!(parse_version("0.1.10-2026112502"), Some((0, 1, 10)));
         assert_eq!(parse_version("0.1"), None);
+    }
+
+    #[test]
+    fn a_bundles_suggested_jobs_are_read_for_their_shape_and_name_only_its_own_flows() {
+        let stems: BTreeSet<String> = ["quick".to_string(), "solid".to_string()].into();
+        let m = BundleMeta::parse(
+            "name: dev\njobs:\n  - {id: daily, name: 每日巡检, cron: \"0 9 * * *\", kind: {simple: {prompt: 看看}}, guard: {timeout_ms: 60000}}\n  - {id: weekly, name: 周报, cron: \"0 10 * * 1\", kind: {flow: {flow: dev/quick, inputs: {risk: low}}}}\n",
+        )
+        .unwrap();
+        assert!(m.jobs_problems(&stems).is_empty(), "{:?}", m.jobs_problems(&stems));
+        assert_eq!(m.jobs[1].flow_of("dev", &stems).as_deref(), Some("dev/quick"));
+        assert!(BundleMeta::parse("name: dev\njobs: [{id: a, name: a, cron: \"* * * * *\", kind: {simple: {prompt: x, project: /tmp}}}]\n").is_err(), "a project is the machine's");
+        let bad = BundleMeta::parse(concat!(
+            "name: dev\njobs:\n",
+            "  - {id: ../x, name: a, cron: \"* * * * *\", kind: {simple: {prompt: x}}}\n",
+            "  - {id: b, name: \" \", cron: \"* * * *\", kind: {simple: {prompt: \"\"}}}\n",
+            "  - {id: b, name: b, cron: \"* * * * *\", kind: {flow: {flow: other/quick}}, guard: {budget: 1}}\n",
+            "  - {id: c, name: c, cron: \"* * * * *\", kind: {flow: {flow: dev, inputs: [1]}}}\n",
+        ))
+        .unwrap();
+        let p = bad.jobs_problems(&stems).join("\n");
+        for want in ["jobs[0]: id", "jobs[1]: name is empty", "has 4 fields", "jobs[1]: prompt is empty", "jobs[2]: id b is given twice", "other/quick is not a flow", "guard has no budget", "jobs[3]: flow dev is not", "inputs is a mapping"] {
+            assert!(p.contains(want), "{want}: {p}");
+        }
+        // The bundle's name alone is its one flow, or its own flow.yaml.
+        let one: BTreeSet<String> = ["quick".to_string()].into();
+        assert_eq!(bad.jobs[3].flow_of("dev", &one).as_deref(), Some("dev/quick"));
+        let main: BTreeSet<String> = ["flow".to_string(), "quick".to_string()].into();
+        assert_eq!(bad.jobs[3].flow_of("dev", &main).as_deref(), Some("dev"));
     }
 
     #[test]

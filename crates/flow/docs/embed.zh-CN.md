@@ -478,6 +478,10 @@ Conix 在 Harnix 0.4.7 分叉了这个库，先把站的治理（门禁、确认
   `RunnerConfig::command_gates` 开着且项目受信时跑。**`doctor_with(packs, layout, bundle, project, Option<&DoctorExec>)`** 把它给 doctor
   （**`DoctorExec`**：`exec`、`refused`、`env_deny`；档位 `Read`，记进日志）；`doctor` 就是 `doctor_with(…, None)`，那里 `flow.exec` 抛错。
   **`runner::exec_record(what, &req, &got)`** 是记录的样子，给自己也起进程的宿主照着记。
+- **包建议的作业**：`bundle.yaml` 加 `jobs: [{id, name, cron, kind, catch_up?, guard?}]`（**`BundleMeta::jobs`**、**`bundle::JobDecl`**、
+  **`JobKindDecl`**（`Simple(SimpleJobDecl)` / `Flow(FlowJobDecl)`，写成 `{simple: …}` / `{flow: …}`）、`JOB_GUARD_KEYS`）。库不跑它们，
+  只查形状（**`BundleMeta::jobs_problems`**，随 `start_problems`：ID、5 段 cron、流程作业只能指这个包的流程）；**`JobDecl::flow_of`**
+  给出流程的全名。cron 解析、写进项目是宿主的事。
   `flow.exec({argv, cwd?, timeout_seconds?, stdin?})` → `{code, signal, stdout, stderr, timed_out, truncated, ms, enforced}`：只收 argv
   （没有 shell），`cwd` 在脚本工作的目录里（运行的工作目录；运行之外是项目），每路输出至多 4 MiB（留开头，`truncated`），时限至多是脚本
   剩下的。档位按调用方：门禁、`plan`、`foreach`、doctor 的脚本，只读的子命令，运行之外的一切命令 → `Read`；运行里会写的子命令与命令步骤 →
