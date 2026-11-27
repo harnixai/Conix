@@ -818,6 +818,14 @@ flows:
 
 # 全局流程库里有、这个项目没装的包：`/flow:review` 提示 `conix flow install review`。
 library: [review]
+# 帮助浮层「样例」页：全局库里内置的包，与这个项目装没装（ListSamples）。
+samples:
+  - name: xforge
+    version: 0.2.0
+    title: XForge 开发流程
+    description: 规格驱动的开发：按风险选路，按工作包实施，独立检查，可以打回，归档时并进规格。
+    flows: [quick, solid, major]
+    installed: false
 runs:
   - summary:
       id: "r1"

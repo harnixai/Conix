@@ -755,6 +755,31 @@ impl Flows {
             .collect()
     }
 
+    /// 帮助浮层的「样例」：全局库里的内置包（删掉的不列），与这个项目装没装。只列内置的：库里别的包是这台机器上
+    /// 的人自己导入、回填的，不是 Conix 拿来给人照着学的样例。
+    pub(crate) fn samples(&self) -> Vec<port::SampleBundle> {
+        let Some(lib) = &self.library else {
+            return vec![];
+        };
+        builtin::bundles()
+            .into_iter()
+            .filter_map(|name| {
+                let dir = lib.dir(name)?;
+                let meta = harnix_flow::bundle::meta(&dir).ok()?;
+                let stems = harnix_flow::bundle::flow_stems(&dir);
+                Some(port::SampleBundle {
+                    name: name.to_string(),
+                    version: package::version_of(&meta),
+                    title: meta.title.clone(),
+                    description: meta.description.clone(),
+                    flows: meta.flow_order(&stems),
+                    installed: self.in_project(name),
+                    jobs: meta.jobs.len() as u32,
+                })
+            })
+            .collect()
+    }
+
     /// 项目的 `.conix/flows/` 里有这个包（或同名的平铺流程）：不看信任——没受信时流程库不读它，但它装着。
     fn in_project(&self, bundle: &str) -> bool {
         let flows = Path::new(&self.project).join(package::PROJECT_FLOWS);
@@ -1002,6 +1027,7 @@ impl FlowPort for Flows {
                 Ok(Reply::Ok)
             }
             Command::ListLibrary => Ok(Reply::Library(self.library_only())),
+            Command::ListSamples => Ok(Reply::Samples(self.samples())),
             other => Err(PortError::Unsupported(other.name().into())),
         }
     }

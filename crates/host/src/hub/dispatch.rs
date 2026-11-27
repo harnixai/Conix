@@ -503,12 +503,14 @@ impl Hub {
             | C::FlowCommand { .. }
             | C::ReloadFlows
             | C::ListLibrary
+            | C::ListSamples
             | C::RunOp { .. }) => match self.flows() {
                 Some(f) => f.command(cmd).await,
                 None => match cmd {
                     C::ListFlows => Ok(Reply::Flows(vec![])),
                     C::ReloadFlows => Ok(Reply::Ok),
                     C::ListLibrary => Ok(Reply::Library(vec![])),
+                    C::ListSamples => Ok(Reply::Samples(vec![])),
                     C::ListBundles => Ok(Reply::Bundles(vec![])),
                     C::ListRuns { .. } | C::ListEndedRuns { .. } => Ok(Reply::Runs(vec![])),
                     // 列表回空、由 Hello 的 flows 能力位让界面说明；具体原因在接入时提示过、也在 host.log。

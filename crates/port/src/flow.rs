@@ -40,6 +40,27 @@ pub struct BundleInfo {
     pub pace: Pace,
 }
 
+/// 帮助浮层「样例」的一个包（`ListSamples`）：全局库里内置的、这个项目装没装。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SampleBundle {
+    pub name: String,
+    #[serde(default)]
+    pub version: String,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub description: String,
+    /// 包里各流程的本地名，按选路的顺序。
+    #[serde(default)]
+    pub flows: Vec<String>,
+    /// 项目的 `.conix/flows/` 里有它。
+    #[serde(default)]
+    pub installed: bool,
+    /// 它建议的作业有几个（装的时候问，flows.md §7.12）。
+    #[serde(default)]
+    pub jobs: u32,
+}
+
 /// 包的一个命令：`read_only` 是不会写的子命令（命令名后的第一个词）。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CommandInfo {

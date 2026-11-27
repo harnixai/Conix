@@ -194,6 +194,9 @@ pub enum Command {
     ReloadFlows,
     /// 全局流程库里有、这个项目没装的包名（flows.md §7.12）：找不到包时提示 `conix flow install`。
     ListLibrary,
+    /// 帮助浮层的「样例」：全局库里内置的包，与这个项目装没装（interaction §10）。界面不自己读 `~/.conix`：
+    /// TUI 可能接的是另一台机器上的实例，库是实例那边的。
+    ListSamples,
 
     // 作业
     ListJobs,
@@ -308,6 +311,7 @@ impl Command {
             Command::FlowCommand { .. } => "flow_command",
             Command::ReloadFlows => "reload_flows",
             Command::ListLibrary => "list_library",
+            Command::ListSamples => "list_samples",
             Command::ListJobs => "list_jobs",
             Command::ReloadJobs => "reload_jobs",
             Command::SaveJob { .. } => "save_job",
@@ -430,6 +434,8 @@ pub enum Reply {
     Run(Box<RunView>),
     /// `ListLibrary`。
     Library(Vec<String>),
+    /// `ListSamples`。
+    Samples(Vec<crate::SampleBundle>),
     RunStarted(RunSummary),
     /// `StartRun` 只给了包、输入定不了路：分诊在 `session` 里开始了，选了流程后模型自己再起运行。
     Triage {

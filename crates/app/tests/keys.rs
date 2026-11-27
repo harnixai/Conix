@@ -256,3 +256,35 @@ async fn the_rare_ones_are_slash_commands() {
     h.keys("Enter").await;
     assert!(h.text().contains("事件日志"));
 }
+
+/// 帮助的第二页「样例」：内置的流程包从实例问来（装没装、怎么装、怎么起），再是作业在会话里怎么说。
+#[tokio::test(start_paused = true)]
+async fn the_help_has_a_samples_page_asked_of_the_instance() {
+    let mut h = Harness::new("default", WIDE).await;
+    h.keys("F1").await;
+    assert!(!h.text().contains("内置的流程包"));
+    h.keys("Tab").await;
+    h.settle().await;
+    assert!(
+        h.calls("dev")
+            .iter()
+            .any(|c| matches!(c, port::Command::ListSamples)),
+        "样例从实例问，不读本机的 ~/.conix"
+    );
+    let text = h.text();
+    for want in [
+        "内置的流程包",
+        "xforge 0.2.0",
+        "这个项目没装",
+        "conix flow install xforge",
+        "/flow:xforge <主题>",
+        "每天 9 点检查昨天的错误日志",
+        "建议的作业",
+    ] {
+        assert!(text.contains(want), "{want}\n{text}");
+    }
+    assert!(!text.contains("demo"), "演示项目不进帮助\n{text}");
+    h.snapshot("help-samples");
+    h.keys("^N").await;
+    assert!(!h.text().contains("内置的流程包"), "^N 翻回键位");
+}

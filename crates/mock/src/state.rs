@@ -19,6 +19,7 @@ pub struct MockState {
     pub flows: Vec<FlowSeed>,
     pub bundles: Vec<port::BundleInfo>,
     pub library: Vec<String>,
+    pub samples: Vec<port::SampleBundle>,
     pub runs: BTreeMap<RunId, RunView>,
     pub jobs: BTreeMap<JobId, (Job, Vec<JobEntry>)>,
     /// 已关闭的会话，关掉的新的在前。
@@ -45,6 +46,7 @@ impl MockState {
             flows: seed.flows,
             bundles: seed.bundles,
             library: seed.library,
+            samples: seed.samples,
             plugin_packages: seed.plugin_packages,
             plugins: vec![],
             runs: seed

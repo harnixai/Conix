@@ -104,13 +104,10 @@ pub enum Confirm {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Overlay {
-    Help {
-        scroll: usize,
-    },
+    /// 帮助：键位一页、样例一页（交互 §10），Tab / ^N 切换。
+    Help { scroll: usize, page: HelpPage },
     /// 退出时的选择：后台运行 / 直接退出 / 返回（交互 §7）。
-    Exit {
-        selected: usize,
-    },
+    Exit { selected: usize },
     /// 只读的文字浮层：流程的原始 YAML。
     Text {
         title: String,
@@ -118,9 +115,7 @@ pub enum Overlay {
         scroll: usize,
     },
     /// `/events`：最近的事件与命令。
-    EventLog {
-        scroll: usize,
-    },
+    EventLog { scroll: usize },
     /// 输入框为空时连按两次 Esc：选一轮退回去，把那一轮的话放回输入框（交互 §4.5）。
     Rewind {
         session: SessionId,
@@ -151,6 +146,24 @@ pub enum Overlay {
         alerts: Vec<port::Alert>,
         selected: usize,
     },
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum HelpPage {
+    #[default]
+    Keys,
+    /// 内置的流程包与作业的例子：照着就能上手的东西。
+    Samples,
+}
+
+impl Overlay {
+    /// 刚打开的帮助：键位那一页。
+    pub fn help() -> Overlay {
+        Overlay::Help {
+            scroll: 0,
+            page: HelpPage::Keys,
+        }
+    }
 }
 
 /// 一个标签自己的选中与滚动；切标签再切回来保持原样。
@@ -211,6 +224,8 @@ pub struct Domain {
     pub job_history: Map<port::JobId, Vec<port::JobEntry>>,
     /// 列表加载失败的原因，按标签（会话 / 流程 / 作业）。
     pub load_errors: [Option<String>; 3],
+    /// 帮助浮层「样例」页的内置流程包（`ListSamples`）；`None` 是还没取到。每次翻到那一页都重取：装没装会变。
+    pub samples: Option<Vec<port::SampleBundle>>,
 }
 
 /// 界面状态：只由输入与 Tick 写入。

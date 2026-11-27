@@ -112,6 +112,8 @@ pub(crate) fn bindings() -> Vec<Binding> {
         b(C::Overlay, "PageDown", A::PageDown),
         b(C::Overlay, "q", A::Back),
         b(C::Overlay, "Enter", A::Confirm),
+        // 帮助浮层翻页（键位 / 样例）。
+        b(C::Overlay, "Tab", A::SwitchSection),
         // `/plugin` 浮层：启停、卸载、确认披露。
         b(C::Overlay, "Space", A::ToggleEnabled),
         b(C::Overlay, "d", A::Delete),

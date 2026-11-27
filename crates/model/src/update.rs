@@ -4,7 +4,8 @@ use tui::layout::{self, ShowPane, Size};
 
 use crate::mouse::{Mouse, MouseButton, MouseKind};
 use crate::state::{
-    Confirm, DetachReason, Drag, Focus, HEARTBEAT_MS, Notice, Overlay, Picker, Screen, State, Tab,
+    Confirm, DetachReason, Drag, Focus, HEARTBEAT_MS, HelpPage, Notice, Overlay, Picker, Screen,
+    State, Tab,
 };
 use crate::view::{layout_spec, tab_labels};
 
@@ -120,6 +121,8 @@ pub(crate) enum Pending {
     Notified,
     /// `/doctor`：自检。
     Doctor,
+    /// 帮助浮层翻到「样例」页。
+    Samples,
     /// `/flow:<包>` 找不到包：问实例全局库里有没有它，有就提示 `conix flow install`（`names` 是项目里有的）。
     NoBundle {
         name: String,
@@ -458,7 +461,7 @@ fn picker_action(s: &mut State, a: Action) -> Vec<Effect> {
             }
         }
         Action::Quit | Action::Exit => return vec![Effect::Quit { detach: true }],
-        Action::Help => s.ui.overlay = Some(Overlay::Help { scroll: 0 }),
+        Action::Help => s.ui.overlay = Some(Overlay::help()),
         Action::New => return create(s),
         Action::Open => match chosen {
             None => return create(s),
@@ -752,8 +755,20 @@ fn action(s: &mut State, a: Action) -> Vec<Effect> {
         s.ui.upper_mut().selected = 0;
         return vec![];
     }
-    if let Some(Overlay::Help { scroll }) = &mut s.ui.overlay {
+    if let Some(Overlay::Help { scroll, page }) = &mut s.ui.overlay {
         match a {
+            Action::SwitchSection | Action::NextTab => {
+                *scroll = 0;
+                *page = match page {
+                    HelpPage::Keys => HelpPage::Samples,
+                    HelpPage::Samples => HelpPage::Keys,
+                };
+                // 选择实例的界面里还没接着实例，没处问。
+                if *page == HelpPage::Samples && matches!(s.ui.screen, Screen::Workbench) {
+                    s.domain.samples = None;
+                    return vec![s.call(Pending::Samples, Command::ListSamples)];
+                }
+            }
             Action::Up | Action::LineUp => *scroll = scroll.saturating_sub(1),
             Action::Down | Action::LineDown => *scroll += 1,
             Action::PageUp => *scroll = scroll.saturating_sub(10),
@@ -789,7 +804,7 @@ fn action(s: &mut State, a: Action) -> Vec<Effect> {
         }
     }
     match a {
-        Action::Help | Action::HelpOrErase => s.ui.overlay = Some(Overlay::Help { scroll: 0 }),
+        Action::Help | Action::HelpOrErase => s.ui.overlay = Some(Overlay::help()),
         Action::ReadTranscript => read_transcript(s),
         Action::ToggleDetail => s.ui.detail = !s.ui.detail,
         Action::NextAttention => return crate::follow::next_attention(s),
@@ -1346,6 +1361,11 @@ fn reply(s: &mut State, id: ReqId, r: Result<Reply, PortError>) -> Vec<Effect> {
                 s.domain.tasks_loaded.insert(sid);
                 return vec![];
             }
+            // 答不了样例（旧的实例）：那一页照"没有"说，不另报错。
+            if matches!(what, Pending::Samples) {
+                s.domain.samples = Some(vec![]);
+                return vec![];
+            }
             // 实例回答不了全局库（旧的实例）：照没有这个包说。
             if let Pending::NoBundle { name, names } = what {
                 s.notice(crate::flow_addr::no_bundle_text(&name, &names, &[]), true);
@@ -1409,6 +1429,9 @@ fn reply(s: &mut State, id: ReqId, r: Result<Reply, PortError>) -> Vec<Effect> {
         }
         (Pending::Bundles, Reply::Bundles(v)) => {
             d.bundles = v;
+        }
+        (Pending::Samples, Reply::Samples(v)) => {
+            d.samples = Some(v);
         }
         (Pending::NoBundle { name, names }, Reply::Library(lib)) => {
             let text = crate::flow_addr::no_bundle_text(&name, &names, &lib);

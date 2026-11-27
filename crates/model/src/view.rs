@@ -5,7 +5,7 @@ use tui::{
     Workbench, truncate_to_width,
 };
 
-use crate::state::{Confirm, DetachReason, Focus, Overlay, Picker, Screen, State, Tab};
+use crate::state::{Confirm, DetachReason, Focus, HelpPage, Overlay, Picker, Screen, State, Tab};
 
 /// 提问框里第一个选项所在的行（鼠标点选项用，交互 §4.6）。
 pub(crate) const ASK_OPTIONS_OFFSET: usize = 4;
@@ -873,10 +873,16 @@ fn overlay(s: &State, o: &Overlay) -> tui::Overlay {
                 width: 72,
             }
         }
-        Overlay::Help { scroll } => {
+        Overlay::Help { scroll, page } => {
+            let mut lines = vec![help_pages(*page), Line::default()];
+            if *page == HelpPage::Samples {
+                lines.extend(samples_page(s, HELP_WIDTH as usize - 4));
+            }
             let mut ctxs = s.key_contexts_without_overlay();
             ctxs.push(keys::Context::Global);
-            let mut lines = vec![];
+            if *page == HelpPage::Samples {
+                ctxs.clear();
+            }
             for ctx in ctxs {
                 lines.push(Line::toned(ctx.label(), Tone::Strong));
                 // 同一个动作的几个键排在一行（`^H / F1`）；兼容键不列。
@@ -901,18 +907,153 @@ fn overlay(s: &State, o: &Overlay) -> tui::Overlay {
                 }
                 lines.push(Line::default());
             }
-            lines.push(Line::toned(i18n::t!("view.help.mouse"), Tone::Dim));
+            if *page == HelpPage::Keys {
+                lines.push(Line::toned(i18n::t!("view.help.mouse"), Tone::Dim));
+            }
             let height = (lines.len() as u16 + 2).min(s.ui.size.rows.saturating_sub(4));
             let body = height.saturating_sub(2) as usize;
             let max_scroll = lines.len().saturating_sub(body);
             tui::Overlay {
                 title: i18n::t!("view.help.title"),
                 lines: lines.into_iter().skip((*scroll).min(max_scroll)).collect(),
-                width: 72,
+                width: HELP_WIDTH,
                 height,
             }
         }
     }
+}
+
+const HELP_WIDTH: u16 = 72;
+
+/// 帮助的两页，当前的一页高亮：`键位 │ 样例   Tab 翻页`。
+fn help_pages(page: HelpPage) -> Line {
+    let tab = |p: HelpPage, label: String| {
+        if p == page {
+            (format!(" {label} "), Tone::Selected)
+        } else {
+            (format!(" {label} "), Tone::Dim)
+        }
+    };
+    let (a, at) = tab(HelpPage::Keys, i18n::t!("view.help.page_keys"));
+    let (b, bt) = tab(HelpPage::Samples, i18n::t!("view.help.page_samples"));
+    Line::toned(a, at).push("│", Tone::Dim).push(b, bt).push(
+        format!("   {}", i18n::t!("view.help.page_switch")),
+        Tone::Dim,
+    )
+}
+
+/// 「样例」页：全局库里内置的流程包（实例给的），各自装没装、怎么装、怎么起；再是作业的说法。
+/// 演示项目（examples/demo）是开发用的，不在这里。
+fn samples_page(s: &State, width: usize) -> Vec<Line> {
+    let wrap = |text: &str, tone: Tone, indent: &str| {
+        crate::text::wrap_text(
+            text,
+            tone,
+            width,
+            &Line::plain(indent),
+            &Line::plain(indent),
+        )
+    };
+    let mut out = vec![Line::toned(
+        i18n::t!("view.help.samples_bundles"),
+        Tone::Strong,
+    )];
+    match &s.domain.samples {
+        _ if !matches!(s.ui.screen, Screen::Workbench) => {
+            out.push(Line::toned(
+                format!("  {}", i18n::t!("view.help.samples_not_attached")),
+                Tone::Dim,
+            ));
+        }
+        None => out.push(Line::toned(
+            format!("  {}", i18n::t!("view.help.samples_loading")),
+            Tone::Dim,
+        )),
+        Some(v) if v.is_empty() => out.push(Line::toned(
+            format!("  {}", i18n::t!("view.help.samples_none")),
+            Tone::Dim,
+        )),
+        Some(v) => {
+            for b in v {
+                let state = if b.installed {
+                    (i18n::t!("view.help.sample_installed"), Tone::Ok)
+                } else {
+                    (i18n::t!("view.help.sample_not_installed"), Tone::Warn)
+                };
+                out.push(
+                    Line::toned(format!("  {}", b.name), Tone::Accent)
+                        .push(format!(" {}  ", b.version), Tone::Dim)
+                        .push(format!("{}  ", b.title), Tone::Strong)
+                        .push(state.0, state.1),
+                );
+                if !b.description.is_empty() {
+                    out.extend(wrap(&b.description, Tone::Normal, "    "));
+                }
+                if !b.flows.is_empty() {
+                    out.extend(wrap(
+                        &i18n::t!(
+                            "view.help.sample_flows",
+                            flows = b.flows.join(&i18n::t!("flows.sep"))
+                        ),
+                        Tone::Dim,
+                        "    ",
+                    ));
+                }
+                if !b.installed {
+                    out.extend(wrap(
+                        &i18n::t!("view.help.sample_install", name = b.name),
+                        Tone::Normal,
+                        "    ",
+                    ));
+                }
+                let first = b.flows.first().cloned().unwrap_or_default();
+                out.extend(wrap(
+                    &i18n::t!("view.help.sample_start", name = b.name, flow = first),
+                    Tone::Normal,
+                    "    ",
+                ));
+                if b.jobs > 0 {
+                    out.extend(wrap(
+                        &i18n::t!("view.help.sample_jobs", n = b.jobs),
+                        Tone::Dim,
+                        "    ",
+                    ));
+                }
+                out.push(Line::default());
+            }
+        }
+    }
+    if out.last().is_some_and(|l| l.width() > 0) {
+        out.push(Line::default());
+    }
+    out.push(Line::toned(
+        i18n::t!("view.help.samples_jobs"),
+        Tone::Strong,
+    ));
+    for key in [
+        "view.help.job_example_daily",
+        "view.help.job_example_weekly",
+        "view.help.job_example_flow",
+    ] {
+        out.extend(crate::text::wrap_text(
+            &i18n::tr(key),
+            Tone::Normal,
+            width,
+            &Line::plain("  • "),
+            &Line::plain("    "),
+        ));
+    }
+    out.extend(wrap(
+        &i18n::t!("view.help.samples_jobs_note"),
+        Tone::Dim,
+        "  ",
+    ));
+    out.extend(wrap(
+        &i18n::t!("view.help.samples_bundle_jobs"),
+        Tone::Dim,
+        "  ",
+    ));
+    out
 }
 
 impl State {

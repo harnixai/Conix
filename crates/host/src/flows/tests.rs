@@ -930,6 +930,14 @@ async fn the_global_library_is_not_run_until_a_bundle_is_installed() {
         panic!("library")
     };
     assert_eq!(lib, ["xforge"]);
+    // 帮助浮层的样例：内置包从全局库读，标着这个项目装没装。
+    let samples = |r: port::Reply| match r {
+        port::Reply::Samples(v) => v.into_iter().find(|s| s.name == "xforge").unwrap(),
+        other => panic!("{other:?}"),
+    };
+    let x = samples(flows.command(port::Command::ListSamples).await.unwrap());
+    assert!(!x.installed && !x.title.is_empty() && !x.version.is_empty());
+    assert_eq!(x.flows.first().map(String::as_str), Some("quick"));
     let e = flows
         .start_run("xforge/quick", "s", json!({}), None)
         .await
@@ -951,6 +959,7 @@ async fn the_global_library_is_not_run_until_a_bundle_is_installed() {
         panic!("library")
     };
     assert!(lib.is_empty(), "{lib:?}");
+    assert!(samples(flows.command(port::Command::ListSamples).await.unwrap()).installed);
     flows.stop().await;
 }
 

@@ -505,6 +505,7 @@ impl ScriptedBackend {
                 .ok_or_else(|| PortError::Failed(format!("没有流程 {name}"))),
             ReloadFlows | ReloadJobs => Ok(Reply::Ok),
             ListLibrary => Ok(Reply::Library(st().library.clone())),
+            ListSamples => Ok(Reply::Samples(st().samples.clone())),
             ListRuns { flow } => {
                 let mut runs: Vec<_> = st()
                     .runs

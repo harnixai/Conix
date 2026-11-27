@@ -21,6 +21,8 @@ pub struct Seed {
     pub bundles: Vec<port::BundleInfo>,
     /// 全局流程库里有、项目没装的包（`ListLibrary`）。
     pub library: Vec<String>,
+    /// 全局库里内置的包与项目装没装（`ListSamples`，帮助浮层的「样例」）。
+    pub samples: Vec<port::SampleBundle>,
     pub runs: Vec<RunView>,
     pub jobs: Vec<JobSeed>,
     /// 可装的插件包；装好的不进种子，从 `nothing installed` 起步。

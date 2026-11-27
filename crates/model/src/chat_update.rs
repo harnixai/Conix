@@ -302,7 +302,7 @@ pub(crate) fn text(s: &mut State, c: char) -> Vec<Effect> {
         return vec![];
     }
     if c == '?' && s.ui.composer.is_empty() && !s.ui.composer.bash {
-        s.ui.overlay = Some(Overlay::Help { scroll: 0 });
+        s.ui.overlay = Some(Overlay::help());
         return vec![];
     }
     s.ui.composer.insert(c);
@@ -672,7 +672,7 @@ fn local_command(s: &mut State, name: &str, arg: String) -> Option<Vec<Effect>> 
     let session = s.ui.chat.clone();
     Some(match name {
         "help" => {
-            s.ui.overlay = Some(Overlay::Help { scroll: 0 });
+            s.ui.overlay = Some(Overlay::help());
             vec![]
         }
         "quit" | "exit" => {
