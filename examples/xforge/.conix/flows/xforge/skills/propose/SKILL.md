@@ -33,4 +33,6 @@ description: 把想法收敛成有边界的目标：写提案，把对规格与�
 **快速变更没有设计站**：这一站顺手划工作包，`xpkg plan <编号> "<标题>" --paths a,b --criteria "判据一;判据二" [--after p1] [--verify <名字>[:参数=值]]`，验证名字从 `xpkg verify-menu` 里选（没有合适的就不写）。
 路径盖住它会改的每个文件，测试也算；判据是能验证的完成条件。交出的 `packages` 就是划的这些：`{id, title, paths, after}`，与 plan 一致。
 
-被打回时先读打回的理由与 findings，照它改提案与增量，两边保持一致。
+被打回时先读打回的理由，再 `xledger list findings` 看 open 的发现：照它改提案与增量（两边保持一致），每条改完
+`xledger set findings <编号> resolved "<怎么改的>"`；不同意的 `xledger set findings <编号> disputed "<理由>"`，由检查站或人定。
+发现都有了结论这一站才过。

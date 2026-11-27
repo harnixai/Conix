@@ -40,6 +40,9 @@ stations:
       - {kind: gate, gate: interface-delta}
       # 没有父运行的设计站：破坏性的接口改动在提案这里就要有接受了的决定。
       - {kind: gate, gate: interface-compat}
+      # 规格侧检查记下发现、打回这里时：发现由这一站改完结掉（xledger set findings … resolved）。不在这里查，
+      # 开着的发现要到澄清站才挡住，而澄清的会话只问问题、结不了它，运行就卡在那里。
+      - {kind: gate, gate: ledgers-settled}
       # 破坏性的改动还要项目的主人点头：要不要由门禁算出的 breaking 定（不由模型交的输出定，门禁没结论就当要）。
       # 批的是接口增量；规格侧检查批的也绑着它，之后再改要回来重批。
       - kind: confirm

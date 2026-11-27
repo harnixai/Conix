@@ -108,6 +108,8 @@ fn the_dual_path_and_its_children_hold_together_and_stay_out_of_the_risk_route()
     // The proposal's is the owner's approval of a breaking change, only when there is one.
     assert_eq!(confirms.iter().map(|(id, _)| *id).collect::<Vec<_>>(), ["propose", "clarify", "check", "join", "verify"]);
     assert!(dual.station("propose").unwrap().exit.iter().any(|e| e.when().is_some_and(|w| w.fact.as_deref() == Some("breaking"))));
+    // 规格侧检查打回提案时带着的发现由提案结掉：澄清的会话结不了它，不在提案查就卡在澄清。
+    assert!(gates_of(dual.station("propose").unwrap()).iter().any(|g| g == "ledgers-settled"));
     for (id, separate) in confirms {
         assert_eq!(separate, Some(OrSetting::Setting("${settings.review.separate}".into())), "{id}");
     }
