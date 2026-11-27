@@ -36,7 +36,8 @@
 `PYTHONPYCACHEPREFIX="$TMPDIR/pycache"`，xforge 的 `verify.sh` 就是这么写的）。缺省不联网（包在 `bundle.yaml` 的 `exec`
 里声明才联网），`~/.ssh` 这类凭据读不到。每次起的进程都记进运行历史，带沙箱守住了什么（`enforced`）。macOS 自带沙箱；
 Linux 要装 `bwrap`（bubblewrap），没装时这些命令不跑、门禁报错，确实要在沙箱外跑就在全局 `conix.yaml` 写
-`flows.exec_unconfined: allow`。
+`flows.exec_unconfined: allow`。macOS 上，门禁的进程自己另起进程组再放到后台的（`setsid`），门禁结束后还会留着（仍在沙箱里，
+Agix 在修：harnixai/Agix#113）。
 
 门禁回的结果都一样：`verdict`、`summary`、`findings`（哪个文件、哪一行、哪里不对）、`metrics`，读过的文件连同 hash
 记进运行。`fail` 是交付要改：站写了 `on_unmet` 就自动打回，新一轮的会话会拿到 findings。`error` 是门禁没得出结论

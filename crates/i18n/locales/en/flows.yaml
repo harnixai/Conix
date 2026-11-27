@@ -18,6 +18,9 @@ flows:
   worktree_merged: "Worktree {branch} merged into {into}"
   worktree_kept: "Worktree {branch} removed, the branch kept: /worktree merge or discard still"
   worktree_discarded: "Worktree {branch} discarded with its branch"
+  worktree_merged_at: "Worktree {branch} merged into {into} ({how}, {commit})"
+  worktree_conflict: "Merging {branch} into the project conflicts in {files}. Nothing in the project changed; the work is committed on {branch} and its worktree is still at {worktree}: resolve it and /worktree merge again, or keep / discard"
+  worktree_git_failed: "{branch} could not be decided: {message}"
   progress_done: "{done}/{total} stations"
   progress: "station {done}/{total} {current}"
   run:

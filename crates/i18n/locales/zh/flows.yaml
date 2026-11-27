@@ -19,6 +19,9 @@ flows:
   worktree_merged: "worktree {branch} 合进了 {into}"
   worktree_kept: "worktree {branch} 删了、分支留着：还能 /worktree merge 或 discard"
   worktree_discarded: "worktree {branch} 连同分支丢掉了"
+  worktree_merged_at: "worktree {branch} 合进了 {into}（{how}，{commit}）"
+  worktree_conflict: "把 {branch} 合进项目有冲突：{files}。项目没动；这次的工作提交在分支 {branch} 上，worktree 还在 {worktree}：解决后再 /worktree merge，或 keep / discard"
+  worktree_git_failed: "{branch} 没收尾成：{message}"
   progress_done: "{done}/{total} 站"
   progress: "站 {done}/{total} {current}"
   run:

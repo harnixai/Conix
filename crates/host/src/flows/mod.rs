@@ -728,9 +728,27 @@ impl Flows {
             .runner
             .end_worktree(run, kind, Self::by())
             .await
-            .map_err(|e| match e {
-                harnix_flow::runner::EndError::Flow(f) => flow_err(f),
-                other => PortError::Failed(other.to_string()),
+            .map_err(|e| {
+                use harnix_flow::runner::EndError as E;
+                match e {
+                    E::Flow(f) => flow_err(f),
+                    E::Conflict {
+                        files,
+                        branch,
+                        worktree,
+                    } => PortError::Failed(i18n::t!(
+                        "flows.worktree_conflict",
+                        branch = branch,
+                        files = files.join(", "),
+                        worktree = worktree
+                    )),
+                    E::Git { message, branch } => PortError::Failed(i18n::t!(
+                        "flows.worktree_git_failed",
+                        branch = branch,
+                        message = message
+                    )),
+                    E::Lost(m) => PortError::Failed(m),
+                }
             })?;
         self.runner.apply(out).await;
         let rec = self.engine.record(run).await.map_err(flow_err)?;
@@ -738,16 +756,15 @@ impl Flows {
         let o = w.and_then(|w| w.outcome.as_ref());
         let branch = w.map(|w| w.branch.as_str()).unwrap_or_default();
         Ok(match (how, o) {
-            (port::WorktreeEnd::Merged, Some(o)) => format!(
-                "merged {branch} into {} ({}) at {}",
-                o.into.as_deref().unwrap_or("the project"),
-                o.how.as_deref().unwrap_or("merge"),
-                o.commit.as_deref().map_or("", |c| &c[..c.len().min(7)]),
+            (port::WorktreeEnd::Merged, Some(o)) => i18n::t!(
+                "flows.worktree_merged_at",
+                branch = branch,
+                into = o.into.as_deref().unwrap_or("-"),
+                how = o.how.as_deref().unwrap_or("merge"),
+                commit = o.commit.as_deref().map_or("", |c| &c[..c.len().min(7)])
             ),
-            (port::WorktreeEnd::Kept, _) => {
-                format!("kept the branch {branch}; its worktree is removed")
-            }
-            _ => format!("discarded {branch} and its worktree"),
+            (port::WorktreeEnd::Kept, _) => i18n::t!("flows.worktree_kept", branch = branch),
+            _ => i18n::t!("flows.worktree_discarded", branch = branch),
         })
     }
 
