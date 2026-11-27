@@ -40,7 +40,7 @@
 | 放哪 | 判据 |
 |---|---|
 | Rust | 要持久（跨重启）、要可信（流程作者与模型绕不过）、要并发与锁、要执法、跨流程通用 |
-| 包 JS | 只依赖项目文件与运行数据、确定、随运行钉住、只为这一个应用 |
+| 包 JS | 只依赖项目文件与运行数据、随运行钉住、只为这一个应用；要系统命令经 `flow.exec`（§7.14） |
 | Agix 插件 | 要 Agix 的工具管线（`tools.Bash`、MCP、权限规则、hook）、要独立于项目分发、要在流程之外给所有会话用 |
 
 ### 1.2 两个 QuickJS：分工，不合并
@@ -49,15 +49,17 @@
 |---|---|---|
 | 定位 | 流程的零件：门禁脚本、命令、命令步骤、选值脚本 | 通用扩展；要工具与 MCP 的门禁与步骤 |
 | 生命周期 | 随运行钉住（`Pinned`） | 装了就生效 |
-| 能力 | `flow.*`（§7.7），没有 shell、没有网络 | `tools.*`、`agix.*`、`conix.*` |
+| 能力 | `flow.*`（§7.7）；进程只经 `flow.exec`（argv、档位由调用方定，§7.14），没有 shell | `tools.*`、`agix.*`、`conix.*` |
 | 授权 | 流程库按范围限写，不问人 | Agix 的权限与披露 |
 | 依赖 | 不依赖 Agix（往回提给 Harnix 也成立） | Agix |
 
-不合并的原因：包 JS 要随运行钉住、要确定、要在没有 Agix 时也成立；插件函数跑在工具管线里，结论会随会话设置变。
+不合并的原因：包 JS 要随运行钉住、要在没有 Agix 时也成立；插件函数跑在工具管线里，结论会随会话设置变。包 JS 不碰进程
+时是确定的；用了 `flow.exec` 就不承诺确定（外部程序的输出流程库管不了），只读靠的是档位（§7.14），不再靠"JS 起不了进程"。
 
 **对齐写法**：两边的入口都是 `export default function (input, flow)`；`flow.*` 的纯计算函数与 `agix.*` 同名同义
-（`yaml`、`glob`、`schema`、`sha256`、`path`）。同一段逻辑在包与插件之间搬，只换宿主对象。包 JS 要跑 shell 或调 MCP
-时不开口子：写成 `command` 门禁，或交给插件函数（`[x-conix.gates]` / `steps`）。
+（`yaml`、`glob`、`schema`、`sha256`、`path`）。同一段逻辑在包与插件之间搬，只换宿主对象。包 JS 要跑系统命令（系统的
+`git`）用 `flow.exec`：按 argv 起、经宿主的执行服务、档位由调用方定（§7.14）；要 shell 写成 `command` 门禁；要调 MCP
+交给插件函数（`[x-conix.gates]` / `steps`）。
 
 ## 2. 门禁：按"检查逻辑写在哪"分三类
 
@@ -135,6 +137,8 @@ timeout_seconds: 900
 - 运行目录下的 `gate-<名>.log` 留着读到的输出（沿用）。
 - **谁能跑**：命令门禁会在本机执行任意命令，只在受信的项目里跑；`conix.yaml` 的 `flows.command_gates: off` 整机关掉
   （缺省 `trusted`）。这与 Agix 对项目 hook、项目 MCP stdio server 的规矩一致：项目受信，它的配置才能在本机执行命令。
+  这个开关管的是项目与包定义的**全部**执行：命令门禁、`plan` 的 run、包 JS 的 `flow.exec`（§7.14）。
+- 进程经宿主的执行服务起（`sh -c <命令>`，档位 `read`），每起一个在运行历史里记一条 `exec`（§7.14）。
 
 #### `plan`：脚本挑，Rust 跑
 
@@ -162,8 +166,8 @@ export default function (input, flow) {
   就依次跑。别的形状、抛错、超时（脚本自己的时限是 30 秒，与 run 的无关）算 `error`。
 - **先全部核对，一个不合就一个都不跑**（`error`）：`argv` 非空、程序非空、没有 NUL；`cwd` 相对运行的工作目录，绝对路径、
   `..`、经符号链接出界、不存在的都拒绝；`argv[0]` 是带 `/` 的相对路径时按 `cwd` 找；至多 32 个 run。
-- **跑**：与命令门禁同一套——环境变量白名单与宿主的拒绝表、`FLOW_*` 变量、自己的进程组、只在受信的项目里、
-  `flows.command_gates: off` 一样关掉。门禁的 `timeout_seconds` 是所有 run 加起来的时限，run 自己的 `timeout_seconds` 只能更短。
+- **跑**：与命令门禁同一套——经宿主的执行服务、档位 `read`、环境变量白名单与宿主的拒绝表、`FLOW_*` 变量、自己的进程组、
+  只在受信的项目里、`flows.command_gates: off` 一样关掉，每个 run 记一条 `exec`（§7.14）。门禁的 `timeout_seconds` 是所有 run 加起来的时限，run 自己的 `timeout_seconds` 只能更短。
 - **结论**：每个 run 都退出 0 才 `pass`。退出非 0 的每个一条 finding（`rule` 是 run 的名字，消息带输出的尾巴），后面的照跑，
   结论 `fail`；起不来、超时、被信号杀掉算 `error`（同命令门禁），后面的不跑。`runs` 为空是 `pass`（`summary` 用脚本给的，
   没给是 "nothing to run"）。
@@ -201,7 +205,8 @@ export default function (input, flow) {
   - `flow.schema.validate(value, schema)`（回 `{ok, errors}`；§7.7 里叫 `flow.validate`，两个名字同义）；
   - `flow.log(...)`（进 `gate-<名>.log`）。
 
-  路径规则同上。没有写、没有命令、没有网络。包内的 `import`、`flow.git`、`flow.runs` 见 §7.6–§7.7。
+  路径规则同上。没有写；进程只经 `flow.exec`，档位 `read`（§7.14）。包内的 `import`、`flow.git`、`flow.runs`、
+  `flow.exec` 见 §7.6–§7.7。
 - **证据由运行时记**：脚本读过、stat 过的每个文件，路径与 sha256 自动进结果的 `evidence`，脚本自己写的 `evidence`
   不算数——证据造不了假。
 - **限额**：时限（中断回调）、内存上限（64 MiB）、返回值至多 1 MiB。
@@ -493,6 +498,7 @@ doctor: doctor                         # 自检脚本 scripts/doctor.js（§7.13
 | `commands` | 包的命令（§7.6）。写成列表（`[xspec, xledger]`）时每个命令的全部子命令都算会写；写成映射时 `read_only` 列出只读的子命令 |
 | `settings` | 项目里的设置文件（`file`，相对项目根、不出项目）与缺省（`defaults`，映射）。见下 |
 | `doctor` | 包的自检脚本（`scripts/<名>.js`），宿主在运行之外为一个项目跑它，查这个项目给包备齐了没有（§7.13）。与别的脚本引用一样读包时校验：名字不对、文件不在，包里的流程都报错 |
+| `exec` | 包起的进程（`flow.exec`、命令门禁、`plan` 的 run）能有什么：`{network: bool, env: [名字, 前缀*]}`，缺省都没有（§7.14）。读包时校验，启动时钉进运行 |
 
 - **`read_only`** 按命令名后的第一个词匹配，照 Agix `[[command]]` 的约定。声明它是为了让运行之外也能放心地查
   （`/flow:xforge:xspec list`）：会写的命令运行之外只有人能调（§7.6）。
@@ -580,12 +586,14 @@ doctor: doctor                         # 自检脚本 scripts/doctor.js（§7.13
 | 写 | `write.text/yaml/json`、`append`、`remove`、`print` | 命令 |
 | 算 | `validate(value, schema)`、`yaml` / `json` 编解码、`sha256`、`path.*` | 全部 |
 | git | `git.base()`（运行的基线提交）、`git.changed({since?})`（基线以来的改动加没提交的，排除制品目录与 `.conix/`）、`git.head()` | 全部，只读 |
+| 进程 | `exec({argv, cwd?, timeout_seconds?, stdin?})` → `{code, signal, stdout, stderr, timed_out, truncated, ms, enforced}`（§7.14） | 全部；档位由调用方定，不由脚本选 |
 | 运行 | `runs.list({bundle?, active?})`、`runs.get(id)`：状态、输入、输出、运行目录 | 全部，只读 |
 | 设置 | `settings`：包的设置（§7.1）。运行里是启动时钉住的；运行之外的命令、门禁试跑是文件此刻合并缺省的结果；包没声明是 `{}`；文件读不成时读它就抛错 | 全部，只读 |
 | 日志 | `log` | 全部 |
 
-读写都限在工作目录与各件允许的范围里，出界报错。git 由 Rust 跑，不给 JS 起进程：JS 里有了进程就绕过了"只读、确定"。
-§2.3 的门禁脚本只用只读的那几组；`import`、`git`、`runs` 对它同样可用。
+读写都限在工作目录与各件允许的范围里，出界报错。`flow.git` 由 Rust 跑、参数固定；要别的系统命令用 `flow.exec`，它经宿主的
+执行服务起进程，档位按调用的上下文定（§7.14）：门禁、doctor、只读的子命令拿到的是 `read`，所以它们的"只读"靠档位守，
+不靠"JS 起不了进程"。§2.3 的门禁脚本只用只读的那几组；`import`、`git`、`runs`、`exec` 对它同样可用。
 
 ### 7.8 工作项
 
@@ -740,7 +748,8 @@ export default function (input, flow) {
 }
 ```
 
-- **与门禁脚本同一个沙箱**（§2.3）：只读、确定，时限 30 秒，同样的内存与返回值上限。`flow.read.*`、`glob`、`stat` 限在项目里；
+- **与门禁脚本同一个沙箱**（§2.3）：只读，时限 30 秒，同样的内存与返回值上限；宿主给了执行服务时有 `flow.exec`
+  （档位 `read`，在项目里，记进宿主日志，§7.14）。`flow.read.*`、`glob`、`stat` 限在项目里；
   `flow.settings` 是项目此刻的文件合并缺省（同运行之外的命令，读不成时读它就抛错，由脚本报成 `error`）；`flow.git.*` 在项目里、
   没有基线（`changed` 要给 `since`）；包内 `import` 照常。**没有 `flow.runs`**：项目备没备好与在途的运行无关，连查两次要说一样的话。
   `data_dir` 是包的数据目录（相对项目根，宿主没给布局时是 `null`）。
@@ -748,10 +757,65 @@ export default function (input, flow) {
   `error`：照项目现在的样子包跑不了（某条流程会拒绝启动、某道门禁必然 `error`）；`warn`：会缺什么、某处会被拒，别的能跑；
   `info`：知道就好（第一次运行会建的目录）。形状不对（多了字段、`level` 不认识、`message` 空）、抛错、超时、读出界，都成一条点名脚本的
   `error`。没写 `doctor` 的包回空报告。
-- **从不修**：没有写、没有命令，`fix` 也只是一句话，宿主不执行它。为什么：自检是"看一眼"，跑一次就改了文件的检查，人得先审它改了什么；
+- **从不修**：没有写，`flow.exec` 只拿到 `read`，`fix` 也只是一句话，宿主不执行它。为什么：自检是"看一眼"，跑一次就改了文件的检查，人得先审它改了什么；
   修由人或由包的命令（经人）做。
 - 落点：`crates/flow/src/runner/doctor.rs`（`doctor`、`DoctorReport`、`DoctorFinding`、`DoctorLevel`）、`bundle.rs`（`BundleMeta::doctor`、
   `doctor_problems`）；宿主的 `conix flow doctor` 调它。
+
+### 7.14 执行：一个服务，档位按上下文定
+
+起进程的地方原来各有各的规矩：命令门禁（`sh -c`、环境白名单、只在受信项目、无隔离）、`plan` 的 run（按 argv）、流程库
+自己的 git、宿主的通知出口与体检；包 JS 一个进程都起不了。现在**流程库替项目或包起的每个进程都经宿主的执行服务**
+（`kernel/host.rs` 的 `Exec`）：命令门禁、`plan` 的 run、包 JS 的 `flow.exec`。谁能跑、带什么环境、能不能上网、能写哪里、
+怎么记，一处定。
+
+```js
+// commands/xreport.js：在运行的工作目录里跑系统的 git
+const r = flow.exec({ argv: ["git", "log", "--format=%H %s", "-n", "50"], cwd: ".", timeout_seconds: 10 });
+// r = {code, signal, stdout, stderr, timed_out, truncated, ms, enforced: {backend, filesystem, network}}
+```
+
+- **只收 argv**：程序与参数原样传过去，中间没有 shell，`;`、`$(…)`、`|` 在参数里只是字符；给一条命令行（字符串）就抛错。
+  要 shell 自己写 `["sh", "-c", …]`——那是包作者明着写的，与模型写进数据里的字符串无关（§2.2 `plan` 的道理）。
+- **`cwd`** 相对脚本工作的目录：运行里是运行的工作目录（项目或 worktree），运行之外（doctor、运行之外的命令、试门禁）是项目
+  （或试的目录）；绝对路径、`..`、经符号链接出界、不存在的都抛错。`argv[0]` 是带 `/` 的相对路径时按 `cwd` 找。
+- **输出**：stdout、stderr 各至多 4 MiB（留开头），多了截掉、`truncated` 为真。**时限**：`timeout_seconds` 缺省、写多了都取
+  脚本剩下的时间（脚本自己的时限，命令是 30 秒）；超时整个进程组杀掉，`timed_out` 为真。`stdin` 是一段文本。
+- **退出非 0、被信号杀、超时是回答**，脚本自己判；**起不来、被拒、调用写错是抛错**（错误的 `code` 是 `exec`），起之前整份核对。
+
+**档位由调用方的上下文定，不由脚本选**：脚本能选，就会选最宽的。
+
+| 谁在调 | 档位 | 记到 |
+|---|---|---|
+| 门禁脚本（`kind: script`）、`plan` 的脚本、`foreach` 脚本 | `read` | 运行历史 |
+| 命令门禁、`plan` 的 run | `read`：门禁判活，不干活 | 运行历史 |
+| 运行里的命令：只读的子命令 | `read` | 运行历史 |
+| 运行里的命令：会写的子命令、命令步骤（`executor: {kind: command}`） | `workspace`：运行目录、包的数据目录，站有 `writes` 时加上每条 glob 第一个通配符之前的那段目录 | 运行历史 |
+| 运行之外的命令（人调、模型调都一样）、试门禁（`flow_gate_try`）、doctor | `read` | 宿主日志 |
+| 宿主自己的：通知出口（用户自己在全局 `conix.yaml` 里配的） | `host`：不隔离 | 宿主日志 |
+
+运行之外的命令写的东西比每个运行都活得长，写由命令自己的写入器管（§7.6），它起的进程只给 `read`。`workspace` 给的是目录，
+`writes` 的 glob 本身照旧由写入器与会话的写入执法守（§7.9）。
+
+- **网络与环境由 `bundle.yaml` 的 `exec` 声明**：`exec: {network: true, env: [CI_TOKEN, CI_*]}`。缺省不上网、环境只有基本的
+  （`PATH`、`HOME`、语言区域、`TMPDIR`……）；`env` 按名字或以 `*` 结尾的前缀透传，再减去宿主的拒绝表（§2.2：写了也不给，
+  拒绝表的项以 `*` 开头是后缀）。读包时校验（未知字段、不是变量名的项都报错），启动时钉进运行（`Pinned::exec`），运行之外读包
+  此刻的。命令门禁与 `plan` 的 run 也按它定网络；不在包里的门禁不上网。命令门禁仍带 `FLOW_*` 变量，`flow.exec` 的进程不带。
+- **谁能跑**：只在受信的项目里，且 `flows.command_gates` 没关——这个开关就是**项目与包定义的全部执行**的总开关。不行时
+  `flow.exec` 抛错并说为什么（开关关着、项目没受信），命令门禁照旧是 `error`。宿主没给执行服务的地方（没有运行时、`doctor`
+  不带执行服务地调）`flow.exec` 抛 "not offered"。
+- **记录**：每个进程都记一笔，从不记输出。运行里是运行历史的一条 `exec`（`Engine::note_exec`）：`for`（`gate semgrep`、
+  `flow.exec in commands/xreport.js`）、`argv`、`cwd`、`profile`、`network`、`code`、`signal`、`timed_out`、`truncated`、`ms`、
+  `enforced`，起不来时是 `error`；运行之外是宿主日志里 target `flow::exec` 的一行。argv 进记录，所以别把密钥写进参数，用 `env`。
+- **后端与接缝**：现在只有普通子进程（流程库的 `PlainExec`，Conix 的 `host::exec::ConixExec` 缺省也是它）：档位与网络
+  **照传不守**，每条结果与记录的 `enforced` 都写 `{backend: plain, filesystem: false, network: false}`，读记录的人不会把档位
+  当成隔离。OS 级的隔离（seatbelt、bwrap，或由 Agix 提供）之后再定：它实现 Conix 的 `Confine`（`crates/host/src/exec.rs`），
+  把一个请求包成在隔离里跑的请求并说它守住了什么，再交给 `run_plain` 起；调用方、档位规则、记录都不用改。
+- **确定性**：不碰进程的包 JS 照旧确定；用了 `flow.exec` 就不承诺（外部程序的输出流程库管不了）。门禁的证据仍只是它读过的
+  文件，进程的输出不算证据。
+- **不经这个服务的**：参数由 Rust 写死的内部 git（`runner/git.rs`、宿主体检的 `check-ignore`、`@` 补全的 `ls-files`）。它们
+  不跑项目给的命令，但仓库自己的配置能让 git 起程序，所以每次都关掉 `core.fsmonitor`、不分页，读 diff 的加 `--no-ext-diff
+  --no-textconv`。
 
 ## 8. 落点
 
@@ -783,6 +847,7 @@ export default function (input, flow) {
 | 流程地址与本地路由、补全 | `crates/model/src/flows.rs`、`crates/model/src/composer.rs`（interaction §4.5） |
 | 流程包的管理（全局库、registry、lock、内置包、包文件与 `MANIFEST.yaml`、`conix flow …`、体检） | `crates/host/src/flows/package.rs`、`library.rs`、`manage.rs`、`doctor.rs`、`builtin.rs`、`crates/conix/src/flow_cli.rs`、`crates/flow/src/bundle.rs`（`requires`、`RESERVED_BUNDLES`）、`crates/model/src/flow_addr.rs`（找不到包时的提示）、`port::Command::{ReloadFlows, ListLibrary}` |
 | 包的自检（`doctor`） | `crates/flow/src/runner/doctor.rs`、`runner/scriptenv.rs`（`Env::for_doctor`）、`bundle.rs`（`BundleMeta::doctor`）；`crates/flow/tests/doctor.rs` |
+| 执行服务（`Exec`、档位、记录、`flow.exec`、`bundle.yaml` 的 `exec`） | `crates/flow/src/kernel/host.rs`（`Exec`、`ExecRequest`、`ExecProfile`、`Enforcement`）、`runner/exec.rs`（`PlainExec`、`run_plain`、记录、环境）、`runner/scriptenv.rs`（`ExecScope`）、`runner/script.rs`（`flow.exec`）、`bundle.rs`（`ExecDecl`）、`kernel/parts.rs`（`Pinned::exec`）、`kernel/engine.rs`（`note_exec`）；Conix 的后端与接缝 `crates/host/src/exec.rs`；`crates/flow/tests/exec.rs` |
 | 内置的 xforge | `examples/xforge/`（项目与流程包）、`crates/host/build.rs`、`crates/host/src/flows/builtin.rs`（种子，进全局库）；`crates/flow/tests/xforge.rs`、`crates/conix/tests/live_xforge.rs` |
 
 ## 9. 往回迁

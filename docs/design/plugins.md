@@ -134,6 +134,11 @@ TUI 照常收到事件。
   且 Conix 读到它带 `[x-conix]` 的包；这一版不区分自带与否（Conix 没有宿主自带的包）。
 - `start` 本身不再问人：调它的插件命令不是 `read_only` 的子命令，那次 `RunExt` 已经过了 Agix 的权限询问（用户亲手敲的算已批准）。
 
+**还没有 `conix.exec`**（下一步）：包 JS 起进程走流程库的执行服务（flows.md §7.14），插件代码现在只有 Agix 的 `tools.Bash`
+（过 Agix 的权限规则）。要加的话是 `conix.exec({argv, cwd?, timeout_seconds?, stdin?})`：同一个服务、档位固定 `read`、
+受同一个开关（`flows.command_gates`）与项目信任约束、记进宿主日志（流程站的会话里记进那次运行）。没在这一版做，因为它
+绕开 Agix 的权限询问：先要定插件代码起的进程归 Agix 的规则管还是归 Conix 的档位管，再决定开不开。
+
 ### 5.2 门禁与步骤：`plugin.call`
 
 插件函数（`[[function]]`，Agix `runext.md` §12）不进模型的工具表，只给宿主按调用名 `<包名>.<函数名>` 调。

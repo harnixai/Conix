@@ -559,6 +559,12 @@ schema；`job_validate` 不落盘，回下 5 次触发时刻与护栏的实际�
   定义经工具存了推 `FlowUpserted` + `FlowDetail`，删了推 `FlowRemoved`。状态与库一致，"等待 / 暂停中 /
   已暂停"取库算出的 `Phase`。`Hello` 的 `flows` 为真。
 - 实例停时派工器的任务不再等，运行不取消；下次启动 `Runner::start` 接着做上次派出去还没答复的活。
+- **执行服务**（`host/src/exec.rs`，flows.md §7.14）：实例替项目、包、用户配置起的进程都经它——命令门禁、`plan` 的
+  run、包 JS 的 `flow.exec`（`RunnerConfig::exec`）、`conix flow doctor` 里包的自检（`DoctorExec`）、通知出口。档位由
+  调用方定，每个进程记一笔（运行历史的 `exec`，或 `host.log` 里 target `flow::exec` 的一行）。现在只有普通子进程
+  （`ConixExec` 加 `Plain`），什么都不隔离，记录照实写；OS 级隔离以后实现 `Confine` 接进来，在 `exec::service()` 里选。
+  `flows.command_gates` 是项目与包定义的全部执行的总开关。参数写死的内部 git（worktree、`@` 补全、体检的
+  `check-ignore`）不经它，但都关掉仓库配置里的 `core.fsmonitor`。
 
 ### 8.7 实例进程的进程级工作
 
@@ -619,7 +625,8 @@ schema；`job_validate` 不落盘，回下 5 次触发时刻与护栏的实际�
 
   桌面、ntfy、webhook、邮件都是一条命令；Conix 不内建网络客户端，凭据留在用户自己的环境里。占位符
   `{instance} {project} {kind} {level} {title} {text} {attach}` 只做参数级替换（不经 shell）；`{attach}` 是
-  `ssh <host> -t conix attach <名>`。每条至多 10 秒，失败重试一次，记到 `state/conix/notify.jsonl`。`TestNotify`
+  `ssh <host> -t conix attach <名>`。命令经实例的执行服务起（§8.6），档位 `host`：是用户自己的命令，不隔离，带用户的
+  整个环境。每条至多 10 秒，失败重试一次，记到 `state/conix/notify.jsonl`。`TestNotify`
   （`/notify test`）发一条测试，回每个出口的结果。
 - **离开期间**：接入时实例推 `AwaySummary{since_ms, alerts}`（上一次有人脱离之后的 Alert），TUI 弹浮层（交互 §5.5）。
 
