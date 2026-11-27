@@ -606,3 +606,25 @@ async fn snapshot_of_a_stepped_run_with_votes_and_a_proposal() {
     h.settle().await;
     h.snapshot("flow-xforge-run");
 }
+
+/// 带 `when` 的出口：不要的也列在站下面，写读到了什么；要的写为什么要。与票数、未达标的红字分开。
+#[tokio::test(start_paused = true)]
+async fn a_station_lists_its_exits_judged_not_required_and_why_the_others_are_required() {
+    let mut h = xforge().await;
+    h.pick_upper(flow_index(&h, "xforge/solid")).await;
+    h.keys("Right").await;
+    h.settle().await;
+    h.pick_upper(run_index(&h, "x1")).await;
+    h.settle().await;
+    let lower = h.lower();
+    assert!(
+        lower.contains("⊘ 批准破坏性改动：不需要（interface-compat: breaking")
+            && lower.contains("      false）"),
+        "{lower}"
+    );
+    assert!(
+        lower.contains("◇ 安全评审：要（gate impact-scan"),
+        "{lower}"
+    );
+    h.snapshot("flow-xforge-conditional");
+}

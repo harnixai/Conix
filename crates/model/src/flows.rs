@@ -43,6 +43,9 @@ pub enum FlowLower {
     Station(StationId),
     /// 站里的一件任务（子 Agent 有会话）。
     StationTask(StationId, usize),
+    /// 站上一条带 `when` 的出口这一轮的判定（`StationView::conditional` 的第 n 条）折成的第 m 行：不收起，
+    /// 审计要看得到本该有谁批、为什么这次没批；依据可能长，折行而不是截断。
+    StationExit(StationId, usize, usize),
     /// 某个会话派出的任务（子 Agent、Shell……），带它在树里的前缀。
     Task(port::TaskId, String),
     /// 选中流程定义时：流程设计的节点图的一行（只看）。
@@ -144,6 +147,11 @@ impl State {
                 out.extend(tasks(&v.main_session, "  ", &listed));
                 for st in &v.stations {
                     out.push(FlowLower::Station(st.id.clone()));
+                    let width = self.side_lower_width();
+                    for (i, c) in st.conditional.iter().enumerate() {
+                        let n = conditional_lines(c, width).len();
+                        out.extend((0..n).map(|m| FlowLower::StationExit(st.id.clone(), i, m)));
+                    }
                     if self.station_open(&v.summary.id, &st.id) {
                         if let Some(sid) = &st.session {
                             out.extend(tasks(sid, "    ", &[]));
@@ -513,6 +521,13 @@ pub(crate) fn lower_lines(s: &State, width: usize) -> Vec<Line> {
                 }
                 crate::sessions::split_line(left, right, width)
             }
+            FlowLower::StationExit(id, k, m) => v
+                .stations
+                .iter()
+                .find(|x| &x.id == id)
+                .and_then(|st| st.conditional.get(*k))
+                .and_then(|c| conditional_lines(c, width).into_iter().nth(*m))
+                .unwrap_or_default(),
             FlowLower::StationTask(id, k) => {
                 let Some(st) = v.stations.iter().find(|x| &x.id == id) else {
                     return Line::default();
@@ -739,9 +754,9 @@ fn lower_action(s: &mut State, a: Action) -> Option<Vec<Effect>> {
     let rows = s.flow_lower_rows();
     let row = rows.get(s.ui.lower[Tab::Flows.index()].selected)?.clone();
     let station = match &row {
-        FlowLower::Station(id) | FlowLower::StationTask(id, _) => {
-            run.stations.iter().find(|x| &x.id == id).cloned()
-        }
+        FlowLower::Station(id)
+        | FlowLower::StationTask(id, _)
+        | FlowLower::StationExit(id, _, _) => run.stations.iter().find(|x| &x.id == id).cloned(),
         _ => None,
     };
     let id = run.summary.id.clone();
@@ -963,4 +978,41 @@ pub(crate) fn person_op(s: &mut State, name: &str, arg: &str) -> Vec<Effect> {
             op,
         },
     )]
+}
+
+/// 一条带 `when` 的出口给人看的样子：符号、标签、判定与依据。不要的淡色、带 `⊘`，要的用提醒色、带 `◇`——
+/// 都不是门禁或确认的结果（那是站行右边的红字与票数），所以不用 ✓ / ✗。
+pub(crate) fn conditional_parts(c: &port::ConditionalExit) -> Vec<(String, Tone)> {
+    let (glyph, tone, verdict) = match c.required {
+        Some(false) => ("⊘ ", Tone::Dim, i18n::t!("flows.exit_not_required")),
+        Some(true) => ("◇ ", Tone::Warn, i18n::t!("flows.exit_required")),
+        None => ("◇ ", Tone::Dim, i18n::t!("flows.exit_undecided")),
+    };
+    let mut out = vec![
+        (glyph.to_string(), tone),
+        (c.label.clone(), Tone::Normal),
+        (i18n::t!("flows.exit_verdict", verdict = verdict), tone),
+    ];
+    if !c.why.is_empty() {
+        out.push((i18n::t!("flows.exit_why", why = c.why), Tone::Dim));
+    }
+    out
+}
+
+/// 站下面的那几行：首行缩进到站名之下，续行再缩进两格。
+fn conditional_lines(c: &port::ConditionalExit, width: usize) -> Vec<Line> {
+    let spans: Vec<tui::Span> = conditional_parts(c)
+        .into_iter()
+        .map(|(text, tone)| tui::Span { text, tone })
+        .collect();
+    crate::text::wrap(&spans, width, &Line::plain("    "), &Line::plain("      "))
+}
+
+/// 同上，一行字（`/<包>` 的状态、话头里用）。
+pub(crate) fn conditional_text(c: &port::ConditionalExit) -> String {
+    conditional_parts(c)
+        .into_iter()
+        .skip(1)
+        .map(|(t, _)| t)
+        .collect()
 }

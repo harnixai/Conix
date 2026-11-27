@@ -227,6 +227,21 @@ pub struct StationView {
     /// 确认站的票数；不是确认站是 `None`。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub votes: Option<VoteView>,
+    /// 带 `when` 的出口这一轮怎么判的（flows.md §4.2）：不要的也列出来，审计看得到本该有谁批、为什么这次没批。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub conditional: Vec<ConditionalExit>,
+}
+
+/// 一条带 `when` 的出口这一轮的判定。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConditionalExit {
+    pub label: String,
+    /// `Some(true)` 要（读到"要"，或说不清按要算）；`Some(false)` 不要；`None` 还不知道（读的门禁还在跑）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub required: Option<bool>,
+    /// 判的依据：不要的是读到了什么（`interface-compat: breaking = false`），要的是为什么要。
+    #[serde(default)]
+    pub why: String,
 }
 
 /// 与 Harnix flow 的 `StationStatus` 一一对应。

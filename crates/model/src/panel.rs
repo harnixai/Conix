@@ -846,6 +846,7 @@ mod tests {
             unmet: None,
             session: None,
             votes: None,
+            conditional: vec![],
         }
     }
 

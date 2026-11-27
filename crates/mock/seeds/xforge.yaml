@@ -96,7 +96,10 @@ runs:
     stations:
       - {"id": "spec", "title": "规格", "work": "session", "exit": ["output"], "status": "passed"}
       - {"id": "design", "title": "设计", "work": "session", "exit": ["output"], "status": "passed"}
-      - {"id": "check", "title": "检查", "work": "confirm", "exit": ["confirm"], "status": "passed", "votes": {"approvals": 2, "rejections": 0, "min": 2}}
+      - {"id": "check", "title": "检查", "work": "confirm", "exit": ["gate: interface-compat", "confirm", "confirm"], "status": "passed", "votes": {"approvals": 2, "rejections": 0, "min": 2},
+         "conditional": [
+           {"label": "批准破坏性改动", "required": false, "why": "interface-compat: breaking = false"},
+           {"label": "安全评审", "required": true, "why": "gate impact-scan fact areas holds auth, in [auth, payment]"}]}
       - {"id": "apply", "title": "实施", "work": "agent × 2", "exit": ["output", "gate: verify"], "status": "held"}
       - {"id": "archive", "title": "归档", "work": "command", "exit": ["output"], "status": "pending"}
   - summary:

@@ -181,6 +181,7 @@ fn row_keys(s: &State, tab: Tab, upper: bool) -> Vec<String> {
                 FlowLower::Proposal(i) => format!("prop:{i}"),
                 FlowLower::Station(id) => format!("st:{id}"),
                 FlowLower::StationTask(id, k) => format!("stt:{id}:{k}"),
+                FlowLower::StationExit(id, k, m) => format!("stx:{id}:{k}:{m}"),
                 FlowLower::Task(id, _) => format!("task:{id}"),
                 FlowLower::Design(i) => format!("design:{i}"),
                 FlowLower::DefStation(i) => format!("def:{i}"),
@@ -582,8 +583,8 @@ fn target_at(s: &State, tab: Tab, upper: bool) -> Option<Target> {
                         None => Target::Session(v.main_session.clone(), vec![], None),
                     })
                 }
-                // 有独立会话的站切到它；其余的站都在运行的主会话里做。
-                FlowLower::Station(st) => {
+                // 有独立会话的站切到它；其余的站都在运行的主会话里做。站上的出口判定跟着站。
+                FlowLower::Station(st) | FlowLower::StationExit(st, _, _) => {
                     let st = v.stations.iter().find(|x| &x.id == st)?;
                     Some(match &st.session {
                         Some(id) => Target::Session(

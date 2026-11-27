@@ -154,8 +154,70 @@ pub(crate) fn def_stations(def: &FlowDef) -> Vec<port::StationView> {
             unmet: None,
             session: None,
             votes: None,
+            conditional: vec![],
         })
         .collect()
+}
+
+/// 带 `when` 的出口这一轮的判定，按出口的顺序：不要的取 `not_required`（记着读到的值），要的与还不知道的取
+/// 检查记录里的 `when`。要的那条的理由本来只在没达标时经 `explain()` 进 `unmet`；放在这里，过了也看得到为什么要过它。
+fn conditional(r: &harnix_flow::kernel::run::StationRec) -> Vec<port::ConditionalExit> {
+    let mut out: Vec<(usize, port::ConditionalExit)> = r
+        .not_required
+        .iter()
+        .map(|n| {
+            (
+                n.cond,
+                port::ConditionalExit {
+                    label: n.label.clone(),
+                    required: Some(false),
+                    why: when_read(&n.when, &n.value),
+                },
+            )
+        })
+        .collect();
+    for c in &r.checks {
+        let (Some(cond), Some(w)) = (c.cond, &c.when) else {
+            continue;
+        };
+        if w.required == Some(false) || out.iter().any(|(k, _)| *k == cond) {
+            continue;
+        }
+        out.push((
+            cond,
+            port::ConditionalExit {
+                label: c.label.clone(),
+                required: w.required,
+                why: w.why.clone(),
+            },
+        ));
+    }
+    out.sort_by_key(|(k, _)| *k);
+    out.into_iter().map(|(_, c)| c).collect()
+}
+
+/// `when` 读到的值，给人看：`interface-compat: breaking = false`、`migrate-plan: summary.destructive = false`。
+/// 门禁与站写本地名：同一个包里的，包名前缀只是噪音。
+fn when_read(w: &harnix_flow::kernel::def::ExitWhen, value: &serde_json::Value) -> String {
+    let local = |n: &str| {
+        harnix_flow::bundle::split(n)
+            .map(|(_, l)| l.to_string())
+            .unwrap_or_else(|| n.to_string())
+    };
+    let (src, key) = match (&w.gate, &w.fact, &w.step, &w.path) {
+        (Some(g), Some(f), _, _) => (local(g), f.clone()),
+        (_, _, Some(s), Some(p)) => (local(s), p.clone()),
+        _ => (String::new(), String::new()),
+    };
+    let v = match value {
+        serde_json::Value::String(s) => s.clone(),
+        other => other.to_string(),
+    };
+    if src.is_empty() {
+        v
+    } else {
+        format!("{src}: {key} = {v}")
+    }
 }
 
 fn task_status(t: &harnix_flow::TaskRec) -> port::TaskStatus {
@@ -290,6 +352,7 @@ pub(crate) fn run_view(v: &harnix_flow::RunView) -> port::RunView {
                         rejections: c.rejections,
                         min: c.min,
                     }),
+                conditional: r.map(conditional).unwrap_or_default(),
             }
         })
         .collect();
@@ -323,6 +386,39 @@ mod tests {
             decided_by: None,
             decided_at: None,
         }
+    }
+
+    /// 不要的出口写读到了什么，要的写为什么要；按出口的顺序，与门禁、确认的结果分开列。
+    #[test]
+    fn conditional_exits_say_why_they_were_or_were_not_required() {
+        let r: harnix_flow::kernel::run::StationRec = serde_json::from_value(serde_json::json!({
+            "status": "passed",
+            "round": 1,
+            "checks": [
+                {"cond": 0, "kind": "gate", "label": "interface-compat", "round": 1, "status": "pass", "at": 1},
+                {"cond": 1, "kind": "confirm", "label": "批准破坏性改动", "round": 1, "status": "pass", "at": 1,
+                 "when": {"required": false, "why": "x", "value": false}},
+                {"cond": 2, "kind": "confirm", "label": "安全评审", "round": 1, "status": "pass", "at": 1,
+                 "when": {"required": true, "why": "gate impact-scan has no result", "value": null}}
+            ],
+            "not_required": [
+                {"cond": 1, "label": "批准破坏性改动", "round": 1,
+                 "when": {"gate": "xforge/interface-compat", "fact": "breaking"}, "value": false}
+            ]
+        }))
+        .unwrap();
+        let c = conditional(&r);
+        assert_eq!(c.len(), 2, "{c:?}");
+        assert_eq!(
+            (c[0].label.as_str(), c[0].required, c[0].why.as_str()),
+            (
+                "批准破坏性改动",
+                Some(false),
+                "interface-compat: breaking = false"
+            )
+        );
+        assert_eq!(c[1].required, Some(true));
+        assert_eq!(c[1].why, "gate impact-scan has no result");
     }
 
     #[test]

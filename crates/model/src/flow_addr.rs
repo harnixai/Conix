@@ -518,6 +518,9 @@ fn status(s: &mut State, v: &RunView) {
         if let Some(u) = &st.unmet {
             lines.push(i18n::t!("flow_addr.s_unmet", v = u));
         }
+        for c in &st.conditional {
+            lines.push(format!("  {}", crate::flows::conditional_text(c)));
+        }
         if let Some(vo) = st.votes {
             lines.push(i18n::t!(
                 "flow_addr.s_votes",
