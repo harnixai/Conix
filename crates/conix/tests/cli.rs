@@ -32,7 +32,7 @@ fn cli_help_is_english() {
     assert!(help_of(&["attach", "--help"]).contains("Kick out"));
     for sub in [
         "flow", "list", "show", "install", "update", "remove", "reset", "export", "import",
-        "inspect", "verify", "backfill", "diff", "clean",
+        "inspect", "verify", "backfill", "diff", "clean", "doctor",
     ] {
         let mut a = vec!["flow"];
         if sub != "flow" {
@@ -594,4 +594,145 @@ fn clean_removes_backups_staging_and_orphan_entries() {
             .count(),
         0
     );
+}
+
+fn sha256_hex(b: &[u8]) -> String {
+    use sha2::Digest as _;
+    sha2::Sha256::digest(b)
+        .iter()
+        .map(|x| format!("{x:02x}"))
+        .collect()
+}
+
+/// 一份归档：一个文件与列着它的 record.json；`honest` 为假时清单里的摘要不对。
+fn archive(project: &Path, bundle: &str, name: &str, honest: bool) {
+    let dir = project
+        .join("conix")
+        .join(bundle)
+        .join("archive")
+        .join(name);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("a.md"), "x").unwrap();
+    let sha = if honest {
+        sha256_hex(b"x")
+    } else {
+        "00".repeat(32)
+    };
+    std::fs::write(
+        dir.join("record.json"),
+        serde_json::json!({"format": 1, "files": [{"path": "a.md", "sha256": sha, "size": 1}]})
+            .to_string(),
+    )
+    .unwrap();
+}
+
+#[test]
+fn verify_all_scans_every_archive_of_the_project() {
+    let e = Env::new();
+    assert!(e.ok(&["verify", "--all"]).contains("No archives"));
+    archive(e.project.path(), "xforge", "2026112601-solid", true);
+    archive(e.project.path(), "brief", "2026112602-brief", true);
+    let out = e.ok(&["verify", "--all"]);
+    assert!(
+        out.contains("2026112601-solid") && out.contains("2026112602-brief"),
+        "{out}"
+    );
+    archive(e.project.path(), "brief", "2026112603-brief", false);
+    let out = e.fails(&["verify", "--all"]);
+    assert!(out.contains("1 of 3"), "{out}");
+    e.fails(&["verify"]);
+}
+
+#[tokio::test]
+async fn doctor_reports_what_is_wrong_and_fix_does_only_the_safe_things() {
+    let e = Env::new();
+    e.ok(&["list"]);
+    // 全局：registry 里目录没了的非内置包、暂存残留、内置包的目录没了。
+    let mine = e.installed("mine");
+    small_bundle(&mine, "mine", "1.0.0");
+    e.ok(&["backfill", "mine", "--yes"]);
+    std::fs::remove_dir_all(e.global().join("mine")).unwrap();
+    std::fs::create_dir_all(e.global().join(".staging/flow-import-x")).unwrap();
+    std::fs::remove_dir_all(e.global().join("xforge")).unwrap();
+    let out = e.ok(&["doctor", "--global"]);
+    assert!(
+        out.contains("directory gone")
+            && out.contains("staging left behind")
+            && out.contains("can be fixed"),
+        "{out}"
+    );
+    e.ok(&["doctor", "--global", "--fix"]);
+    assert!(
+        e.global().join("xforge/bundle.yaml").is_file(),
+        "the built-in is back"
+    );
+    assert!(e.registry()["bundles"]["mine"].is_null());
+    assert_eq!(
+        std::fs::read_dir(e.global().join(".staging"))
+            .unwrap()
+            .count(),
+        0
+    );
+    let out = e.ok(&["doctor", "--global"]);
+    assert!(!out.contains("can be fixed"), "{out}");
+
+    // 项目：与库里一样却没记 lock 的、lock 里目录没了的、保留名、进行中的运行的包不在了、校验不过的。
+    let src = e.global().join("xforge");
+    let dst = e.installed("xforge");
+    copy(&src, &dst);
+    std::fs::remove_dir_all(&mine).unwrap();
+    small_bundle(&e.installed("export"), "export", "1.0.0");
+    let broken = e.installed("broken");
+    small_bundle(&broken, "broken", "1.0.0");
+    std::fs::write(
+        broken.join("main.yaml"),
+        "name: main\nstations:\n  - {id: a, executor: {kind: session}, skill: nope, exit: [{kind: output}]}\n",
+    )
+    .unwrap();
+    run_in_flight(e.project.path(), "gone").await;
+    let out = e.fails(&["doctor"]);
+    for want in [
+        "not recorded in the lock",
+        "directory gone",
+        "reserved name",
+        "runs in flight use it",
+        "does not validate",
+        "nope",
+        "errors",
+    ] {
+        assert!(out.contains(want), "{want}: {out}");
+    }
+    // --fix：补 lock、去孤儿；校验不过的、保留名只报。
+    let out = e.fails(&["doctor", "--fix"]);
+    assert!(out.contains("Fixed"), "{out}");
+    let lock = e.lock();
+    assert_eq!(lock["bundles"]["xforge"]["from"].as_str(), Some("global"));
+    assert!(lock["bundles"]["mine"].is_null());
+    assert!(
+        broken.join("main.yaml").is_file(),
+        "nothing else is touched"
+    );
+
+    // 进行中的运行用的包库里有、项目里没有：--fix 装上。
+    std::fs::remove_dir_all(&broken).unwrap();
+    std::fs::remove_dir_all(e.installed("export")).unwrap();
+    let e2 = Env::new();
+    e2.ok(&["list"]);
+    run_in_flight(e2.project.path(), "xforge").await;
+    let out = e2.fails(&["doctor"]);
+    assert!(out.contains("conix flow install xforge"), "{out}");
+    e2.ok(&["doctor", "--fix"]);
+    assert!(e2.installed("xforge").join("bundle.yaml").is_file());
+}
+
+fn copy(from: &Path, to: &Path) {
+    std::fs::create_dir_all(to).unwrap();
+    for e in std::fs::read_dir(from).unwrap().flatten() {
+        let (s, d) = (e.path(), to.join(e.file_name()));
+        if s.is_dir() {
+            copy(&s, &d);
+        } else {
+            std::fs::copy(&s, &d).unwrap();
+        }
+    }
 }

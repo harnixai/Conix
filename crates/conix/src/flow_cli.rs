@@ -6,6 +6,7 @@ use std::io::{BufRead as _, IsTerminal as _, Write as _};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result, bail};
+use host::flows::doctor::{self, Level};
 use host::flows::library::{BootNote, BuiltinState, Library};
 use host::flows::manage::{self, Action, Ctx, Plan, Status, Where};
 use host::flows::package;
@@ -99,6 +100,13 @@ pub enum FlowCmd {
     },
     /// 看包里的 MANIFEST 并核对：不装。
     Inspect { file: PathBuf },
+    /// 体检：全局库（--global）或项目的流程包。
+    Doctor {
+        #[arg(long)]
+        global: bool,
+        #[arg(long)]
+        fix: bool,
+    },
     /// 核对一份归档：文件与 record.json 的清单、证据与确认的摘要、record.json 与运行账本。
     Verify {
         #[arg(required_unless_present = "all")]
@@ -175,6 +183,13 @@ pub fn localize(c: clap::Command) -> clap::Command {
             c.about(i18n::t!("app.cli.flow_inspect"))
                 .mut_arg("file", |a| a.help(i18n::t!("app.cli.flow_file")))
         })
+        .mut_subcommand("doctor", |c| {
+            global(
+                c.about(i18n::t!("app.cli.flow_doctor")),
+                "app.cli.flow_in_global",
+            )
+            .mut_arg("fix", |a| a.help(i18n::t!("app.cli.flow_doctor_fix")))
+        })
         .mut_subcommand("verify", |c| {
             c.about(i18n::t!("app.cli.flow_verify"))
                 .mut_arg("dir", |a| a.help(i18n::t!("app.cli.flow_archive_dir")))
@@ -219,9 +234,21 @@ fn err(e: String) -> anyhow::Error {
     anyhow::Error::msg(e)
 }
 
-/// 跑一条子命令；`here` 给出没写 `-C` 时的项目（和直接运行 `conix` 一样），`home` 是全局目录。
-pub fn run(args: FlowArgs, home: &Path, here: impl FnOnce() -> Result<PathBuf>) -> Result<()> {
+/// 跑一条子命令；`here` 给出没写 `-C` 时的项目（和直接运行 `conix` 一样），`home` 是全局目录，
+/// `artifacts_dir` 是全局配置里的制品目录名（项目自己的 `.conix/conix.yaml` 写了以项目的为准）。
+pub async fn run(
+    args: FlowArgs,
+    home: &Path,
+    artifacts_dir: Option<String>,
+    here: impl FnOnce() -> Result<PathBuf>,
+) -> Result<()> {
     let project = project_of(args.project_dir, here)?;
+    let artifacts = app::config::ProjectConfig::load(&project)
+        .flows
+        .artifacts_dir
+        .or(artifacts_dir)
+        .filter(|a| host::flows::artifacts_dir_ok(a))
+        .unwrap_or_else(|| host::flows::ARTIFACTS_DIR.to_string());
     let ctx = Ctx::new(&project, home);
     let confirm = Confirm {
         yes: args.yes,
@@ -348,17 +375,49 @@ pub fn run(args: FlowArgs, home: &Path, here: impl FnOnce() -> Result<PathBuf>) 
             }
             Ok(())
         }
-        FlowCmd::Verify { dir, all: _ } => {
+        FlowCmd::Doctor { global, fix } => doctor(&ctx, home, &artifacts, global, fix).await,
+        FlowCmd::Verify { dir, all } => {
             let runs = client::layout::ProjectState::new(&project).flow_runs();
-            let Some(dir) = dir else {
-                bail!("{}", i18n::t!("flowlib.cli_verify_which"));
+            let dirs = match dir {
+                Some(d) => vec![d],
+                None if all => {
+                    let found = doctor::archives(&project, &artifacts);
+                    if found.is_empty() {
+                        println!(
+                            "{}",
+                            i18n::t!(
+                                "flowlib.verify_none",
+                                dir = project.join(&artifacts).display()
+                            )
+                        );
+                    }
+                    found
+                }
+                None => bail!("{}", i18n::t!("flowlib.cli_verify_which")),
             };
-            let r = package::verify_archive(&runs, &dir);
-            print_report(&r);
-            if !r.ok {
+            let several = dirs.len() > 1 || all;
+            let mut bad = 0;
+            for d in &dirs {
+                if several {
+                    println!("{}", d.strip_prefix(&project).unwrap_or(d).display());
+                }
+                let r = package::verify_archive(&runs, d);
+                print_report(&r);
+                if r.ok {
+                    println!("{}", i18n::t!("app.flow_verify_ok", n = r.checked));
+                } else {
+                    bad += 1;
+                }
+            }
+            if bad > 0 {
+                if several {
+                    bail!(
+                        "{}",
+                        i18n::t!("flowlib.verify_some_failed", n = bad, total = dirs.len())
+                    );
+                }
                 bail!("{}", i18n::t!("app.flow_verify_failed"));
             }
-            println!("{}", i18n::t!("app.flow_verify_ok", n = r.checked));
             Ok(())
         }
     }
@@ -568,6 +627,167 @@ fn diff(ctx: &Ctx, name: &str) -> Result<()> {
     all("+", &c.added);
     all("~", &c.changed);
     all("-", &c.removed);
+    Ok(())
+}
+
+// ── 体检 ────────────────────────────────────────────────────────────────────
+
+/// 装着的插件的流程目录（按插件名），不经实例：`<家目录>/plugins/` 下带 `plugin.toml` 的包（至多三层）。
+/// 启没启用要问引擎，这里不知道，所以只用来提醒"可能遮住"。
+fn plugin_flow_dirs(home: &Path) -> Vec<(String, PathBuf)> {
+    fn walk(dir: &Path, depth: u32, out: &mut Vec<(String, PathBuf)>) {
+        if dir.join("plugin.toml").is_file() {
+            if let Some(section) = host::plugins::conix_section(dir) {
+                let m = host::plugins::Mounted {
+                    name: dir
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_default(),
+                    root: dir.to_path_buf(),
+                    section,
+                };
+                if let Some(d) = m.flows_dir() {
+                    out.push((m.name, d));
+                }
+            }
+            return;
+        }
+        if depth == 0 {
+            return;
+        }
+        for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+            if e.file_type().is_ok_and(|t| t.is_dir()) {
+                walk(&e.path(), depth - 1, out);
+            }
+        }
+    }
+    let mut out = vec![];
+    walk(&home.join("plugins"), 3, &mut out);
+    out
+}
+
+/// 项目受不受信，照 Agix 记信任的地方读（全局 `settings.json` / `settings.local.json` 的 `app.trusted_projects`，
+/// 路径或以 `/*`、`/**` 结尾的前缀）：读不出来的当没信任，看不出来（两个文件都不是 JSON）是 `None`。
+fn trusted(home: &Path, project: &Path) -> Option<bool> {
+    let mut read_any = false;
+    let mut missing = 0;
+    for f in ["settings.json", "settings.local.json"] {
+        let Ok(text) = std::fs::read_to_string(home.join(f)) else {
+            missing += 1;
+            continue;
+        };
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) else {
+            continue;
+        };
+        read_any = true;
+        if v["app"]["trust_all_projects"].as_bool() == Some(true) {
+            return Some(true);
+        }
+        let entries = v["app"]["trusted_projects"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        for e in entries.iter().filter_map(|e| e.as_str()) {
+            let hit = match e.strip_suffix("/**").or_else(|| e.strip_suffix("/*")) {
+                Some(prefix) => project.starts_with(prefix),
+                None => Path::new(e) == project,
+            };
+            if hit || e == "*" || e == "**" {
+                return Some(true);
+            }
+        }
+    }
+    (read_any || missing == 2).then_some(false)
+}
+
+fn level_mark(l: Level) -> &'static str {
+    match l {
+        Level::Info => "·",
+        Level::Warn => "◐",
+        Level::Error => "✗",
+    }
+}
+
+async fn check(ctx: &Ctx, home: &Path, artifacts: &str, global: bool) -> doctor::Report {
+    if global {
+        doctor::global(ctx)
+    } else {
+        let opts = doctor::ProjectOpts {
+            artifacts_dir: artifacts.to_string(),
+            plugin_flow_dirs: plugin_flow_dirs(home),
+            trusted: trusted(home, &ctx.project),
+        };
+        doctor::project(ctx, &opts).await
+    }
+}
+
+async fn doctor(ctx: &Ctx, home: &Path, artifacts: &str, global: bool, fix: bool) -> Result<()> {
+    let report = check(ctx, home, artifacts, global).await;
+    println!(
+        "{}",
+        if global {
+            i18n::t!(
+                "flowlib.dr_title_global",
+                dir = ctx.library.root().display()
+            )
+        } else {
+            i18n::t!("flowlib.dr_title_project", dir = ctx.project.display())
+        }
+    );
+    if report.findings.is_empty() {
+        println!("  {}", i18n::t!("flowlib.dr_nothing"));
+    }
+    for f in &report.findings {
+        let who = f
+            .bundle
+            .as_deref()
+            .map(|b| format!("{b}: "))
+            .unwrap_or_default();
+        println!("  {} {who}{}", level_mark(f.level), f.text);
+        if let Some(h) = &f.hint {
+            println!("      → {h}");
+        }
+    }
+    if fix {
+        if report.fixes.is_empty() {
+            println!("{}", i18n::t!("flowlib.dr_no_fixes"));
+        }
+        let mut installed = false;
+        for (f, r) in report.fixes.iter().zip(doctor::fix(ctx, &report.fixes)) {
+            match r {
+                Ok(line) => {
+                    installed |= matches!(f, doctor::Fix::Install(_) | doctor::Fix::Lock(_));
+                    println!("{}", i18n::t!("flowlib.dr_fixed", what = line));
+                }
+                Err(e) => eprintln!("{}", i18n::t!("flowlib.dr_fix_failed", why = e)),
+            }
+        }
+        if installed && let Some(name) = notify_instance(home, &ctx.project) {
+            println!("{}", i18n::t!("flowlib.notified", name = name));
+        }
+    } else if !report.fixes.is_empty() {
+        println!(
+            "{}",
+            i18n::t!(
+                "flowlib.dr_can_fix",
+                n = report.fixes.len(),
+                cmd = if global {
+                    "conix flow doctor --global --fix"
+                } else {
+                    "conix flow doctor --fix"
+                }
+            )
+        );
+    }
+    // 修过了就按修完的样子再查一遍定退出码：修好的错误不该让脚本以为还坏着。
+    let errors = if fix && !report.fixes.is_empty() {
+        check(ctx, home, artifacts, global).await.errors()
+    } else {
+        report.errors()
+    };
+    if errors > 0 {
+        bail!("{}", i18n::t!("flowlib.dr_errors", n = errors));
+    }
     Ok(())
 }
 

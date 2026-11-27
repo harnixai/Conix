@@ -581,6 +581,12 @@ fn check_compatible(requires: &ManifestRequires, meta: &bundle::BundleMeta) -> R
     Ok(())
 }
 
+/// 一个包目录这个 Conix 能不能跑：`bundle.yaml` 读得成、`requires.conix` 满足。
+pub fn compatible(dir: &Path) -> Result<(), String> {
+    let meta = bundle::meta(dir)?;
+    check_compatible(&requires_of(&meta), &meta)
+}
+
 /// 用流程库校验解开的流程包目录（`<父>/<包名>`）：每个流程、每个件、`commands` 里列的命令文件。
 pub fn validate_bundle(dir: &Path, catalog: Catalog) -> Vec<String> {
     let Some(name) = dir.file_name().and_then(|n| n.to_str()) else {

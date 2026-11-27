@@ -468,8 +468,8 @@ pub fn list_short(v: &[String]) -> String {
     s
 }
 
-/// 这个项目里没结束、用着这个包的运行（流程名 `<包>/<流程>`，不在包里的流程包名就是流程名）。
-pub fn active_runs(project: &Path, name: &str) -> Vec<String> {
+/// 这个项目里没结束的运行：（运行，流程名）。直接读运行账本，不经实例。
+pub fn active_flows(project: &Path) -> Vec<(String, String)> {
     use harnix_flow::RunStore as _;
     let store = harnix_flow::FileStore::new(client::ProjectState::new(project).flow_runs());
     // 没有运行时：FileStore 在没有 Tokio 运行时的时候就地读，这个 future 不会挂起。
@@ -477,8 +477,16 @@ pub fn active_runs(project: &Path, name: &str) -> Vec<String> {
         .unwrap_or_default()
         .into_iter()
         .filter(|r| r.status == harnix_flow::RunStatus::Active)
-        .filter(|r| r.flow.split('/').next() == Some(name))
-        .map(|r| r.id)
+        .map(|r| (r.id, r.flow))
+        .collect()
+}
+
+/// 这个项目里没结束、用着这个包的运行（流程名 `<包>/<流程>`，不在包里的流程包名就是流程名）。
+pub fn active_runs(project: &Path, name: &str) -> Vec<String> {
+    active_flows(project)
+        .into_iter()
+        .filter(|(_, f)| f.split('/').next() == Some(name))
+        .map(|(id, _)| id)
         .collect()
 }
 

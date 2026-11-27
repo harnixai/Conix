@@ -58,6 +58,8 @@ app:
     flow_backfill: "把项目里的包回填到全局库（库里没有就新加）。"
     flow_diff: "项目里的包与全局库里的差在哪：版本、增删改的文件。"
     flow_clean: "清掉备份、暂存的残留、对不上目录的记录（项目的，或 --global 全局库的）。"
+    flow_doctor: "体检：项目的流程包（缺省），或 --global 全局库；有错误时退出码非 0。"
+    flow_doctor_fix: "做安全的修复：清暂存、去孤儿条目、补 lock、重新解开缺的内置包、装上进行中的运行要的包。"
     flow_inspect: "看包里的 MANIFEST 并核对，不装。"
     flow_verify: "核对一份归档：文件、证据与确认的摘要、与运行账本对。"
     flow_verify_all: "核对项目里所有的归档（conix/*/archive/*/）。"

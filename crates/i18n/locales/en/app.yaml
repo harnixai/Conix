@@ -57,6 +57,8 @@ app:
     flow_backfill: "Backfill a bundle from the project into the global library (added if it is not there)."
     flow_diff: "How the project's bundle differs from the global library's: versions, files added, changed, removed."
     flow_clean: "Remove backups, leftover staging and entries whose directory is gone (the project's, or with --global the global library's)."
+    flow_doctor: "Check the project's flow bundles (default) or, with --global, the global library; exits non-zero on errors."
+    flow_doctor_fix: "Make the safe fixes: clear staging, drop orphan entries, record unmodified bundles in the lock, re-extract missing built-ins, install the bundles runs in flight need."
     flow_inspect: "Show a package's MANIFEST and verify it, without installing."
     flow_verify: "Verify an archive: its files, evidence and confirmation digests, and the run ledger."
     flow_verify_all: "Verify every archive in the project (conix/*/archive/*/)."

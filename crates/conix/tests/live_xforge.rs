@@ -261,6 +261,33 @@ async fn the_builtin_xforge_runs_a_change_from_proposal_to_archive_with_its_own_
     ] {
         assert!(Path::new(&out).join(f).is_file(), "{out}/{f}");
     }
+    // 划的工作包里至少有一个登记了验证，名字来自项目治理文件的 verify 菜单：交付时门禁 package-tests 才有东西跑。
+    let menu: serde_yaml::Value = serde_yaml::from_str(
+        &std::fs::read_to_string(Path::new(&to).join(".conix/governance/xforge.yaml")).unwrap(),
+    )
+    .unwrap();
+    let menu: Vec<String> = menu["verify"]
+        .as_mapping()
+        .map(|m| {
+            m.keys()
+                .filter_map(|k| k.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default();
+    let plan_text = std::fs::read_to_string(Path::new(&out).join("work-packages.yaml")).unwrap();
+    eprintln!("---- work-packages.yaml\n{plan_text}");
+    let plan: serde_yaml::Value = serde_yaml::from_str(&plan_text).unwrap();
+    let planned: Vec<String> = plan["packages"]
+        .as_sequence()
+        .into_iter()
+        .flatten()
+        .flat_map(|p| p["verify"].as_sequence().cloned().unwrap_or_default())
+        .filter_map(|v| v["name"].as_str().map(String::from))
+        .collect();
+    assert!(
+        planned.iter().any(|n| menu.contains(n)),
+        "工作包要登记 verify 菜单（{menu:?}）里的验证，登记的是 {planned:?}"
+    );
     c.ok(Command::RunOp {
         run: id.clone(),
         op: confirm("check", "检查过了，开工"),
@@ -282,6 +309,16 @@ async fn the_builtin_xforge_runs_a_change_from_proposal_to_archive_with_its_own_
     })
     .await;
     let rec = rec_of(&lv);
+    // package-tests 真起了进程：它的日志（站目录里的 gate-package-tests.log）每跑一项记一行 `== <名字> [argv] in <目录>`。
+    // 只看"过了"不够——没登记验证的包也是过。
+    let logs = find_files(Path::new(&out), "gate-package-tests.log");
+    let ran: Vec<String> = logs
+        .iter()
+        .filter_map(|l| std::fs::read_to_string(l).ok())
+        .filter(|t| t.lines().any(|l| l.starts_with("== ")))
+        .collect();
+    assert!(!ran.is_empty(), "门禁 package-tests 没跑任何验证：{logs:?}");
+    eprintln!("---- gate-package-tests.log\n{}", ran.join("\n----\n"));
     eprintln!("==== 结束（打回 {reworks} 次，按建议退到提案：{proposed_back}）");
     report(&rec);
     for s in &done.stations {
@@ -350,4 +387,18 @@ async fn the_builtin_xforge_runs_a_change_from_proposal_to_archive_with_its_own_
         ignored.lines().all(|l| l.starts_with("!!")),
         "运行的目录不进 git：{ignored}"
     );
+}
+
+/// `dir` 下（含子目录）叫 `name` 的文件。
+fn find_files(dir: &Path, name: &str) -> Vec<std::path::PathBuf> {
+    let mut out = vec![];
+    for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+        let p = e.path();
+        if p.is_dir() {
+            out.extend(find_files(&p, name));
+        } else if e.file_name() == name {
+            out.push(p);
+        }
+    }
+    out
 }

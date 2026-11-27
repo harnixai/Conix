@@ -5,6 +5,7 @@
 mod approvals;
 pub(crate) mod authorize;
 pub mod builtin;
+pub mod doctor;
 mod frames;
 mod goto;
 pub mod library;
@@ -97,6 +98,17 @@ pub const GATE_ENV_DENY: &[&str] = &[
     "CONIX_*",
     "AGIX_*",
 ];
+
+/// 一个项目的流程布局，与实例里的一样（`start`）：命令行（`conix flow doctor`）跑包的体检用。
+pub fn project_layout(project: &Path, artifacts_dir: Option<&str>) -> ProjectLayout {
+    let mut layout = ProjectLayout::new(".conix", worktrees_root(project), BRANCH_PREFIX)
+        .with_agent_dirs(AGENT_DIRS)
+        .with_runs_dir(RUNS_DIR);
+    if let Some(a) = artifacts_dir.filter(|a| artifacts_dir_ok(a)) {
+        layout = layout.with_artifacts_dir(a);
+    }
+    layout
+}
 
 /// 项目所在仓库的根下的 [`WORKTREES_DIR`]；不在仓库里就是项目下的（那样的运行开不出 worktree）。
 pub fn worktrees_root(project: &Path) -> PathBuf {

@@ -116,7 +116,8 @@ async fn main() -> Result<()> {
         return supervise::run(name, project).await;
     }
     if let Some(Cmd::Flow(args)) = cli.command {
-        return flow_cli::run(args, &config::home(), || project_here(&cfg));
+        let artifacts = cfg.flows.artifacts_dir.clone();
+        return flow_cli::run(args, &config::home(), artifacts, || project_here(&cfg)).await;
     }
     let (settings, more) = cfg.settings();
     problems.extend(more);
