@@ -61,7 +61,8 @@ pub(crate) fn tokenize(s: &str) -> Vec<String> {
     out
 }
 
-/// 启动的参数：`--k v` 成输入（`--title` 是运行的标题，覆盖主题）、`--step` 是步进，剩下的词是主题。
+/// 启动的参数：`--k v` 成输入、`--step` 是步进，剩下的词是主题。`--title` 也是一个输入：流程声明了 `title`（xforge 的
+/// 归档名）就是它；没声明，实例拿它当主题（运行的标题），见 host 的 `typed.rs`。界面不知道流程的输入，所以两样都交。
 #[derive(Debug, Default, PartialEq)]
 pub(crate) struct StartArgs {
     pub subject: String,
@@ -97,12 +98,15 @@ pub(crate) fn start_args(arg: &str) -> StartArgs {
             },
         };
         if key == "title" {
-            title = Some(value);
-        } else {
-            out.inputs.insert(key, serde_json::Value::String(value));
+            title = Some(value.clone());
         }
+        out.inputs.insert(key, serde_json::Value::String(value));
     }
-    out.subject = title.unwrap_or_else(|| words.join(" "));
+    out.subject = if words.is_empty() {
+        title.unwrap_or_default()
+    } else {
+        words.join(" ")
+    };
     out
 }
 
@@ -691,7 +695,9 @@ mod tests {
     fn start_args_split_inputs_flag_and_subject() {
         let a = start_args(r#"登录加 OAuth --risk low --step --title "加 OAuth" --dry"#);
         assert!(a.step);
-        assert_eq!(a.subject, "加 OAuth");
+        assert_eq!(a.subject, "登录加 OAuth");
+        assert_eq!(a.inputs["title"], "加 OAuth");
+        assert_eq!(start_args("--title 只有标题").subject, "只有标题");
         assert_eq!(a.inputs["risk"], "low");
         assert_eq!(a.inputs["dry"], "true");
         let b = start_args("导出 报表 --risk=medium");

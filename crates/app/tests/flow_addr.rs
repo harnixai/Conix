@@ -146,8 +146,12 @@ async fn global_start_by_bundle_by_flow_and_with_step() {
     assert_eq!(starts[0].2, serde_json::json!({"risk": "low"}));
     assert!(!starts[0].3);
     assert_eq!(starts[1].0, "xforge/solid");
-    assert_eq!(starts[1].1, "导出报表二期");
-    assert_eq!(starts[1].2, serde_json::json!({"risk": "medium"}));
+    // `--title` 是流程的输入还是运行的标题，界面不知道（不看流程的输入），两样都交给实例分。
+    assert_eq!(starts[1].1, "做导出");
+    assert_eq!(
+        starts[1].2,
+        serde_json::json!({"risk": "medium", "title": "导出报表二期"})
+    );
     assert!(starts[1].3, "--step");
     let runs = &h.core.state.domain.run_views;
     let quick = runs
@@ -158,7 +162,7 @@ async fn global_start_by_bundle_by_flow_and_with_step() {
     assert_eq!(quick.summary.bundle.as_deref(), Some("xforge"));
     let solid = runs
         .values()
-        .find(|v| v.summary.subject == "导出报表二期")
+        .find(|v| v.summary.subject == "做导出")
         .expect("solid 的运行");
     assert_eq!(solid.summary.pace, port::Pace::Step);
     assert_eq!(

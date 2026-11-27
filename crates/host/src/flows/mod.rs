@@ -1062,7 +1062,8 @@ impl FlowPort for Flows {
             } => {
                 // 选路先于开运行，库在选路时就报找不到：全局库里有的包要在这之前说怎么装。
                 self.installed_or_hint(&flow)?;
-                let inputs = typed::typed_inputs(self.packs().as_ref(), &flow, inputs);
+                let (subject, inputs) =
+                    typed::person_start(self.packs().as_ref(), &flow, subject, inputs);
                 // 只给包、输入定不了路：不开运行，让主会话里的模型读项目、判输入，再 `flow_start`。
                 if let harnix_flow::kernel::route::Route::Triage {
                     bundle,

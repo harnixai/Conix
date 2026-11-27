@@ -5,12 +5,9 @@
 use harnix_flow::Packs;
 use serde_json::{Map, Value};
 
-/// `inputs` 里的字照 `name`（一条流程，或一个包的每条流程）的输入 schema 读：几条流程说的类型不一样就不动。
-pub(super) fn typed_inputs(packs: &dyn Packs, name: &str, inputs: Value) -> Value {
-    let Value::Object(map) = inputs else {
-        return inputs;
-    };
-    let defs: Vec<_> = match packs.flow(name) {
+/// `name` 这个名字可能起的流程：它自己，或一个包的每条流程。
+fn candidates(packs: &dyn Packs, name: &str) -> Vec<harnix_flow::FlowDef> {
+    match packs.flow(name) {
         Some((def, _)) => vec![def],
         None => harnix_flow::bundle::offered_stems(packs, name)
             .iter()
@@ -20,7 +17,40 @@ pub(super) fn typed_inputs(packs: &dyn Packs, name: &str, inputs: Value) -> Valu
                     .map(|(d, _)| d)
             })
             .collect(),
+    }
+}
+
+/// 人起运行时打的 `--title`：流程声明了 `title` 这个输入就是它；都没声明，它是运行的标题，换掉主题（界面不知道
+/// 流程的输入，两样都交过来）。回主题与读过类型的输入。
+pub(super) fn person_start(
+    packs: &dyn Packs,
+    name: &str,
+    subject: String,
+    inputs: Value,
+) -> (String, Value) {
+    let Value::Object(mut map) = inputs else {
+        return (subject, inputs);
     };
+    let declared = candidates(packs, name)
+        .iter()
+        .any(|d| d.inputs.contains_key("title"));
+    let subject = match map.get("title") {
+        Some(Value::String(t)) if !declared => {
+            let t = t.clone();
+            map.remove("title");
+            t
+        }
+        _ => subject,
+    };
+    (subject, typed_inputs(packs, name, Value::Object(map)))
+}
+
+/// `inputs` 里的字照 `name`（一条流程，或一个包的每条流程）的输入 schema 读：几条流程说的类型不一样就不动。
+pub(super) fn typed_inputs(packs: &dyn Packs, name: &str, inputs: Value) -> Value {
+    let Value::Object(map) = inputs else {
+        return inputs;
+    };
+    let defs = candidates(packs, name);
     let out: Map<String, Value> = map
         .into_iter()
         .map(|(k, v)| {
@@ -94,5 +124,25 @@ mod tests {
             typed_inputs(&packs, "nothing", json!({"days": "7"})),
             json!({"days": "7"})
         );
+    }
+
+    #[test]
+    fn a_title_is_the_flows_input_when_it_declares_one_and_the_runs_subject_otherwise() {
+        let packs = MemPacks::new()
+            .flow("name: t\ninputs:\n  title: {schema: {type: string}}\nstations: [{id: a, exit: []}]\n")
+            .flow("name: u\nstations: [{id: a, exit: []}]\n");
+        let (subject, inputs) = person_start(
+            &packs,
+            "t",
+            "加 wrap，按宽度折行".into(),
+            json!({"title": "wrap"}),
+        );
+        assert_eq!(
+            (subject.as_str(), inputs),
+            ("加 wrap，按宽度折行", json!({"title": "wrap"}))
+        );
+        let (subject, inputs) =
+            person_start(&packs, "u", "上周的提交".into(), json!({"title": "周报"}));
+        assert_eq!((subject.as_str(), inputs), ("周报", json!({})));
     }
 }
