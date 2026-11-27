@@ -291,10 +291,10 @@ xterm 发的字节写进去，`vt100` 照 `conix` 写出的 VT 序列还原屏�
 | `the_terminal_starts_an_instance_detaches_from_it_and_stops_it_on_quit` | `conix new --name lv`；`/trust`；^N 三下；^X 后台运行；`conix attach lv`；^X 直接退出 | 顶栏是这个实例、启动是草稿；「已信任这个项目」；流程标签「还没有流程」；`conix list` 里先是 Running、退出后 Stopped |
 | `a_line_typed_in_the_draft_gets_its_reply_and_rename_renames_the_session` | 草稿上说一句只回 pong 的话；`/rename 乒乓` | 左边从运行中到空闲、转录里是 `⏺ pong`、会话列表有 #1；标题变成「会话 › 乒乓」 |
 | `a_permission_prompt_is_found_with_ctrl_r_and_approved_with_enter` | 叫模型跑一条要批准的 Bash；^G 走开、^R、^G ^G 回到左边、Enter | 提问框拿着键盘、左边是「等你」；走开后交出键盘、^R 提示「待处理 1/1」；批准后跑完，命令的输出在转录里 |
-| `xreport_is_started_confirmed_and_archived_from_the_keyboard` | 造好这一周的历史，`conix flow install xreport`；关掉「离开期间」；`/trust`；`/flow:xreport 上周的提交 --since <6 天前>`；待处理变成 1 时 ^R；读 `REPORT.md`；^G ^G、`/confirm 报告定稿` | 「已启动「上周的提交」（运行）」；流程标签里运行「等你确认」；报告里是并过的名字、没有邮箱、五节都在；「已确认 … 的站 publish」；运行进「已结束」、`conix/xreport/archive/` 里四个文件，`REPORT.md` 就是看过的那一份 |
+| `xreport_is_started_confirmed_and_archived_from_the_keyboard` | 造好这一周的历史，`conix flow install xreport`；关掉「离开期间」；`/trust`；`/flow:xreport 上周的提交 --days 7`；待处理变成 1 时 ^R；读 `REPORT.md`；^G ^G、`/confirm 报告定稿` | 「已启动「上周的提交」（运行）」；流程标签里运行「等你确认」；报告里是并过的名字、没有邮箱、五节都在；「已确认 … 的站 publish」；运行进「已结束」、`conix/xreport/archive/` 里四个文件，`REPORT.md` 就是看过的那一份 |
 
-xreport 的 `days` 是整数，而斜杠命令的 `--k v` 都按字符串交给实例，`--days 7` 过不了输入的 schema（`input days: "7"
-does not satisfy its schema`）；用例写成同一个范围的 `--since`。
+斜杠命令的 `--k v` 都是字，实例在人的那扇门（`Command::StartRun`）照流程输入的 schema 读成数、开关或逗号分开的列表
+（`crates/host/src/flows/typed.rs`）：`--days 7` 就是 xreport 的整数 7。
 
 ### 需求与用例的对照
 

@@ -4,7 +4,7 @@
 //! - 起实例、`/trust`、^N 换标签、^X 后台运行（`conix list` 里还在跑）、`conix attach` 接回、^X 直接退出（停了）。
 //! - 草稿上说一句话，看见回复与会话；`/rename` 改名。
 //! - 权限询问：^G 走开、^R 找回、回到左边 Enter 批准，工具的输出出现在转录里。
-//! - xreport：造好的历史上 `/flow:xreport 上周的提交 --since <6 天前>`，^R 跳到等确认的运行，看过 `REPORT.md`
+//! - xreport：造好的历史上 `/flow:xreport 上周的提交 --days 7`，^R 跳到等确认的运行，看过 `REPORT.md`
 //!   后 `/confirm 报告定稿`，归档里是批的那一份。
 //!
 //! 主模型是 Claude（`.env` 没有它的 key 就跳过）。
@@ -197,12 +197,8 @@ fn xreport_is_started_confirmed_and_archived_from_the_keyboard() {
     t.line("/trust");
     t.wait_text("信任的回复", QUICK, "已信任这个项目");
 
-    // `--days 7` 进不来：斜杠命令的 `--k v` 都是字符串，`days` 的 schema 是整数（见用例外的说明）。
-    // 写成起始日期是同一个范围：含今天往前 7 天。
-    let since = (chrono::Local::now() - chrono::Duration::days(6))
-        .format("%Y-%m-%d")
-        .to_string();
-    t.line(&format!("/flow:xreport 上周的提交 --since {since}"));
+    // `--days 7` 打进来是字，实例照 xreport 的输入 schema 读成整数。
+    t.line("/flow:xreport 上周的提交 --days 7");
     t.wait_text("启动", QUICK, "已启动「上周的提交」（");
     let run = t
         .between("已启动「上周的提交」（", "）")
