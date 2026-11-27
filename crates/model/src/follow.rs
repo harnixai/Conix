@@ -179,6 +179,7 @@ fn row_keys(s: &State, tab: Tab, upper: bool) -> Vec<String> {
             .map(|r| match r {
                 FlowLower::Main => "main".into(),
                 FlowLower::Proposal(i) => format!("prop:{i}"),
+                FlowLower::Worktree => "worktree".into(),
                 FlowLower::Station(id) => format!("st:{id}"),
                 FlowLower::StationTask(id, k) => format!("stt:{id}:{k}"),
                 FlowLower::StationExit(id, k, m) => format!("stx:{id}:{k}:{m}"),
@@ -565,7 +566,9 @@ fn target_at(s: &State, tab: Tab, upper: bool) -> Option<Target> {
                 .flow_lower_rows()
                 .get(s.ui.lower[Tab::Flows.index()].selected)?
             {
-                FlowLower::Main => Some(Target::Session(v.main_session.clone(), vec![], None)),
+                FlowLower::Main | FlowLower::Worktree => {
+                    Some(Target::Session(v.main_session.clone(), vec![], None))
+                }
                 // 建议是哪一站的会话提的，就切到哪里去看。
                 FlowLower::Proposal(i) => {
                     let p = v.proposals.get(*i)?;

@@ -40,6 +40,8 @@ pub enum FlowLower {
     Main,
     /// 站里的会话提的、在等人的建议（`RunView::proposals` 里在等的第 n 条）。
     Proposal(usize),
+    /// 运行自己的 worktree：怎么收尾了，或等人 `/worktree`。
+    Worktree,
     Station(StationId),
     /// 站里的一件任务（子 Agent 有会话）。
     StationTask(StationId, usize),
@@ -144,6 +146,9 @@ impl State {
                         .into_iter()
                         .map(|(i, _)| FlowLower::Proposal(i)),
                 );
+                if v.worktree.is_some() {
+                    out.push(FlowLower::Worktree);
+                }
                 out.extend(tasks(&v.main_session, "  ", &listed));
                 for st in &v.stations {
                     out.push(FlowLower::Station(st.id.clone()));
@@ -458,6 +463,13 @@ pub(crate) fn lower_lines(s: &State, width: usize) -> Vec<Line> {
             FlowLower::Proposal(i) => match v.proposals.get(*i) {
                 Some(p) => Line::toned("  ⚑ ", Tone::Warn)
                     .push(crate::flow_addr::proposal_text(p, v), Tone::Warn),
+                None => Line::default(),
+            },
+            FlowLower::Worktree => match &v.worktree {
+                Some(w) => {
+                    let tone = if w.decidable { Tone::Warn } else { Tone::Dim };
+                    Line::toned("  ⎇ ", tone).push(worktree_text(w), tone)
+                }
                 None => Line::default(),
             },
             FlowLower::Station(id) => {
@@ -868,8 +880,9 @@ fn def_action(s: &mut State, a: Action, name: &str) -> Option<Vec<Effect>> {
 ///
 /// `[运行] [站] [理由]`：运行不写，是流程标签里选中的运行、或左边正对着的运行主会话；站不写，是这个运行里唯一
 /// 在等这件事的站。驳回与强制放行要写理由。打回的站是目标站，没有"在等打回"的站可推断，所以一定要写。
-pub(crate) fn person_op(s: &mut State, name: &str, arg: &str) -> Vec<Effect> {
-    let mut words: Vec<&str> = arg.split_whitespace().collect();
+/// 人的操作是对哪次运行：第一个词是认得的运行 id 就是它（从 `words` 里拿掉），否则是流程标签里选中的运行、
+/// 或左边正对着的运行主会话（或站的会话）。
+fn person_run(s: &State, words: &mut Vec<&str>) -> Option<RunView> {
     let known = |id: &str| s.domain.run_views.contains_key(&RunId(id.to_string()));
     let run = match words.first() {
         Some(w) if known(w) => Some(RunId(words.remove(0).to_string())),
@@ -887,7 +900,12 @@ pub(crate) fn person_op(s: &mut State, name: &str, arg: &str) -> Vec<Effect> {
                 .map(|v| v.summary.id.clone())
         }),
     };
-    let Some(view) = run.and_then(|r| s.domain.run_views.get(&r)).cloned() else {
+    run.and_then(|r| s.domain.run_views.get(&r)).cloned()
+}
+
+pub(crate) fn person_op(s: &mut State, name: &str, arg: &str) -> Vec<Effect> {
+    let mut words: Vec<&str> = arg.split_whitespace().collect();
+    let Some(view) = person_run(s, &mut words) else {
         s.notice(i18n::t!("flows.person_no_run", cmd = name), true);
         return vec![];
     };
@@ -900,11 +918,41 @@ pub(crate) fn person_op(s: &mut State, name: &str, arg: &str) -> Vec<Effect> {
         "rework" => false,
         _ => st.status == StationStatus::Unmet,
     };
-    let named = words.first().and_then(|w| {
+    // `/rework <站>/<任务>[,<任务>]`：只重做这一站的这几个任务（如双路只重做实现那一路）。
+    let (head, picked) = match words.first() {
+        Some(w) if name == "rework" => match w.split_once('/') {
+            Some((st, tasks)) => (Some(st), Some(tasks)),
+            None => (Some(*w), None),
+        },
+        Some(w) => (Some(*w), None),
+        None => (None, None),
+    };
+    let named = head.and_then(|w| {
         view.stations
             .iter()
-            .find(|st| st.id.0 == *w || st.title == *w)
+            .find(|st| st.id.0 == w || st.title == w)
     });
+    let mut tasks = vec![];
+    if let (Some(st), Some(picked)) = (named, picked) {
+        for t in picked.split(',').filter(|t| !t.is_empty()) {
+            match st.tasks.iter().find(|x| x.id.0 == t || x.label == t) {
+                Some(x) => tasks.push(x.id.clone()),
+                None => {
+                    let known: Vec<&str> = st.tasks.iter().map(|x| x.id.0.as_str()).collect();
+                    s.notice(
+                        i18n::t!(
+                            "flows.person_rework_task",
+                            task = t,
+                            station = st.id.0,
+                            tasks = known.join(", ")
+                        ),
+                        true,
+                    );
+                    return vec![];
+                }
+            }
+        }
+    }
     let station = match named {
         Some(st) => {
             words.remove(0);
@@ -960,6 +1008,7 @@ pub(crate) fn person_op(s: &mut State, name: &str, arg: &str) -> Vec<Effect> {
         },
         "rework" => port::RunOp::Rework {
             to: station.clone(),
+            tasks: tasks.clone(),
             reason,
         },
         _ => port::RunOp::Force {
@@ -967,10 +1016,20 @@ pub(crate) fn person_op(s: &mut State, name: &str, arg: &str) -> Vec<Effect> {
             reason: reason.unwrap_or_default(),
         },
     };
-    let done = i18n::tr_args(
-        &format!("flows.person_done_{name}"),
-        &[("station", &station.0), ("run", &view.summary.id.0)],
-    );
+    let done = if tasks.is_empty() {
+        i18n::tr_args(
+            &format!("flows.person_done_{name}"),
+            &[("station", &station.0), ("run", &view.summary.id.0)],
+        )
+    } else {
+        let names: Vec<&str> = tasks.iter().map(|t| t.0.as_str()).collect();
+        i18n::t!(
+            "flows.person_done_rework_tasks",
+            run = view.summary.id.0,
+            station = station.0,
+            tasks = names.join(", ")
+        )
+    };
     vec![s.call(
         Pending::Done(done),
         Command::RunOp {
@@ -978,6 +1037,74 @@ pub(crate) fn person_op(s: &mut State, name: &str, arg: &str) -> Vec<Effect> {
             op,
         },
     )]
+}
+
+/// `/worktree [运行] merge|keep|discard`：结束了的运行的 worktree 由人收尾（flows.md §6.4）。不带动作时说
+/// 它现在怎样、能做什么。丢掉要在底栏再确认一次：分支与 worktree 一起删，没有备份。能不能收尾由实例判
+/// （`WorktreeView::decidable`），这里只照着说。
+pub(crate) fn worktree_op(s: &mut State, arg: &str) -> Vec<Effect> {
+    let mut words: Vec<&str> = arg.split_whitespace().collect();
+    let Some(view) = person_run(s, &mut words) else {
+        s.notice(i18n::t!("flows.person_no_run", cmd = "worktree"), true);
+        return vec![];
+    };
+    let run = view.summary.id.clone();
+    let Some(w) = view.worktree.as_ref() else {
+        s.notice(i18n::t!("flows.worktree_none", run = run.0), true);
+        return vec![];
+    };
+    let how = match words.first().copied() {
+        Some("merge") => port::WorktreeEnd::Merged,
+        Some("keep") => port::WorktreeEnd::Kept,
+        Some("discard") => port::WorktreeEnd::Discarded,
+        Some(other) => {
+            s.notice(i18n::t!("flows.worktree_usage", word = other), true);
+            return vec![];
+        }
+        None => {
+            s.notice(worktree_text(w), false);
+            return vec![];
+        }
+    };
+    if !w.decidable {
+        s.notice(worktree_text(w), true);
+        return vec![];
+    }
+    if how == port::WorktreeEnd::Discarded {
+        s.ui.confirm = Some(crate::state::Confirm::DiscardWorktree(
+            run,
+            w.branch.clone(),
+        ));
+        return vec![];
+    }
+    end_worktree(s, run, how)
+}
+
+pub(crate) fn end_worktree(s: &mut State, run: RunId, how: port::WorktreeEnd) -> Vec<Effect> {
+    vec![s.call(
+        Pending::FlowText("/worktree".into()),
+        Command::RunOp {
+            run,
+            op: port::RunOp::EndWorktree { how },
+        },
+    )]
+}
+
+/// 运行的 worktree 现在怎样、人能做什么，一行字。
+pub(crate) fn worktree_text(w: &port::WorktreeView) -> String {
+    match (w.outcome, w.decidable) {
+        (Some(port::WorktreeEnd::Merged), _) => i18n::t!(
+            "flows.worktree_merged",
+            branch = w.branch,
+            into = w.into.clone().unwrap_or_default()
+        ),
+        (Some(port::WorktreeEnd::Discarded), _) => {
+            i18n::t!("flows.worktree_discarded", branch = w.branch)
+        }
+        (Some(port::WorktreeEnd::Kept), _) => i18n::t!("flows.worktree_kept", branch = w.branch),
+        (None, true) => i18n::t!("flows.worktree_decide", branch = w.branch),
+        (None, false) => i18n::t!("flows.worktree_going", branch = w.branch),
+    }
 }
 
 /// 一条带 `when` 的出口给人看的样子：符号、标签、判定与依据。不要的淡色、带 `⊘`，要的用提醒色、带 `◇`——

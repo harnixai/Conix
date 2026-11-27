@@ -363,7 +363,26 @@ pub(crate) fn run_view(v: &harnix_flow::RunView) -> port::RunView {
         def_digest: rec.def_digest.clone(),
         def_state: port::DefState::Current,
         proposals: rec.proposals.iter().filter_map(proposal).collect(),
+        worktree: worktree(rec),
     }
+}
+
+/// 运行自己的 worktree：子运行借父运行的或自己分叉出来的，由流程库合回父运行，人不收尾，但也列出来
+/// （`decidable` 为假）。
+fn worktree(rec: &harnix_flow::RunRecord) -> Option<port::WorktreeView> {
+    let w = rec.worktree.as_ref()?;
+    let outcome = w.outcome.as_ref();
+    Some(port::WorktreeView {
+        branch: w.branch.clone(),
+        path: w.path.clone(),
+        outcome: outcome.map(|o| match o.kind {
+            harnix_flow::WorktreeEnd::Merged => port::WorktreeEnd::Merged,
+            harnix_flow::WorktreeEnd::Kept => port::WorktreeEnd::Kept,
+            harnix_flow::WorktreeEnd::Discarded => port::WorktreeEnd::Discarded,
+        }),
+        into: outcome.and_then(|o| o.into.clone()),
+        decidable: harnix_flow::worktree_may_end(rec).is_ok(),
+    })
 }
 
 #[cfg(test)]

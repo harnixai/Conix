@@ -506,8 +506,22 @@ async fn the_doctor_is_quiet_on_a_repository_and_says_what_is_missing_elsewhere(
     assert!(errors.len() == 2 && errors.iter().any(|m| m.contains("privacy.emails")) && errors.iter().any(|m| m.contains("range.days")), "{errors:?}");
     std::fs::remove_file(root.join(".conix/governance/xreport.yaml")).unwrap();
 
-    let r = doctor_with(&p, Some(&l), "xreport", &root, Some(&doctor_exec(Some("the project is not trusted: what it asks to run does not run")))).await.unwrap();
-    assert!(r.findings.iter().any(|f| f.level == DoctorLevel::Error && f.message.contains("/trust")), "{r:?}");
+    // Why nothing starts comes in the library's words in a run and in the host's, in its language, in
+    // `conix flow doctor`: each names the switch, or what to do, all the same.
+    for (why, says) in [
+        ("the project is not trusted: what it asks to run does not run", "/trust"),
+        ("项目没受信（或看不出来）：包的自检不起进程（在实例里 /trust）", "/trust"),
+        ("the project is not trusted (or that cannot be told): a bundle's doctor starts no process (/trust in the instance)", "/trust"),
+        ("commands are not turned on here (the host's switch for every command a project or a bundle runs)", "flows.command_gates 是 off"),
+        ("命令没开（conix.yaml 的 flows.command_gates: off）：包的自检不起进程", "flows.command_gates 是 off"),
+        ("commands are off (flows.command_gates: off in conix.yaml): a bundle's doctor starts no process", "flows.command_gates 是 off"),
+    ] {
+        let r = doctor_with(&p, Some(&l), "xreport", &root, Some(&doctor_exec(Some(why)))).await.unwrap();
+        assert!(
+            r.findings.iter().any(|f| f.level == DoctorLevel::Error && f.message.contains(says) && !f.message.contains("git 起不来")),
+            "{why}: {r:?}"
+        );
+    }
     let r = doctor(&p, Some(&l), "xreport", &root).await.unwrap();
     assert!(r.findings.iter().any(|f| f.level == DoctorLevel::Warn && f.message.contains("没有执行服务")), "{r:?}");
 }

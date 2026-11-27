@@ -28,7 +28,7 @@ use std::time::Duration;
 use live::{Answering, Client, Endpoint, Live};
 use port::{
     Command, Event, ProposalStatus, Reply, RunId, RunOp, RunStatus, RunView, StationId,
-    StationStatus,
+    StationStatus, TaskId, WorktreeEnd,
 };
 use serde_json::Value;
 
@@ -254,6 +254,7 @@ async fn the_builtin_xforge_runs_a_change_from_proposal_to_archive_with_its_own_
             run: id.clone(),
             op: RunOp::Rework {
                 to: StationId(to),
+                tasks: vec![],
                 reason: Some("检查还留着 open 的问题：照台账改，改完让检查再看".into()),
             },
         })
@@ -494,6 +495,7 @@ async fn tend_child(c: &mut Client, lv: &Live, child: &RunId, p: &mut People) {
                 run: child.clone(),
                 op: RunOp::Rework {
                     to: StationId(to),
+                    tasks: vec![],
                     reason: Some("没达标的照台账与门禁的说明改，规格侧不动".into()),
                 },
             })
@@ -689,6 +691,7 @@ async fn the_builtin_xforge_dual_forks_an_implementation_and_black_box_tests_and
                             run: id.clone(),
                             op: RunOp::Rework {
                                 to: StationId(back),
+                                tasks: vec![],
                                 reason: Some(
                                     "规格侧检查还留着 open 的问题：照台账改，改完让检查再看".into(),
                                 ),
@@ -696,11 +699,29 @@ async fn the_builtin_xforge_dual_forks_an_implementation_and_black_box_tests_and
                         })
                         .await;
                     }
-                    // 黑盒测试没过：错在哪一边由人定，这里照合起来那一站的建议（缺省两路都重新分叉）。
+                    // 黑盒测试没过：错在哪一边由人定，这里照合起来那一站的建议。会话判出错在一路时（交出的
+                    // `rework.tasks`），只重做分叉站里那一路，另一路的结果留着；判不出就两路都重新分叉。
                     "join" => {
                         p.join_reworks += 1;
                         assert!(p.join_reworks <= 2, "合起来打回两次还没对上");
                         let back = proposed(&v, "join", &["fork", "propose"], "fork");
+                        let rec = rec_of(&lv, &id.0);
+                        let tasks: Vec<TaskId> = (back == "fork")
+                            .then(|| {
+                                rec["stations"]["join"]["tasks"]
+                                    .as_array()
+                                    .and_then(|t| t.last())
+                                    .and_then(|t| t["output"]["rework"]["tasks"].as_array())
+                                    .map(|t| {
+                                        t.iter()
+                                            .filter_map(|x| x.as_str())
+                                            .map(|x| TaskId(x.into()))
+                                            .collect()
+                                    })
+                            })
+                            .flatten()
+                            .unwrap_or_default();
+                        eprintln!("==== 只重做：{tasks:?}（空是整站）");
                         eprintln!(
                             "==== 合起来没对上，打回到 {back}\n---- ledgers/findings.yaml\n{}",
                             std::fs::read_to_string(Path::new(&out).join("ledgers/findings.yaml"))
@@ -710,6 +731,7 @@ async fn the_builtin_xforge_dual_forks_an_implementation_and_black_box_tests_and
                             run: id.clone(),
                             op: RunOp::Rework {
                                 to: StationId(back),
+                                tasks,
                                 reason: Some(
                                     "黑盒测试没过：照 findings 台账按规格修，不照对面凑".into(),
                                 ),
@@ -956,8 +978,8 @@ async fn the_builtin_xforge_dual_forks_an_implementation_and_black_box_tests_and
         assert!(archived.join(f).is_file(), "{}/{f}", archived.display());
     }
 
-    // 项目的分支没动：父运行的 worktree 怎么收尾由人定。Conix 还没有给人做这件事的操作（端口没有，
-    // 流程库的 Runner::end_worktree 没接出来），这里人在终端里自己合。合之前项目里没有这次的改动。
+    // 项目的分支没动：父运行的 worktree 怎么收尾由人定（`/worktree merge`，端口的 `EndWorktree`）。
+    // 合之前项目里没有这次的改动；视图里写着等人收尾。
     assert!(
         rec["worktree"]["outcome"].is_null(),
         "没人决定过：{}",
@@ -969,15 +991,32 @@ async fn the_builtin_xforge_dual_forks_an_implementation_and_black_box_tests_and
         "项目的分支没被自动提交"
     );
     assert!(!sh(&to, "git show HEAD:src/textkit/__init__.py").contains("def truncate"));
-    sh(
-        &wt,
-        "git add -A && git -c user.name=live -c user.email=live@conix commit -qm 'xforge/dual: 收尾' || true",
+    let w = view(&c, &id).await.worktree.expect("父运行有 worktree");
+    assert!(w.decidable && w.branch == branch, "{w:?}");
+    let Reply::Text { text } = c
+        .ok(Command::RunOp {
+            run: id.clone(),
+            op: RunOp::EndWorktree {
+                how: WorktreeEnd::Merged,
+            },
+        })
+        .await
+    else {
+        panic!("收尾回一句话")
+    };
+    eprintln!("==== 收尾：{text}");
+    let w = view(&c, &id).await.worktree.unwrap();
+    assert_eq!(
+        (w.outcome, w.decidable),
+        (Some(WorktreeEnd::Merged), false),
+        "{w:?}"
     );
-    sh(
-        &to,
-        &format!(
-            "git -c user.name=live -c user.email=live@conix merge --no-ff --no-edit -q {branch}"
-        ),
+    assert!(!Path::new(&wt).exists(), "合了之后 worktree 删了：{wt}");
+    assert!(
+        sh(&to, &format!("git branch --list {branch}"))
+            .trim()
+            .is_empty(),
+        "分支也删了"
     );
     assert!(
         std::fs::read_to_string(Path::new(&to).join("src/textkit/__init__.py"))

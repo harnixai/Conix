@@ -72,6 +72,7 @@ view:
     stop_task: "Stop \"{title}\"? · y to confirm / any other key to cancel"
     clear_goal: "Clear this goal? · y to confirm / any other key to cancel"
     delete_session: "Delete session “{title}”? Its transcript, data and sub-agents go too, for good · y to confirm / any other key to cancel"
+    discard_worktree: "Discard the worktree and branch {branch} of run {run}? Work not merged into the project is lost · y to confirm / any other key to cancel"
   models:
     title: "Pick a model"
     keys: "↑↓ select · Enter to switch (from the next turn) · Esc to keep"

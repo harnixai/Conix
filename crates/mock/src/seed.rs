@@ -171,6 +171,7 @@ pub fn busy() -> Seed {
             def_digest: String::new(),
             def_state: port::DefState::Current,
             proposals: vec![],
+            worktree: None,
         })
         .collect();
     Seed {

@@ -879,6 +879,8 @@ runs:
     main_session: s3
     def_digest: "3f2a91c5e0b14d7a"
     def_state: changed
+    # 在自己的 worktree 里跑完、等人收尾（`/worktree`）。
+    worktree: {branch: conix/flow/r3, path: /srv/app/.wkts/r3, decidable: true}
     stations:
       - {"id": "collect", "title": "收集需求", "work": "session", "skill": "gather-requirements", "exit": ["output"], "status": "passed", "elapsed_ms": 360000, "usage": {"input": 3000, "output": 800}}
       - {"id": "design", "title": "设计", "needs": ["collect"], "work": "session", "skill": "write-design", "exit": ["output", "confirm"], "status": "passed", "elapsed_ms": 1500000, "usage": {"input": 7000, "output": 2500, "cache_read": 8000}}

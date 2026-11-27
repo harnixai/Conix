@@ -705,6 +705,7 @@ async fn run_ops_release_pause_resume_rework_force_and_confirm() {
         &id,
         RunOp::Rework {
             to: port::StationId("say".into()),
+            tasks: vec![],
             reason: None,
         },
     ))

@@ -212,7 +212,7 @@ apply（每包一个子 Agent，任务级 package-check、package-tests；站 pa
   每个没过的（一个根因一条）`xledger add findings`，写明建议错在实现、测试还是规格，`flow_propose` 建议打回。门禁 blackbox 与
   ledgers-settled 不过，这一站就等人；不自动打回：错在哪一边要人定。
 - **打回**：join 的 `rework_to` 是 `[fork, propose]`。打回 `fork` 有两种粒度：整站（`/rework fork`）两路都重新分叉；只打回一个任务
-  （对话里让主 Agent `flow_rework {to: fork, tasks: [impl]}`）只重做那一路，另一路的子运行与结果留着。都是新一轮、新的分叉提交，
+  （`/rework fork/impl`，或对话里让主 Agent `flow_rework {to: fork, tasks: [impl]}`）只重做那一路，另一路的子运行与结果留着。都是新一轮、新的分叉提交，
   而这时父运行的分支上已经有上一轮两路合回来的东西：重做的那一路看得见另一路上一轮的工作（实现看得见测试，反之亦然），
   两路不再互相独立——skill 要它照规格修，不照对面凑。重做的那一路的禁读名单里只有父运行的 worktree：另一路已经合回去，worktree 删了。
   新的子运行自己的目录是空的，上一轮为什么打回在父运行的 `ledgers/findings.yaml`。

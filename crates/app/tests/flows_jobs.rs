@@ -667,6 +667,7 @@ async fn a_person_sends_a_run_back_by_typing_it() {
                 "r2".to_string(),
                 port::RunOp::Rework {
                     to: port::StationId("design".into()),
+                    tasks: vec![],
                     reason: Some("接口还要能取消".into()),
                 }
             ),
@@ -674,9 +675,116 @@ async fn a_person_sends_a_run_back_by_typing_it() {
                 "r2".to_string(),
                 port::RunOp::Rework {
                     to: port::StationId("design".into()),
+                    tasks: vec![],
                     reason: None,
                 }
             ),
         ]
     );
+}
+
+/// 打回可以只重做一站里的几件任务（`/rework <站>/<任务>[,<任务>]`）：如双路只重做实现那一路；写错任务名时
+/// 列出这一站有哪些，不发命令。
+#[tokio::test(start_paused = true)]
+async fn a_person_sends_back_only_some_tasks_of_a_station() {
+    let mut h = flows("default").await;
+    h.pick_upper(flow_index(&h, "feature-to-ship")).await;
+    h.keys("Right").await;
+    h.settle().await;
+    h.pick_upper(run_index(&h, "r1")).await;
+    h.settle().await;
+    h.keys("m").await;
+    h.core.state.ui.composer.clear();
+    let before = h.calls("dev").len();
+    let ops = |h: &Harness| -> Vec<port::RunOp> {
+        h.calls("dev")[before..]
+            .iter()
+            .filter_map(|c| match c {
+                Command::RunOp { op, .. } => Some(op.clone()),
+                _ => None,
+            })
+            .collect()
+    };
+    h.type_str("/rework impl/t9").await;
+    h.keys("Enter").await;
+    assert!(ops(&h).is_empty());
+    let notice = h.core.state.ui.notice.as_ref().map(|n| n.text.clone());
+    assert!(
+        notice.as_deref().is_some_and(|n| n.contains("t6, t7")),
+        "{notice:?}"
+    );
+    h.type_str("/rework impl/后端 接口改了").await;
+    h.keys("Enter").await;
+    assert_eq!(
+        ops(&h),
+        [port::RunOp::Rework {
+            to: port::StationId("impl".into()),
+            tasks: vec![port::TaskId("t6".into())],
+            reason: Some("接口改了".into()),
+        }]
+    );
+}
+
+/// 结束了的运行的 worktree 由人收尾（`/worktree`）：流程标签里一行写着在等人；不带动作说能做什么；丢掉要在
+/// 底栏再按一次 y；合进项目直接发，实例回的那句显示出来。
+#[tokio::test(start_paused = true)]
+async fn a_person_decides_a_finished_runs_worktree() {
+    let mut h = flows("default").await;
+    h.pick_upper(flow_index(&h, "feature-to-ship")).await;
+    h.keys("Right").await;
+    h.settle().await;
+    let ended = h
+        .core
+        .state
+        .flow_rows()
+        .iter()
+        .position(|r| r == &FlowRow::Ended)
+        .unwrap();
+    h.pick_upper(ended).await;
+    h.keys("Right").await;
+    h.settle().await;
+    h.pick_upper(run_index(&h, "r3")).await;
+    h.settle().await;
+    assert!(
+        h.text().contains("worktree conix/flow/r3 等人收尾"),
+        "{}",
+        h.text()
+    );
+    h.keys("m").await;
+    h.core.state.ui.composer.clear();
+    let before = h.calls("dev").len();
+    let ops = |h: &Harness| -> Vec<port::RunOp> {
+        h.calls("dev")[before..]
+            .iter()
+            .filter_map(|c| match c {
+                Command::RunOp { op, .. } => Some(op.clone()),
+                _ => None,
+            })
+            .collect()
+    };
+    h.type_str("/worktree r3 discard").await;
+    h.keys("Enter").await;
+    assert!(ops(&h).is_empty(), "丢掉先问");
+    assert!(h.text().contains("丢掉运行 r3 的 worktree"), "{}", h.text());
+    h.keys("n").await;
+    h.settle().await;
+    assert!(ops(&h).is_empty(), "放弃了");
+    h.type_str("/worktree r3 merge").await;
+    h.keys("Enter").await;
+    h.settle().await;
+    assert_eq!(
+        ops(&h),
+        [port::RunOp::EndWorktree {
+            how: port::WorktreeEnd::Merged
+        }]
+    );
+    let notice = h.core.state.ui.notice.as_ref().map(|n| n.text.clone());
+    assert!(
+        notice.as_deref().is_some_and(|n| n.contains("合进了 main")),
+        "{notice:?}"
+    );
+    h.type_str("/worktree r3 discard").await;
+    h.keys("Enter").await;
+    h.settle().await;
+    assert_eq!(ops(&h).len(), 1, "合过了就不能再丢：界面照实例的说法拒");
 }

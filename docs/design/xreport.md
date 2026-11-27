@@ -65,7 +65,8 @@ review: {separate: false}                 # 定稿要不要别人批
   `@{…}`（reflog），git 那边再放 `--end-of-options`；路径相对项目根、没有 `..`、不以 `-` 或 `:`（pathspec 的魔法）开头，放在 `--` 之后。
   认不出的选项报错。
 - **只在受信的项目里、`flows.command_gates` 没关时跑**（执行的总开关）。不行时 `xstat` 说中文的理由与该做什么：项目没受信就 `/trust`，
-  开关关着就改回 `trusted`。
+  开关关着就改回 `trusted`。运行里与 `conix flow doctor` 里拒绝的原话不同（流程库的英文、宿主照语言给的），所以认的是
+  里面不随语言变的记号：开关的键名 `flows.command_gates`、信任的命令 `/trust`。
 - **名字照 git。** 报告里的作者就是 git 里的名字（`.mailmap` 合过），不起代号：进了 git 的不是秘密。**邮箱缺省不记**：`privacy.emails`
   为 `false` 时连向 git 要都不要，`stats.json`、分析、`REPORT.md` 里都没有。**提交说明缺省给模型**（`privacy.subjects: true`），关掉后
   `stats.json` 里没有说明，模型只凭数写。

@@ -928,7 +928,9 @@ fn doctor_runs_each_installed_bundles_own_check_on_a_fresh_project() {
     .unwrap();
     let out = e.fails(&["doctor"]);
     assert!(
-        out.contains("✗ xreport:") && out.contains("flows.command_gates"),
+        out.contains("✗ xreport:")
+            && out.contains("flows.command_gates 是 off")
+            && !out.contains("git 起不来"),
         "{out}"
     );
 }

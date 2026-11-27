@@ -205,6 +205,35 @@ pub struct RunView {
     /// 站里的会话提的建议（在等的与处理过的）。
     #[serde(default)]
     pub proposals: Vec<ProposalView>,
+    /// 运行在自己的 worktree 里（`workspace: worktree`）：分支、怎么收尾的；在项目里跑的是 `None`。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worktree: Option<WorktreeView>,
+}
+
+/// 运行的 worktree（flows.md §6.4）：运行结束后由人定合进项目、留分支还是丢掉（`RunOp::EndWorktree`）。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorktreeView {
+    pub branch: String,
+    /// worktree 的目录（绝对路径）。
+    pub path: String,
+    /// 定过了怎么收尾：`Kept` 之后还能再合或丢。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<WorktreeEnd>,
+    /// 合进了项目的哪个分支（`Merged`）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub into: Option<String>,
+    /// 现在能不能由人收尾：运行结束了、不是子运行、没合也没丢。实例判，界面照着显示操作。
+    #[serde(default)]
+    pub decidable: bool,
+}
+
+/// worktree 的三种收尾：分支合进项目当前的分支（worktree 删掉）、留着分支（worktree 删掉）、都丢掉。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorktreeEnd {
+    Merged,
+    Kept,
+    Discarded,
 }
 
 /// 钉住的定义与流程现在的定义比：已结束的运行看得出它跑的是不是现在这份。
@@ -305,9 +334,12 @@ pub enum RunOp {
         station: StationId,
         reason: String,
     },
-    /// 打回到 `to`（它和后面的站重做）；`reason` 记进运行的日志，给重做的站看。
+    /// 打回到 `to`（它和后面的站重做）；`reason` 记进运行的日志，给重做的站看。`tasks` 不空时只重做 `to`
+    /// 的这几个任务（如双路只重做实现那一路），站里别的任务的结果留着。
     Rework {
         to: StationId,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        tasks: Vec<TaskId>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         reason: Option<String>,
     },
@@ -327,6 +359,11 @@ pub enum RunOp {
         to: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         reason: Option<String>,
+    },
+    /// 结束了的运行的 worktree 怎么收尾（`RunView::worktree` 的 `decidable` 为真时）。回 `Reply::Text`
+    /// （合进了哪个分支、怎么合的）；合并冲突报 `PortError::Failed`，列出冲突的文件，项目不动、worktree 还在。
+    EndWorktree {
+        how: WorktreeEnd,
     },
     Pause,
     Resume,

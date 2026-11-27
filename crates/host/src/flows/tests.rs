@@ -1026,3 +1026,122 @@ async fn a_bundles_process_goes_through_the_instances_exec_and_is_recorded() {
     );
     flows.stop().await;
 }
+
+/// 在自己的 worktree 里跑、只有一站确认的流程：跑完由人收尾。
+const WT_YAML: &str = "name: wt
+title: Worktree
+workspace: worktree
+stations:
+  - {id: a, title: A, exit: [{kind: confirm}]}
+";
+
+/// 人经端口收尾一个运行的 worktree（`RunOp::EndWorktree`）：跑着时不能定；结束后视图里写着能定，合进项目后
+/// 项目有了 worktree 里的改动、不能再定；另一个运行丢掉，分支没了。
+#[tokio::test]
+async fn a_person_merges_or_discards_a_finished_runs_worktree_through_the_port() {
+    let dir = tempfile::tempdir().unwrap();
+    let project = dir.path().join("p");
+    std::fs::create_dir_all(project.join(".conix/flows")).unwrap();
+    std::fs::write(project.join(".conix/flows/wt.yaml"), WT_YAML).unwrap();
+    std::fs::write(
+        project.join(".gitignore"),
+        ".wkts/\nconix/runs/\n.conix/state/\n",
+    )
+    .unwrap();
+    let git = |args: &[&str]| {
+        let o = std::process::Command::new("git")
+            .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+            .args(args)
+            .current_dir(&project)
+            .output()
+            .unwrap();
+        assert!(
+            o.status.success(),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&o.stderr)
+        );
+        String::from_utf8_lossy(&o.stdout).trim().to_string()
+    };
+    git(&["init", "-q", "-b", "main"]);
+    git(&["add", "-A"]);
+    git(&["commit", "-qm", "init"]);
+    let r = rig_in(project.to_str().unwrap()).await;
+    let flows = super::start(
+        &r.hub,
+        super::FlowsConfig {
+            runs_dir: dir.path().join("runs"),
+            worktrees_dir: project.join(".wkts"),
+            workspaces_dir: dir.path().join("ws"),
+            policies_file: None,
+            command_gates: true,
+            artifacts_dir: None,
+            library_home: None,
+        },
+    )
+    .await
+    .unwrap();
+    let t = BundleRig {
+        r,
+        flows,
+        _dir: dir,
+    };
+    let end = |id: port::RunId, how| {
+        let t = &t;
+        async move { t.op(&id, port::RunOp::EndWorktree { how }).await }
+    };
+    let finished = |id: port::RunId| {
+        let t = &t;
+        async move {
+            for _ in 0..300 {
+                let v = t.flows.view(&id.0).await.unwrap();
+                if v.worktree.as_ref().is_some_and(|w| w.decidable) {
+                    return v;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+            panic!("run {id} never became decidable");
+        }
+    };
+
+    let v = t.start("wt", json!({}), false).await;
+    let id = v.summary.id.clone();
+    let w = v.worktree.clone().expect("works in a worktree");
+    assert!(!w.decidable, "still going: {w:?}");
+    assert!(end(id.clone(), port::WorktreeEnd::Merged).await.is_err());
+    std::fs::write(std::path::Path::new(&w.path).join("made.txt"), "made\n").unwrap();
+    t.until(&id, "a", port::StationStatus::Working).await;
+    t.confirm(&id, "a").await.unwrap();
+    let v = finished(id.clone()).await;
+    assert!(v.worktree.unwrap().outcome.is_none());
+    let port::Reply::Text { text } = end(id.clone(), port::WorktreeEnd::Merged).await.unwrap()
+    else {
+        panic!("a text")
+    };
+    assert!(text.contains("merged") && text.contains("main"), "{text}");
+    assert!(
+        project.join("made.txt").is_file(),
+        "the work is in the project now"
+    );
+    let w = t.flows.view(&id.0).await.unwrap().worktree.unwrap();
+    assert_eq!(
+        (w.outcome, w.into.as_deref(), w.decidable),
+        (Some(port::WorktreeEnd::Merged), Some("main"), false)
+    );
+    assert!(
+        end(id.clone(), port::WorktreeEnd::Discarded).await.is_err(),
+        "merged already"
+    );
+
+    let v = t.start("wt", json!({}), false).await;
+    let id = v.summary.id.clone();
+    let branch = v.worktree.clone().unwrap().branch;
+    t.until(&id, "a", port::StationStatus::Working).await;
+    t.confirm(&id, "a").await.unwrap();
+    finished(id.clone()).await;
+    end(id.clone(), port::WorktreeEnd::Discarded).await.unwrap();
+    assert!(
+        git(&["branch", "--list", &branch]).is_empty(),
+        "{branch} is gone"
+    );
+    t.flows.stop().await;
+}

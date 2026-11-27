@@ -100,6 +100,8 @@ pub enum Confirm {
     ClearGoal(SessionId),
     /// 删掉一个已关闭的会话：会话、名字。
     DeleteSession(SessionId, String),
+    /// 丢掉结束了的运行的 worktree 与分支（`/worktree discard`）：运行、分支。
+    DiscardWorktree(port::RunId, String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

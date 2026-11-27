@@ -420,6 +420,9 @@ fn confirmed(s: &mut State, c: Confirm) -> Vec<Effect> {
         Confirm::DeleteSession(session, _) => {
             vec![s.call(Pending::Ignore, Command::DeleteSession { session })]
         }
+        Confirm::DiscardWorktree(run, _) => {
+            crate::flows::end_worktree(s, run, port::WorktreeEnd::Discarded)
+        }
         Confirm::ClearGoal(id) => vec![s.call(
             Pending::Ignore,
             Command::UpdateGoal {
