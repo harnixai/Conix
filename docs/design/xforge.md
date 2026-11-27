@@ -1,6 +1,6 @@
 # 内置流程包 xforge：规格驱动的开发流程
 
-xforge 是 Conix 内置的开发流程包（源头 `examples/xforge/.conix/flows/xforge/`，构建时编进 host），能力对齐 XForge
+xforge 是 Conix 内置的开发流程包（源头 `examples/xforge/.conix/flows/xforge/`，构建时编进 host，起来时放进全局流程库，`conix flow install xforge` 装进项目），能力对齐 XForge
 （`harnixai/xforge`）：两条基线（规格、接口）、三条按风险选的路径、独立检查、按工作包实施、人在几处把关、归档并进基线。
 XForge 自己的状态机（`xflow`）、receipt 链、往 `.claude/` 的投影不搬：运行的状态就是流程（flows.md §7），
 结构化的数据由包的命令写，判断由门禁做。本文是这个包的约定：数据的形状、命令、门禁、流程。

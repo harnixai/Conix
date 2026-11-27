@@ -28,7 +28,7 @@ Conix 不跟 Claude Code 这类聊天式编程 CLI 拼打磨。它的位置是 A
 - **引擎只走 Agix 的 JSON-RPC 协议**（`agix/docs/daemon_rpc_protocol.md`）：实例进程内部用 `agix::embed` 嵌入引擎，通过 duplex 通信。不使用 `agix::pool` 这一层 Rust 门面，因为它不承诺兼容。唯一的例外是启动时的装配：`EmbedConfig` 本来就是 Rust 的，cli 层设置与给插件的宿主 JS 库（`conix.*`，`js_libs`）在这里登记（`docs/design/plugins.md` §5.1）。
 - **项目里：`.conix/` 放脚手架，制品目录（缺省 `conix/`）放运行与归档**（`docs/design/layout.md`）：流程一个包一个目录、
   自洽不共享；运行的目录 `conix/runs/` 不进 git，结束后的归档与包的数据进 git。
-- **项目级的放项目，全局的放全局。** 会话、流程、作业都是项目的，放在项目的 `.conix/`（Agix 的项目层目录）里：定义（流程、作业）进 git，本机数据与过程数据在 `.conix/state/` 下、不进 git，Conix 自己的在 `state/conix/`。全局目录是 `~/.conix`（可以用 `CONIX_HOME` 改），Agix 的 `data_root` 也指向这里，不使用 `~/.agix`；它只放用户级的配置（`conix.yaml`、键位等）和实例的运行时文件（`instances/`）；没有全局的流程与作业，要各处都用的放进个人项目（`<文档目录>/Conix`），不往 Agix 的 `settings.json` 里写东西。布局见 `docs/design/architecture.md` §8.1。
+- **项目级的放项目，全局的放全局。** 会话、流程、作业都是项目的，放在项目的 `.conix/`（Agix 的项目层目录）里：定义（流程、作业）进 git，本机数据与过程数据在 `.conix/state/` 下、不进 git，Conix 自己的在 `state/conix/`。全局目录是 `~/.conix`（可以用 `CONIX_HOME` 改），Agix 的 `data_root` 也指向这里，不使用 `~/.agix`；它只放用户级的配置（`conix.yaml`、键位等）和实例的运行时文件（`instances/`）；全局只放一个流程库（`~/.conix/flows/`，可装进项目的包，内置的也在这里），跑的流程在项目里（`conix flow install` 装进来），没有全局的作业，要各处都用的放进个人项目（`<文档目录>/Conix`），不往 Agix 的 `settings.json` 里写东西。布局见 `docs/design/architecture.md` §8.1。
 - **TUI 与后端之间只有一个端口**：`Instances` 和 `Backend` 两个 trait 加上领域事件，定义见 `docs/design/architecture.md` §3。mock 与真实实现走的是同一个端口；端口的消息序列化之后就是 TUI 与实例之间的协议。
 - **流程来自 Harnix**：从 Harnix-v0.4.7 分叉到 `crates/flow`，在 Conix 里改（门禁、确认、交付的治理，`docs/design/flows.md`），稳定后整理成 issue 提给 Harnix。分叉前的流程定义照旧能读。流程不放进 Agix。
 - **不做**：ACP（已作为需求提给 Agix：harnixai/Agix#74）、Web 界面。

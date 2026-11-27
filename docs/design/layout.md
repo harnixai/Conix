@@ -18,6 +18,7 @@
 │   │   ├── templates/                     制品的骨架（站的 deliverables 引用）
 │   │   └── commands/<名>.js               包自己的命令（QuickJS）：会话经 flow_command、人经 /… 命令、站经命令步骤调
 │   ├── flows/*.yaml、flows/skills/ …      旧的平铺布局：照旧能读（§5）
+│   ├── flows.lock.yaml                    从全局流程库装进来的包：版本、摘要（flows.md §7.12）
 │   ├── governance/                        项目的原则、治理文件：流程的门禁读它
 │   ├── roles.yaml  jobs.json  settings.json …
 │   └── state/                             本机数据（Agix 的），不进 git：会话、运行账本（flow-runs/）
@@ -40,16 +41,17 @@
 - **`bundle.yaml`**：`name`（与目录名相同）、`title`、`description`、`version`，以及 `flows`（选路的顺序）、`start`（`route`、`triage`）、
   `pace`、`commands`（`read_only` 声明）；字段见 flows.md §7.1。目录里有它才当一个包读；没有它的子目录
   （`skills/`、`gates/` …）是旧的平铺布局。
-- **来源与覆盖**：包可以随 Conix 内置、随插件来、或在项目的 `.conix/flows/` 里。项目里有**同名、带 `bundle.yaml`** 的包，
-  整包代替其他来源的同名包；项目里同名目录**不带 `bundle.yaml`**，只是给它加 `local.md`（§4）。
+- **来源与覆盖**：跑的包只有两处：项目的 `.conix/flows/` 与插件带的。项目里有**同名、带 `bundle.yaml`** 的包，整包代替插件的同名包；
+  项目里同名目录**不带 `bundle.yaml`**，只是给它加 `local.md`（§4）。随 Conix 内置的包（`xforge`）与别处来的包放在全局流程库
+  `~/.conix/flows/`，不跑，`conix flow install` 装进项目（flows.md §7.12）。
 - **`lib/`**：包内共用的函数。脚本与命令用相对路径 `import`（`../lib/specs.js`），只认包内，不出包、没有 npm，随运行一起钉住。
   门禁与命令共用一份判法放在这里。
 - **名字一个空间**：包里的流程名、命令名、站 id 不能重名，`help`、`status` 保留。地址里这三种名字共用一个位置，见下。
 - **命令**：`commands/<名>.js` 是包自己的命令。站里的会话用 `flow_command {command, args}` 调；命令读得到项目，只写得了
   这次运行的工作目录（`_run/` 除外）和包的数据目录 `conix/<包>/`。结构化的数据（规格增量、台账）由命令写，模型不手写。
 
-- **导出与导入**：包可以导出成 `<包>-<版本>.zip`（带 `MANIFEST.yaml`：导出它的 Conix 版本、要求、每个文件的 SHA-256）、
-  装进别的项目；`export`、`import` 是包的保留名。见 flows.md §7.12。
+- **管理**：全局库与项目之间装、更新、回填，包文件（`<包>-<版本>.zip`，带 `MANIFEST.yaml`）导入导出，都只在命令行
+  （`conix flow …`）；`export`、`import` 是包的保留名。见 flows.md §7.12。
 
 ### 2.1 地址
 
@@ -82,7 +84,7 @@
     （`dir` 相对项目，`record_sha256` 是写完时 `record.json` 的摘要）。账本模型写不了，所以 `record.json` 连同 `files`
     被改写也看得出来。**不做哈希链**：归档提交进 git，历史加账本里这一个摘要，批过的制品之后被改就看得见，
     链只会多出一套要维护的东西。
-  - `conix flow verify <归档目录> [--project 目录]`（不要实例，直接读项目的运行账本，调 `harnix_flow::archive::verify`）报告：`missing`（列了没有）、
+  - `conix flow verify <归档目录> | --all [-C 项目]`（不要实例，直接读项目的运行账本，调 `harnix_flow::archive::verify`）报告：`missing`（列了没有）、
     `extra`（有了没列）、`changed`（摘要或大小不同）；门禁证据与确认绑定的摘要对着归档里的文件重算，不符的列出；
     `record` 是 `matches` / `differs` / `no_ledger`（账本里没有这次归档，如旧的）。没有 `files` 的旧归档只报
     `unlisted`、仍核对证据摘要——这是核对不了，不算失败。

@@ -1,9 +1,9 @@
 # 流程
 
-流程是按站推进的多步工作（流程库来自 Harnix）。流程**只在项目里**：项目自己的在 `<项目>/.conix/flows/`，
-随项目提交，**项目受信才读、才写**（见 `/trust`）；内置的与插件带来的是只读的，每个项目都有，名字前标 `◎`，
-项目里存一份同名的就取代它，删掉回到原来那份。没有全局流程：要各处都用的，放进**个人项目**（见
-[实例](instances.md#个人项目)）。以前的 `~/.conix/flows/` 不再读。
+流程是按站推进的多步工作（流程库来自 Harnix）。**跑的流程只在项目里**：项目自己的在 `<项目>/.conix/flows/`，
+随项目提交，**项目受信才读、才写**（见 `/trust`）；插件带来的是只读的，名字前标 `◎`，项目里存一份同名的就取代它。
+全局只有一个**流程库**（`~/.conix/flows/`）：放可以装进各个项目的包，内置的 `xforge` 也在这里，但库里的包不跑，
+要用就 `conix flow install <包>` 装进项目（见下面的「管理流程包」）。
 
 ## 新建与修改
 
@@ -83,17 +83,14 @@ release: [carol]
 - **制品目录**：项目下的 `conix/`（项目的 `.conix/conix.yaml` 或全局 `conix.yaml` 的 `flows.artifacts_dir` 可以改名）。
   每次运行在 `conix/runs/<运行>/` 有自己的目录，不进 git；流程包的流程结束后，交付物连同 `record.json`（各站结论、门禁证据、
   谁确认的）归档进 `conix/<包>/archive/`，进 git。制品目录与包同名时（比如 `xforge`），包的数据直接放在它下面。
-- **改内置的流程**：在项目里建一个同名目录、不放 `bundle.yaml`，只写 `skills/<名>/local.md`——它接在原 skill 后面（"本项目的补充"），
-  流程升级时还在。要改得更多，把整个包拷进项目的 `.conix/flows/`，项目里的就整包代替内置的。
+- **补充一个 skill**：在装进来的包里写 `skills/<名>/local.md`——它接在原 skill 后面（"本项目的补充"），
+  `conix flow update` 时带过去，不算对包的改动、不进包。
 - **包的字段**：`bundle.yaml` 写 `flows`（流程与选路的先后）、`start`（选路顺序、分诊用的 skill）、`pace`（`auto` 或 `step`）、
   `commands`（哪些子命令只读）。包里的流程名、命令名、站 id 不能重名，`help`、`status` 保留。包里的 `lib/` 放脚本与命令共用的 JS，只能 import 包内的文件。
-- **导出与导入**：`conix flow export <包> [-o 文件]` 把项目里的或内置的包打成 `<包>-<版本>.zip`，`conix flow import <文件>`
-  装进当前项目的 `.conix/flows/`（已有同名的要加 `--force`，旧的先备份，你写的 `local.md` 会带过去），`conix flow inspect <文件>`
-  只看包里的 `MANIFEST.yaml` 并核对。实例里用 `/flow:export <包> [文件]`、`/flow:import <文件> [--force]`。包里有 `command` 门禁时，
-  它们只在受信任的项目里运行。`local.md` 不进包；`export`、`import` 不能当包名。
 - **核对归档**：`conix flow verify <归档目录>` 看一份归档在写下之后有没有被改过：文件对着 `record.json` 的清单，
   门禁证据与确认绑定的摘要重算，`record.json` 再对着这台机器上的运行账本。有问题就列出来，退出码非 0。
-- **内置的 `xforge`**：规格驱动的开发流程，`xforge/solid`（提案、设计、独立检查、按工作包实施、验证、归档）与 `xforge/quick`
+  `conix flow verify --all` 扫项目里所有的 `conix/*/archive/*/`。
+- **内置的 `xforge`**（`conix flow install xforge` 装进项目）：规格驱动的开发流程，`xforge/solid`（提案、设计、独立检查、按工作包实施、验证、归档）与 `xforge/quick`
   （提案、实施、验证、归档）。规格在 `conix/xforge/specs/`，站里的会话用 `xspec`、`xledger`、`xpkg` 三个命令记规格增量、
   台账、工作包，归档时增量并进规格。项目要准备的：`.conix/governance/verify.sh`（实施站的出口跑它：单测、lint），
   可选的 `.conix/governance/constitution.yaml`（设计逐条对照的原则）。完整的例子是仓库里的 `examples/xforge`。
@@ -101,6 +98,50 @@ release: [carol]
   一个实现、一个只照规格写黑盒测试，互相看不到；两路合回运行的分支后用黑盒测试跑实现，没过的由会话判错在哪一边，你决定打回哪一路
   （`/rework fork` 两路都重做，或在对话里让主 Agent 只打回其中一个任务）。不按风险自动选，点名起：`/flow:xforge:dual <主题> --risk high`。
   要在 `.conix/governance/xforge.yaml` 的 verify 菜单里声明一项 `blackbox`（黑盒测试放哪、怎么跑），没有它合起来那一站就报错。
+
+## 管理流程包
+
+只在命令行，不需要实例；在项目目录里跑（或 `-C <项目>`）。改东西的命令先列出要做什么（包、版本从哪到哪、增删改的文件、
+备份到哪）再问 `[y/N]`；`--yes` 不问，`--dry-run` 只列不做；在脚本里（不是终端）不给 `--yes` 就拒绝。改了项目的包，
+这个项目若有实例在跑，它会重读流程。
+
+| 命令 | 做什么 |
+|---|---|
+| `conix flow list [--global \| --all]` | 项目的包（缺省）、全局库的、两边对照，带状态：已装、改过、全局库有新版、只在项目、未装 |
+| `conix flow show <包> [--global]` | 说明、流程、命令、版本、要求的 Conix、来源 |
+| `conix flow install <包>` | 全局库 → 项目；项目里已有同名的用 `update` |
+| `conix flow update [<包> \| --all]` | 全局库的新版 → 项目。项目里改过的、全局库更旧的拒绝，`--force` 才覆盖（先备份） |
+| `conix flow backfill <包>` | 项目 → 全局库：项目里改好的包放回库里，别的项目再 `update`。版本没变而内容不同的拒绝：改 `bundle.yaml` 的 `version` |
+| `conix flow remove <包> [--global]` | 删项目的（缺省）或库里的，都先备份；项目里有进行中的运行用着它就拒绝，`--force` 才删 |
+| `conix flow diff <包>` | 项目的与库里的差在哪：版本、增删改的文件 |
+| `conix flow import <文件> [--project]` | 包文件 → 全局库（缺省）或项目 |
+| `conix flow export <包> [--global] [-o 文件]` | 项目的（缺省）或库里的 → `<包>-<版本>.zip` |
+| `conix flow inspect <文件>` | 只看包文件的 `MANIFEST.yaml` 并核对 |
+| `conix flow reset <包> \| --all` | 库里的内置包恢复成这个 Conix 带的那版（当前的先备份） |
+| `conix flow clean [--global]` | 清掉备份、暂存的残留、对不上目录的记录 |
+| `conix flow doctor [--global] [--fix]` | 体检，见下 |
+
+- **项目记着装了什么**：`.conix/flows.lock.yaml`（进 git）记每个从库里装的包的版本与摘要；拿它判"项目里改过没有"。
+  `skills/*/local.md` 不算。
+- **内置的包**：Conix 带的 `xforge` 在你第一次运行 `conix` 时放进全局库。库里那份没改过、新的 Conix 带了新版时自动换上
+  （打一行提示）；改过的不动，`doctor` 会说有新的内置版，`conix flow reset xforge` 换上（你的那份先备份）。
+  `remove --global` 也删得掉它，`reset` 找回。
+- **以前直接用内置 xforge 的项目**：升级后 xforge 不再自动出现，`conix flow install xforge` 一条命令装进来。有进行中的运行时，
+  实例起来会提示这一句（流程的定义、门禁、脚本钉在运行里，skill 与模板没钉，不装就跑不下去）；`conix flow doctor --fix` 也会装。
+- **包文件**：zip，带 `MANIFEST.yaml`（导出它的 Conix、要求、每个文件的 SHA-256）。导入先核对再校验，过了才装；
+  包里有 `command` 门禁时，它们只在受信任的项目里运行。`local.md` 不进包；`export`、`import` 不能当包名。
+
+### 体检
+
+`conix flow doctor` 查项目（加 `--global` 查全局库），有错误时退出码非 0：
+
+- 全局库：目录与记录对不上、每个包的校验、这个 Conix 满不满足包要求的版本、内置包没改过 / 改过 / 有新的内置版、暂存残留、备份占了多少。
+- 项目：每个包的校验、lock 与目录对不上、包改过、库里有新版、只在项目的包（可以 `backfill`）、遮住了插件的同名包、用了保留名、
+  进行中的运行用的包不见了、项目没受信（命令门禁不会跑）、`.gitignore` 里有没有 `conix/runs/` 与 `.wkts/`、包自己的体检
+  （`bundle.yaml` 的 `doctor:`）、归档的核对摘要。
+
+`--fix` 只做安全的：清暂存、去掉对不上目录的记录、内容与库里一样却没记进 lock 的补记、缺了的内置包重新放进库里、
+进行中的运行用的包库里有而项目没有的装上。别的只报，给出该跑的命令。
 
 ## 启动与推进一个流程包
 

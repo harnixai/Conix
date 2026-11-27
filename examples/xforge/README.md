@@ -1,8 +1,8 @@
 # Conix 演示项目：xforge 开发流程
 
 一个很小的 Python 库（`src/textkit`，带规格、接口登记与测试），用 Conix 内置的 **xforge** 流程包做规格驱动的变更
-（约定见 `docs/design/xforge.md`）。`.conix/flows/xforge/` 就是 Conix 内置的那个包的源头：构建时编进 Conix，每个项目里都能用；
-这个项目里有同名的包，所以用的是项目自己的这份（改它就是改内置的）。
+（约定见 `docs/design/xforge.md`）。`.conix/flows/xforge/` 就是 Conix 内置的那个包的源头：构建时编进 Conix，起来时放进全局流程库
+（`~/.conix/flows/`），别的项目 `conix flow install xforge` 装进去；这个项目里本来就有这个包，用的是项目自己的这份（改它就是改内置的）。
 
 ## 怎么跑
 
@@ -78,6 +78,6 @@ src/  tests/                被改的代码与单测
 tests_blackbox/             黑盒测试（verify 菜单的 blackbox；双路开发的测试那一路写在这里）
 ```
 
-在别的项目里用内置的 xforge：准备 `.conix/governance/verify.sh`（可选 `constitution.yaml`、`xforge.yaml`），规格在 `conix/xforge/specs/`
-（没有就让提案站 `xspec init <能力> <前缀> "<标题>"` 建一份）。只想补几句做法，写 `.conix/flows/xforge/skills/<站>/local.md`
-（不放 `bundle.yaml`），它接在内置的 skill 后面。
+在别的项目里用内置的 xforge：`conix flow install xforge`，再准备 `.conix/governance/verify.sh`（可选 `constitution.yaml`、
+`xforge.yaml`；`conix flow doctor` 会说缺什么），规格在 `conix/xforge/specs/`（没有就让提案站 `xspec init <能力> <前缀> "<标题>"` 建一份）。
+只想补几句做法，写 `.conix/flows/xforge/skills/<站>/local.md`，它接在 skill 后面，`conix flow update` 时留着。

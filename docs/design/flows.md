@@ -421,7 +421,7 @@ exit: [{kind: children, require: all}]   # all（缺省）| any | 正整数：�
 调，结构化的数据（规格增量、台账、工作包）由命令写。skill 只写这一站怎么干活，用户补充写 `local.md`。
 
 Conix 内置一个按这些写的开发流程包 `xforge`（能力与 xforge 插件对齐：规格驱动、按工作包实施、独立检查、可以打回、归档时
-并进规格），源头是演示项目 `examples/xforge/.conix/flows/xforge/`。它的流程就是流程本身，没有 `xflow` 这一层：运行的状态
+并进规格），源头是演示项目 `examples/xforge/.conix/flows/xforge/`，起来时放进全局流程库，`conix flow install xforge` 装进项目（§7.12）。它的流程就是流程本身，没有 `xflow` 这一层：运行的状态
 在流程里，结构化的数据由 `xspec`、`xledger`、`xpkg` 三个命令维护。
 
 ### 7.1 包：`bundle.yaml`
@@ -578,10 +578,21 @@ doctor: doctor                         # 自检脚本 scripts/doctor.js（§7.13
 - 插件带的流程包、受管流程不变；插件包里的流程包同样有 `/flow:<包>` 地址。
 - 每一项在 `3rds/INDEX.md` 的分叉记录里记一行；只在 Conix 里有的（地址、分诊、授权）标"in Conix"。
 
-### 7.12 导出与导入
+### 7.12 流程包的管理：全局库、项目、包文件
 
-一个流程包可以导出成一个文件、装进另一个项目。包文件是 zip，`<包>-<版本>.zip`（版本取 `bundle.yaml`，没写是 `0.0.0`），
-放的就是包目录原样，外加根上一份导出时生成的 `MANIFEST.yaml`：
+管理只在命令行（`conix flow …`），不进界面、不给模型、不需要实例。流程包在三处：
+
+| 处 | 位置 | 跑不跑 |
+|---|---|---|
+| 内置的 | 编进二进制（源头 `examples/xforge/.conix/flows/`），当一个包文件看 | 否：全局库的种子 |
+| 全局库 | `~/.conix/flows/<包>/`（`CONIX_HOME`），旁边 `.registry.yaml`、`.backups/`、`.staging/`、`.lock` | 否 |
+| 项目 | `<项目>/.conix/flows/<包>/`，`.conix/flows.lock.yaml` 记从库里装的哪一版（进 git） | 是 |
+| 插件 | 插件目录（§7.11） | 是 |
+
+- **项目只跑项目的与插件的。** 没有内置层（以前的 `MemPacks::examples()`、每次起实例重写的 `state/conix/flows-builtin/` 都去掉了），
+  全局库也不读：库是"可以装的"，不是"在用的"。为什么：同一个包在库里改了，不该让所有项目的下一次运行悄悄换规矩；装进项目、进 git，
+  哪一版在用就有记录。
+- **包文件**：zip，`<包>-<版本>.zip`（版本取 `bundle.yaml`，没写是 `0.0.0`），放的就是包目录原样，根上一份生成的 `MANIFEST.yaml`：
 
 ```yaml
 format: 1
@@ -591,27 +602,95 @@ requires: {conix: ">=0.1.10", flow_definition_format: 1, flow_api: 1}
 files: [{path, sha256, size}, …]
 ```
 
-- **不带身份**：没有用户名、主机名、路径。`requires.conix` 取 `bundle.yaml` 里可选的 `requires: {conix: ">=x.y.z"}`
-  （只认这一种写法，写别的拒绝），没写就是导出它的那个版本。
-- **不进包的**：`skills/*/local.md`（用户自己的补充）、点开头的文件、`__pycache__`、符号链接（遇到就报错）。
-  项目的、插件的、内置的包都能导出，内置的 `xforge` 也是。
-- **导入先核对再动手**：包在暂存目录（`.conix/state/conix/` 下）里解开，逐项核对后才装。拒绝：`format` 不认识；
-  文件与 MANIFEST 对不上（缺的、多的、SHA-256 或大小不符）；绝对路径、`..`、反斜杠、隐藏文件、`local.md`、符号链接；
-  超过 512 个文件、总共 10 MiB、单个 2 MiB。不兼容也拒绝：运行的 Conix 低于 `requires.conix`，或定义格式、流程库接口比这个构建新
-  （`DEFINITION_FORMAT`、`FLOW_API_VERSION`）。最后用流程库校验整个包（每个流程、每个件、`commands` 列的文件），有问题就拒绝。
-- **装**：`<项目>/.conix/flows/<包>/`。已有同名的拒绝，`--force` 才覆盖：旧的先整个移到
-  `.conix/state/conix/flow-backups/<包>-<时刻>/`，旧的 `skills/*/local.md` 带到新的里。报告包名、版本、导出它的 Conix 版本、
-  流程与命令；遮住了同名的插件或内置的包时提醒；包里有 `command` 门禁时提醒它们只在受信任的项目里跑。
-- **`export`、`import` 是包的保留名**（`bundle::RESERVED_BUNDLES`）：`/flow:export`、`/flow:import` 因此不会与哪个包的地址混，
-  地址路由在查包之前先接下它们。
-- **入口只给人，不给模型**：命令行 `conix flow export <包> [-o 文件] [--project 目录]`、`conix flow import <文件> [--force]
-  [--project 目录]`、`conix flow inspect <文件>`（打印 MANIFEST 与核对结果）不需要实例，项目的与内置的包直接读（插件的要在实例里导）；
-  输入框里 `/flow:export <包> [文件]`、`/flow:import <文件> [--force]` 发 `ExportFlow` / `ImportFlow` 给实例（文件相对项目根，
-  导出不写文件就放项目根），导入后实例重列流程，流程标签随之更新。打包与核对在 `crates/host/src/flows/package.rs`，命令行与实例共用。
+  - **不带身份**：没有用户名、主机名、路径。`requires.conix` 取 `bundle.yaml` 里可选的 `requires: {conix: ">=x.y.z"}`（只认这一种写法），
+    没写就是导出它的那个版本。
+  - **不进包的**：`skills/*/local.md`（项目自己的补充）、点开头的文件、`__pycache__`、符号链接（遇到就报错）。
+  - **摘要**：`files` 按路径排好，每个一行 `<sha256> <size> <path>`，整段的 SHA-256。目录、包文件、内置的同样的内容摘要一样；
+    registry 与 lock 记的都是它，所以 `local.md` 改了不算包改了。
+- **写进库或项目都先核对再动手**：内容在暂存目录（库的 `.staging/`、项目的 `.conix/state/conix/`）里放好、逐项核对，过了才改名换上，
+  换下来的进备份（库的 `.backups/`、项目的 `.conix/state/conix/flow-backups/<包>-<时刻>/`）。拒绝：`format` 不认识；文件与 MANIFEST
+  对不上（缺的、多的、SHA-256 或大小不符）；绝对路径、`..`、反斜杠、隐藏文件、`local.md`、符号链接；超过 512 个文件、总共 10 MiB、
+  单个 2 MiB；运行的 Conix 低于 `requires.conix`，或定义格式、流程库接口比这个构建新；流程库校验（每个流程、每个件、`commands`
+  列的文件）不过。从目录来的（install、update、backfill）与内置的同样走这一套。写库拿 `.lock`（flock），几个实例与命令行同时动也不乱。
+- **registry**（`~/.conix/flows/.registry.yaml`）：每个包 `source`（`builtin` / `import` / `backfill`，最后写它的是谁）、`version`、`digest`、
+  `at`；内置的再记 `shipped: {version, digest}`——库里这份是从哪一版内置的解出来的；`remove --global` 删掉的内置包留一条 `removed: true`。
+- **lock**（`<项目>/.conix/flows.lock.yaml`）：每个从库里装的包 `from: global`、`version`、`digest`、`at`。项目自己建的、`import --project`
+  进来的没有条目（"只在项目"）。项目的摘要对不上 lock 就是"改过"。
+
+**内置的包进全局库。** 任何一条 `conix`（含 `conix host`）起来时查一次：库里没有某个内置包（也没删过）就解开；有、没改过
+（目录的摘要等于 `shipped.digest`）而这个 Conix 带的不同且版本不更旧，就换成它，打一行提示；改过的不动，`doctor` 报"有新的内置版"。
+`conix flow reset <包> | --all` 把库里的内置包恢复成这个 Conix 带的那版（当前的先备份），不碰项目。
+同版本内容不同（开发中没改版本号）也算可以换：没改过的那份本来就是上一版内置的，换掉不丢东西。
+
+**命令**
+
+```
+conix flow list    [--global | --all]            项目的（缺省）/ 全局库的 / 两边对照，带状态
+conix flow show    <包> [--global]                说明、流程、命令、版本、要求的 Conix、来源
+conix flow diff    <包>                           项目 vs 全局库：版本、增删改的文件
+conix flow install <包> [--force]                 全局库 → 项目；项目已有同名就拒绝（用 update）
+conix flow update  [<包> | --all] [--force]       全局库 → 项目
+conix flow backfill <包> [--force]                项目 → 全局库（回填；库里没有就新加）
+conix flow remove  <包> [--global] [--force]      删项目的（缺省）或库里的；都先备份
+conix flow clean   [--global]                     清备份、暂存残留、孤儿条目
+conix flow reset   <包> | --all                   库里的内置包恢复初始
+conix flow import  <文件> [--project] [--force]   包文件 → 全局库（缺省）或项目
+conix flow export  <包> [--global] [-o 文件]      项目的（缺省）或库里的 → 包文件
+conix flow inspect <文件>                         看包文件、核对
+conix flow verify  <归档目录> | --all             核对归档（layout.md §3；--all 扫项目的 conix/*/archive/*/）
+conix flow doctor  [--global] [--fix]             体检（§7.13）
+```
+
+公共的选项：`-C <目录>`（项目，缺省是当前目录所在的项目；不叫 `--project`，那是 `import` 的"进项目"）、`--yes`、`--dry-run`。
+
+update（全局库 → 项目），用 lock 判项目改过没有：
+
+| 情况 | 动作 |
+|---|---|
+| 库里更新、项目没改 | 更新，`local.md` 带过去，lock 跟上 |
+| 项目改过（或没有 lock 条目、内容又不同） | 拒绝，列出更新会改的文件；`--force` 覆盖（先备份） |
+| 同版本 | 无事；内容一样而 lock 缺条目就只补 lock |
+| 库里更旧 | 拒绝；`--force` 才降级 |
+
+backfill（项目 → 全局库），`local.md` 不回填：
+
+| 情况 | 动作 |
+|---|---|
+| 库里没有 | 加，`source: backfill` |
+| 项目版本更高 | 替换（先备份），lock 跟上 |
+| 同版本、内容不同 | 拒绝：改 `version`，或 `--force` |
+| 库里更新 | 拒绝（会盖掉新的）；`--force` |
+
+- 回填的是内置包：库里那份成"改过的内置"，`reset` 能回去。
+- install 已有同名拒绝（`--force` 换掉，先备份）；remove 在项目里有进行中的运行用这个包时拒绝——定义、门禁、脚本钉在运行里，
+  skill 与模板不钉，删了就断——`--force` 才删。`remove --global` 也删得掉内置包，起来时不再解开，`reset` 找回。
+- import 已有同名拒绝，`--force` 覆盖；`--project` 进项目、不记 lock。export 缺省导项目的，`--global` 导库里的；插件的包不在这里导。
+- **确认**：改东西的命令先列出要做什么（包、版本从→到、增删改的文件、备份到哪、要留意的：命令门禁、回填内置包……），问 `[y/N]`；
+  `--yes` 跳过；不是终端（脚本里）不给 `--yes` 就拒绝；`--dry-run` 只列不做。确认之后拿锁再看一眼目标，确认期间被别处改了就不做。
+- **在跑的实例**：命令行改了项目的包，这个项目若有实例在跑，经它的 socket 发一帧 `ReloadFlows`（不接入、不踢人，architecture §8.3），
+  实例重列流程、流程标签跟着变；不在、连不上都不算错。界面里没有导出导入（以前的 `/flow:export`、`/flow:import` 与端口的
+  `ExportFlow`/`ImportFlow` 去掉了）；地址或 `flow_start` 指的包项目里没有、库里有时，回的话里写 `conix flow install <包>`
+  （界面经 `ListLibrary` 问实例库里有什么）。实例起来时有进行中的运行而它的包不在项目里，接入时提示装哪个。
+- **`export`、`import` 仍是包的保留名**（`bundle::RESERVED_BUNDLES`）：留着不给包用，以后界面要加管理的入口时不与包的地址混。
+- **迁移**：以前直接用内置 xforge 的项目，升级后 xforge 不再自动出现：`conix flow install xforge`；有进行中运行的，实例提示或
+  `doctor --fix` 装上。
+- 落点：`crates/host/src/flows/package.rs`（包文件、摘要、暂存与换上）、`library.rs`（全局库、registry、内置包的解开与升级）、
+  `manage.rs`（lock、规矩、计划与执行）、`doctor.rs`（体检）、`builtin.rs`；`crates/conix/src/flow_cli.rs`（参数、确认、通知实例）。
 
 ### 7.13 包的自检：`doctor`
 
-`conix flow doctor` 查全局的流程库与一个项目装的包。通用的检查归宿主：包与流程校验得过、版本、锁文件。**包自己要项目备什么，
+`conix flow doctor [--global] [--fix]` 查全局的流程库与一个项目装的包，有 `error` 时退出码非 0（`crates/host/src/flows/doctor.rs`）：
+
+- 全局库：目录与 registry 对不上（孤儿条目、没登记的目录、手改过的）；每个包的校验与 `requires.conix`；内置包未改 / 改过 / 删了 /
+  有新的内置版（给 `reset`）；暂存残留、备份占了多少。
+- 项目：每个包的校验与要求；lock 与目录对不上；改过（对 lock）；库里有新版（给 `update`）；只在项目（给 `backfill`）；遮住了插件的同名包
+  （看 `<家目录>/plugins/` 下的包，启没启用命令行不知道，只提醒）；用了保留名；进行中的运行用的包不在项目里；有命令门禁而项目没受信
+  （照 Agix 的 `app.trusted_projects` 读）；制品目录与 `.wkts/` 已经有了、git 却没忽略 `runs/` 与 `.wkts/`；包自己的体检（下面）；
+  归档（`verify --all` 的摘要）。
+- `--fix` 只做不丢东西的：清暂存、去孤儿条目、内容与库里一样却没进 lock 的补记、缺了（没删过）的内置包重新解开、进行中的运行要的包
+  库里有就装上。别的只报，给出该跑的命令。修完再查一遍定退出码。
+
+通用的检查归宿主（上面）。**包自己要项目备什么，
 只有包知道**（xforge 要治理文件读得成、verify 菜单合规），所以这一段是包的脚本：`bundle.yaml` 写 `doctor: <脚本>`，宿主为项目调
 流程库的 `doctor(packs, layout, 包, 项目)`，按条列出结果。
 
@@ -662,9 +741,9 @@ export default function (input, flow) {
 | `flow.git`、基线、`writes` 执法 | `runner/git.rs`、`runner/script.rs`、`kernel/run.rs`（`base_commit`）、`crates/host/src/flows/policy.rs`（写入执法） |
 | 工作项（`foreach` 脚本、`after`、`task_exit`） | `kernel/work.rs`、`kernel/def.rs`、`kernel/txn.rs`、`runner/dispatch.rs` |
 | 流程地址与本地路由、补全 | `crates/model/src/flows.rs`、`crates/model/src/composer.rs`（interaction §4.5） |
-| 流程包的导出与导入（zip、`MANIFEST.yaml`、核对、`/flow:export`、`conix flow …`） | `crates/host/src/flows/package.rs`、`crates/conix/src/flow_cli.rs`、`crates/flow/src/bundle.rs`（`requires`、`RESERVED_BUNDLES`）、`crates/model/src/flow_addr.rs`（路由）、`port::Command::{ExportFlow, ImportFlow}` |
+| 流程包的管理（全局库、registry、lock、内置包、包文件与 `MANIFEST.yaml`、`conix flow …`、体检） | `crates/host/src/flows/package.rs`、`library.rs`、`manage.rs`、`doctor.rs`、`builtin.rs`、`crates/conix/src/flow_cli.rs`、`crates/flow/src/bundle.rs`（`requires`、`RESERVED_BUNDLES`）、`crates/model/src/flow_addr.rs`（找不到包时的提示）、`port::Command::{ReloadFlows, ListLibrary}` |
 | 包的自检（`doctor`） | `crates/flow/src/runner/doctor.rs`、`runner/scriptenv.rs`（`Env::for_doctor`）、`bundle.rs`（`BundleMeta::doctor`）；`crates/flow/tests/doctor.rs` |
-| 内置的 xforge | `examples/xforge/`（项目与流程包）、`crates/host/build.rs`、`crates/host/src/flows/builtin.rs`；`crates/flow/tests/xforge.rs`、`crates/conix/tests/live_xforge.rs` |
+| 内置的 xforge | `examples/xforge/`（项目与流程包）、`crates/host/build.rs`、`crates/host/src/flows/builtin.rs`（种子，进全局库）；`crates/flow/tests/xforge.rs`、`crates/conix/tests/live_xforge.rs` |
 
 ## 9. 往回迁
 
