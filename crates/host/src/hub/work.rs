@@ -18,14 +18,11 @@ impl Hub {
     /// 一个会话在报告里的样子：它是谁、用的什么模型、花了多少。
     fn session_brief(&self, id: &str) -> Value {
         let st = self.0.st.locked();
-        let Some(sum) = st.summary(id) else {
+        let Some(sess) = st.session_or_closed(id) else {
             return json!({"id": id});
         };
-        let tasks: Vec<Value> = st
-            .sessions
-            .get(id)
-            .map(|s| s.tasks.values().map(task_brief).collect())
-            .unwrap_or_default();
+        let sum = st.summary_of(sess);
+        let tasks: Vec<Value> = sess.tasks.values().map(task_brief).collect();
         json!({
             "id": id, "title": sum.title, "state": sum.state, "model": sum.provenance.model,
             "usage": sum.usage, "tasks": tasks,

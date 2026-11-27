@@ -102,11 +102,33 @@ pub struct St {
     pub prompts: HashMap<String, PromptMeta>,
     /// 任务 → 派它的会话。停任务、读输出要带会话 id。
     pub task_owner: HashMap<String, String>,
+    /// 刚关掉的会话最后的样子（至多 [`RECENTLY_CLOSED`] 个，先关的先丢）：运行结束时派工器先关它的主会话、
+    /// 再轮到写运行的报告，报告要的模型与用量这时已经不在会话表里了。
+    pub closed: std::collections::VecDeque<Sess>,
 }
+
+pub const RECENTLY_CLOSED: usize = 64;
 
 impl St {
     pub fn summary(&self, id: &str) -> Option<SessionSummary> {
         Some(self.summary_of(self.sessions.get(id)?))
+    }
+
+    /// 会话表里的，或刚关掉的。
+    pub fn session_or_closed(&self, id: &str) -> Option<&Sess> {
+        self.sessions
+            .get(id)
+            .or_else(|| self.closed.iter().rev().find(|s| s.id == id))
+    }
+
+    /// 从会话表里拿掉一个关了的会话，留着它最后的样子。
+    pub fn close(&mut self, id: &str) {
+        if let Some(s) = self.sessions.remove(id) {
+            if self.closed.len() >= RECENTLY_CLOSED {
+                self.closed.pop_front();
+            }
+            self.closed.push_back(s);
+        }
     }
 
     /// 不在会话表里的（已关闭的）也能拼一份摘要。
@@ -816,5 +838,35 @@ mod frame_tests {
             out.events.as_slice(),
             [Event::ProviderSwitched { to, .. }] if to == "b"
         ));
+    }
+}
+
+#[cfg(test)]
+mod closed_tests {
+    use super::*;
+
+    #[test]
+    fn a_closed_session_is_still_found_until_newer_ones_push_it_out() {
+        let mut st = St::default();
+        let sess = |id: &str| Sess {
+            id: id.into(),
+            model: format!("m-{id}"),
+            ..Sess::default()
+        };
+        st.sessions.insert("a".into(), sess("a"));
+        st.close("a");
+        assert!(!st.sessions.contains_key("a"));
+        assert_eq!(
+            st.session_or_closed("a").map(|s| s.model.as_str()),
+            Some("m-a"),
+            "the run's report reads it after"
+        );
+        for i in 0..RECENTLY_CLOSED {
+            let id = format!("s{i}");
+            st.sessions.insert(id.clone(), sess(&id));
+            st.close(&id);
+        }
+        assert!(st.session_or_closed("a").is_none());
+        assert_eq!(st.closed.len(), RECENTLY_CLOSED);
     }
 }

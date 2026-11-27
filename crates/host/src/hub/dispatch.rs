@@ -92,7 +92,7 @@ impl Hub {
                     r.closed = true;
                     r.closed_ms = now;
                 });
-                self.0.st.locked().sessions.remove(&session.0);
+                self.0.st.locked().close(&session.0);
                 self.0.link.locked().watched.remove(&session.0);
                 self.emit_events(vec![Event::SessionRemoved { session }]);
                 Ok(Reply::Ok)
