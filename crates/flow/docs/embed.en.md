@@ -605,6 +605,9 @@ is so as not to collide with Harnix's own next one; what changes for a host is l
   handing the parent's task its result: merged back into the parent's branch, its worktree removed, reported through
   **`Engine::subflow_joined`**; a conflict fails the parent's task with the files. **`OpenSpec::deny_read`**: directories
   a child's session must not read (its parent's and its siblings' worktrees); the host denies them, its sandbox too.
+  A round's fork commit also takes the id of the child of every task that forks that round (`ForkPoint::children`), and a
+  child's siblings' worktrees are fixed as it forks (`ForkRec::siblings`, the ones not made yet included): a child forked
+  first is kept from the sibling forked after it, and a session is opened with the same list every time.
 
 ### `FLOW_API_VERSION = 1`
 

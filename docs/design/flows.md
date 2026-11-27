@@ -397,9 +397,17 @@ exit: [{kind: children, require: all}]   # all（缺省）| any | 正整数：�
 - **失败或取消的子运行**（或者父任务已经不等它了）：它的工作提交到它的分支，分支留着，worktree 删掉，记成 `kept`；父任务照旧失败。
 - **读隔离。** 子运行的会话读不到父运行的 worktree，也读不到同一站其他子运行的 worktree：一个合回去之后父运行的 worktree 里就有它的东西了，
   另一个读了就不再独立。派工器开会话时给宿主 `OpenSpec::deny_read`（绝对路径），宿主翻成 Agix 的 `Read(...)` deny 规则，进沙箱。
-  这份名单在开会话时算：`max_parallel` 让兄弟子运行晚起的，早开的会话名单里没有它。不限 `max_parallel` 也一样：同一站的子运行是一个一个分叉的，
-  子运行的主会话在它建起来时就开了，先分叉的那一个的主会话名单里没有后分叉的兄弟（还没有），而会话站与子 Agent 站都在主会话里跑。
-  要两边都隔开，得等这一轮的分叉都做完再开子运行的会话，还没做。
+  - **名单在分叉提交时就定全。** 同一站的子运行是一个一个分叉的，分叉了就起，主会话随即打开（会话站与子 Agent 站都在它里面跑），
+    而会话开了就换不了名单（宿主按 spec 认会话，再开一次 spec 不同就拒）。所以不等兄弟建起来再算：这一轮第一次分叉、做分叉提交时，
+    这一站这一轮要分叉的每个任务——已认领在等的、`max_parallel` 下还没轮到的——都先取好子运行的 id，记在 `ForkPoint::children`；
+    worktree 的路径由 id 定，还没建也知道。子运行分叉时它的名单就定了，记在 `ForkRec::siblings`：这一轮其他任务的 worktree，
+    加上这一站当时还在跑的其他子运行的；之后不再变，兄弟合回去、worktree 删了也留在名单里，重开会话时与原来一模一样。
+    哪一路先分叉、中间有没有重启，两边都从第一个会话起互相读不到；重启后剩下的分叉照取好的 id 建（id 下有没记下来的残留就收回重建，
+    换个 id 兄弟就挡不住它了）。
+  - **只打回一部分任务**（`flow_rework {to, tasks: [impl]}`）：新的一轮只给打回的任务取 id。重做的那一路读不到父运行，也读不到当时
+    还在跑的兄弟；已经合回去的兄弟 worktree 删了，它的东西在父运行的分支上、新的分叉提交里，本来就看得见（xforge.md §5.1）。
+    反过来，还在跑的兄弟的名单是它分叉时定的，里面没有新的这一路——打回时兄弟还没交付才会这样，从后面的站打回时兄弟都已合回去了。
+  - **同一轮里重试**（`attempts`、`flow_retry`）的任务另取新 id：原来的 id 是前一个子运行的。新的一路名单是全的，已经在跑的兄弟的名单里没有它。
 - **为什么走 git，不让子运行直接读父运行的目录。** 父运行的目录一直在变，读它就看得见兄弟合回来的东西；分叉提交是定下来、不会再变的规格侧，
   两边看到的一模一样，事后也查得到它们是从哪个提交出发的。合回去也走 git，冲突是 git 判的，不是谁覆盖了谁。
 - **重启之后**：派工器从父运行的记录里把没做完的分叉（任务已认领、还没有子运行）与合回（任务在等、子运行已结束、worktree 还没处理）
@@ -609,7 +617,7 @@ files: [{path, sha256, size}, …]
 | 确认、轮询审批 | `kernel/def.rs`（`ExitCond::Confirm`）、`kernel/txn.rs`、`runner/approvals.rs`（新） |
 | 受管流程 | `packs.rs`（`ProjectPacks`、`DirPacks`）、`kernel/run.rs`（`governed`） |
 | 子流程结果、`children`、交付 | `kernel/def.rs`、`kernel/txn.rs`、`runner/tools.rs`（`flow_submit`） |
-| 子运行在自己的 worktree 里（分叉提交、合回、读隔离） | `crates/flow/src/kernel/fork.rs`、`runner/fork.rs`（新）、`runner/worktree.rs`（`make` 带起点）、`runner/host.rs`（`OpenSpec::deny_read`）；Conix 把 `deny_read` 翻成 `Read(...)` deny：`crates/host/src/flows/session_host.rs` |
+| 子运行在自己的 worktree 里（分叉提交、合回、读隔离） | `crates/flow/src/kernel/fork.rs`、`runner/fork.rs`（新）、`runner/worktree.rs`（`make` 带起点与取好的 id）、`runner/host.rs`（`OpenSpec::deny_read`）；Conix 把 `deny_read` 翻成 `Read(...)` deny：`crates/host/src/flows/session_host.rs` |
 | Conix 的授权（人、角色、受管） | `crates/host/src/flows/authorize.rs`（新） |
 | Conix 的审批（MCP） | `crates/host/src/flows/approvals.rs`（新） |
 | `[x-conix] governed`、`command_gates` | `crates/host/src/plugins/mod.rs`、`crates/host/src/config` |

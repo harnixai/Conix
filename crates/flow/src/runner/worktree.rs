@@ -69,7 +69,12 @@ fn needs_git(no: &NoRepo) -> FlowError {
 /// `<worktrees_root>/<id>` on `<branch_prefix>/<id>` — a child's beside its parent's, never in it.
 /// The project's `<dir>/.gitignore` is written first, so the run's process directory is not
 /// something the project's tree shows. Returns the id and the worktree.
-pub(crate) async fn make(engine: &Engine, root: &str, flow: &str, base: Option<&str>) -> crate::Result<(String, WorktreeRec)> {
+///
+/// `taken`: the id the run is to have, taken already (a child's, when its round forked): its
+/// worktree is where its siblings are kept from reading. What is there under it was left by a
+/// fork stopped before it was recorded — no run has the id — and is made again; a new id instead
+/// would put the child where its siblings may read it.
+pub(crate) async fn make(engine: &Engine, root: &str, flow: &str, base: Option<&str>, taken: Option<&str>) -> crate::Result<(String, WorktreeRec)> {
     let project = PathBuf::from(root);
     let probed = {
         let project = project.clone();
@@ -91,14 +96,23 @@ pub(crate) async fn make(engine: &Engine, root: &str, flow: &str, base: Option<&
             tracing::warn!(root, worktrees = rel, "the runs' worktrees are in the project and its repository does not ignore them");
         }
     }
-    for _ in 0..TRIES {
-        let id = engine.alloc_id(flow, Some(root)).await?;
+    let tries = if taken.is_some() { 1 } else { TRIES };
+    for _ in 0..tries {
+        let id = match taken {
+            Some(id) => id.to_string(),
+            None => engine.alloc_id(flow, Some(root)).await?,
+        };
         let path = layout.worktree_dir(&id);
         let branch = layout.worktree_branch(&id);
         let (p, b, head, project) = (path.clone(), branch.clone(), repo.head.clone(), project.clone());
+        let (ours, again) = (layout.worktrees_root.clone(), taken.is_some());
         let made = blocking(move || {
             if p.exists() || git::has_branch(&project, &b)? {
-                return Ok(false);
+                if !again {
+                    return Ok(false);
+                }
+                git::remove_worktree(&project, &p, Some(&ours))?;
+                git::delete_branch(&project, &b, true)?;
             }
             git::add_worktree(&project, &p, &b, &head).map(|()| true)
         })
