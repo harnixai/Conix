@@ -2,8 +2,10 @@
 //! (`import`), the run's git workspace (`flow.git`) and the runs of its project (`flow.runs`).
 //!
 //! All of it is a snapshot or a table made before the script starts: the script's runtime is
-//! synchronous, and nothing in it may wait for the store or start a process of its own. What git
-//! says is asked of git by Rust when the script asks it, in the run's workspace and nowhere else.
+//! synchronous, and nothing in it may wait for the store. What git says is asked of git by Rust
+//! when the script asks it, in the run's workspace and nowhere else. The one thing a script waits
+//! for is a process it starts with `flow.exec` ([`ExecScope`]): through the host's `Exec`, under a
+//! profile the caller fixed, waited for on the runtime while the script's thread blocks.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -182,12 +184,153 @@ pub(crate) struct Env {
     /// `flow.settings`: what the run pinned; outside a run, the project's file now over the
     /// defaults. An `Err` is a file that does not read, thrown when the script asks for it.
     pub settings: Result<Value, String>,
+    /// What `flow.exec` starts processes with; `None`: it throws, saying it is not offered here.
+    pub exec: Option<ExecScope>,
+}
+
+/// What `flow.exec` starts its processes with (docs/design/flows.md §7.14): all of it fixed by
+/// where the script runs — a gate's, a doctor's, a read-only call's script reads; a command that
+/// writes writes where its run may — and nothing of it by the script.
+#[derive(Clone)]
+pub(crate) struct ExecScope {
+    pub service: Arc<dyn crate::kernel::host::Exec>,
+    /// The runtime the process is waited for on: the script itself runs on a thread of its own.
+    pub handle: tokio::runtime::Handle,
+    /// Why no process may start here (the host's switch is off, the project is not trusted):
+    /// thrown at the call, so that the same code says why wherever it runs.
+    pub refused: Option<String>,
+    /// The directory a `cwd` is relative to and must stay in: the run's workspace, or the project.
+    pub root: PathBuf,
+    pub profile: crate::kernel::host::ExecProfile,
+    pub network: bool,
+    /// The process's whole environment: the basics and what the bundle declared, less what the
+    /// host denies.
+    pub env: Vec<(std::ffi::OsString, std::ffi::OsString)>,
+    pub audit: super::exec::Audit,
+}
+
+impl ExecScope {
+    /// A scope for a script of a bundle whose `exec` is `decl`, the host's deny list `deny`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        service: Arc<dyn crate::kernel::host::Exec>,
+        refused: Option<String>,
+        root: PathBuf,
+        profile: crate::kernel::host::ExecProfile,
+        decl: Option<&bundle::ExecDecl>,
+        deny: &[String],
+        audit: super::exec::Audit,
+    ) -> Option<Self> {
+        // Without a runtime to wait on there is nothing to start a process with: not offered.
+        let handle = tokio::runtime::Handle::try_current().ok()?;
+        let wanted = decl.map(|d| d.env.clone()).unwrap_or_default();
+        Some(Self {
+            service,
+            handle,
+            refused,
+            root,
+            profile,
+            network: decl.is_some_and(|d| d.network),
+            env: super::exec::passed_env(&wanted, deny),
+            audit,
+        })
+    }
+}
+
+/// What `flow.exec` is called with.
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ExecCall {
+    /// The program and its arguments: no shell, no command line.
+    argv: Vec<String>,
+    /// Relative to the scope's root, inside it; the root when absent.
+    #[serde(default)]
+    cwd: Option<String>,
+    /// At most what the script has left, which is also the default.
+    #[serde(default)]
+    timeout_seconds: Option<f64>,
+    /// Text written to the process's stdin; none: stdin is empty.
+    #[serde(default)]
+    stdin: Option<String>,
+}
+
+/// How much of each output stream `flow.exec` hands back (its head; `truncated` says when more came).
+pub(crate) const EXEC_OUTPUT: usize = 4 * 1024 * 1024;
+
+impl ExecScope {
+    /// `flow.exec(opts)` (`opts` as JSON) for a script that must be done by `deadline`: checked
+    /// whole before anything starts, started through the host's `Exec` and recorded, waited for on
+    /// the runtime. A process that exits non-zero, is killed by a signal or runs out of time is an
+    /// answer (`code`, `signal`, `timed_out`); one that cannot be started, or a call that is wrong,
+    /// is an `Err`, thrown to the script.
+    pub fn call(&self, opts: &str, deadline: std::time::Instant) -> Result<Value, String> {
+        if let Some(why) = &self.refused {
+            return Err(why.clone());
+        }
+        let call: ExecCall = serde_json::from_str(opts).map_err(|e| format!("takes {{argv: [program, ...args], cwd?, timeout_seconds?, stdin?}}: {e}"))?;
+        let Some(program) = call.argv.first() else {
+            return Err("argv is empty: it is the program and its arguments (no shell: a command line is not split)".into());
+        };
+        if program.trim().is_empty() {
+            return Err("argv[0], the program, is empty".into());
+        }
+        if call.argv.iter().any(|a| a.contains('\0')) || call.stdin.as_deref().is_some_and(|t| t.contains('\0')) {
+            return Err("an argument holds a NUL".into());
+        }
+        let root = std::fs::canonicalize(&self.root).map_err(|e| format!("{}: {e}", self.root.display()))?;
+        let cwd = super::plan::inside(&root, call.cwd.as_deref().unwrap_or(""), "the directory the script works in")?;
+        let left = deadline.saturating_duration_since(std::time::Instant::now());
+        if left < std::time::Duration::from_millis(10) {
+            return Err("the script has no time left to wait for a process".into());
+        }
+        let timeout = match call.timeout_seconds {
+            Some(t) if !t.is_finite() || t <= 0.0 => return Err(format!("timeout_seconds {t} is not a number of seconds above 0")),
+            Some(t) => std::time::Duration::from_secs_f64(t).min(left),
+            None => left,
+        };
+        let mut argv = call.argv;
+        // A program by path is found where the process works, as a plan's run is.
+        if argv[0].contains('/') && std::path::Path::new(&argv[0]).is_relative() {
+            argv[0] = cwd.join(&argv[0]).to_string_lossy().into_owned();
+        }
+        let mut req = crate::kernel::host::ExecRequest::new(argv, cwd, timeout);
+        req.profile = self.profile.clone();
+        req.network = self.network;
+        req.env = self.env.clone();
+        req.stdin = call.stdin.map(String::into_bytes);
+        req.keep = crate::kernel::host::OutputKeep::Head(EXEC_OUTPUT);
+        let (tx, rx) = std::sync::mpsc::channel();
+        let (service, audit) = (self.service.clone(), self.audit.clone());
+        // On the runtime, not here: this thread is the script's, and the process, its pipes and
+        // its timer are the runtime's to drive.
+        self.handle.spawn(async move {
+            let _ = tx.send(super::exec::run_audited(service.as_ref(), req, &audit).await);
+        });
+        let got = rx.recv().map_err(|_| "the process was not waited for (the host is stopping)".to_string())?;
+        let o = got.map_err(|e| e.to_string())?;
+        Ok(json!({
+            "code": o.code,
+            "signal": o.signal,
+            "stdout": String::from_utf8_lossy(&o.stdout),
+            "stderr": String::from_utf8_lossy(&o.stderr),
+            "timed_out": o.timed_out,
+            "truncated": o.truncated,
+            "ms": o.ms,
+            "enforced": o.enforced,
+        }))
+    }
 }
 
 impl Env {
     /// A script that gets nothing extra.
     pub fn bare() -> Self {
-        Self { modules: Modules::none(), git: None, runs: Default::default(), settings: Ok(json!({})) }
+        Self { modules: Modules::none(), git: None, runs: Default::default(), settings: Ok(json!({})), exec: None }
+    }
+
+    /// The same, `flow.exec` starting its processes in `scope`.
+    pub fn with_exec(mut self, scope: Option<ExecScope>) -> Self {
+        self.exec = scope;
+        self
     }
 
     /// For a script of a run: its pinned modules (`entry`: its path in the bundle), its workspace in
@@ -196,7 +339,7 @@ impl Env {
         let modules = Modules::pinned(rec, entry);
         let runs = if modules.mentions(text, "runs") { snapshot(engine, rec.project_root.as_deref()).await } else { vec![] };
         let git = Some(GitView::new(ws, rec.base_commit.clone(), engine));
-        Self { modules, git, runs: Arc::new(runs), settings: Ok(rec.parts.settings.clone().unwrap_or_else(|| json!({}))) }
+        Self { modules, git, runs: Arc::new(runs), settings: Ok(rec.parts.settings.clone().unwrap_or_else(|| json!({}))), exec: None }
     }
 }
 
@@ -213,7 +356,7 @@ impl Env {
             Some((b, _)) => live_settings(packs, b, &ws),
             None => Ok(json!({})),
         };
-        Self { modules, git: Some(GitView::new(ws, None, engine)), runs: Default::default(), settings }
+        Self { modules, git: Some(GitView::new(ws, None, engine)), runs: Default::default(), settings, exec: None }
     }
 }
 
@@ -224,7 +367,7 @@ impl Env {
         let modules = Modules::from_packs(packs, bundle, entry, text);
         let runs = if modules.mentions(text, "runs") { snapshot(engine, root.to_str()).await } else { vec![] };
         let settings = live_settings(packs, bundle, &root);
-        Self { modules, git: Some(GitView::new(root, None, engine)), runs: Arc::new(runs), settings }
+        Self { modules, git: Some(GitView::new(root, None, engine)), runs: Arc::new(runs), settings, exec: None }
     }
 }
 
@@ -235,7 +378,7 @@ impl Env {
     pub fn for_doctor(packs: &dyn Packs, layout: Option<&ProjectLayout>, bundle: &str, entry: String, text: &str, root: PathBuf) -> Self {
         let modules = Modules::from_packs(packs, bundle, entry, text);
         let settings = live_settings(packs, bundle, &root);
-        Self { modules, git: Some(GitView::in_layout(root, None, layout)), runs: Default::default(), settings }
+        Self { modules, git: Some(GitView::in_layout(root, None, layout)), runs: Default::default(), settings, exec: None }
     }
 }
 
@@ -287,6 +430,35 @@ impl Env {
 
     pub fn runs_get(&self, id: &str) -> Option<Value> {
         self.runs.iter().find(|r| r["id"].as_str() == Some(id)).cloned()
+    }
+}
+
+impl super::Runner {
+    /// `flow.exec`'s scope for a script of run `rec` working in `ws`, under `profile`: the host's
+    /// `Exec`, the rule for every process a project asks for, the bundle's declaration the run
+    /// pinned, the record into the run's history (`station`, `task`, `what` it was for).
+    pub(crate) fn run_exec_scope(
+        &self,
+        rec: &RunRecord,
+        ws: PathBuf,
+        profile: crate::kernel::host::ExecProfile,
+        station: Option<&str>,
+        task: Option<&str>,
+        what: String,
+    ) -> Option<ExecScope> {
+        let audit = super::exec::Audit::run(self.engine().clone(), &rec.id, station, task, what);
+        let refused = self.exec_refused(rec.project_root.as_deref());
+        ExecScope::new(self.exec().clone(), refused, ws, profile, rec.parts.exec.as_ref(), &self.config().env_deny, audit)
+    }
+
+    /// The same outside any run, for a bundle's script in the project at `root` (a command run for
+    /// a person or a model, a gate tried): profile `read`, the bundle's declaration as it is now,
+    /// the record into the log. `refused` is a reason the caller has besides the host's rule.
+    pub(crate) fn bundle_exec_scope(&self, packs: &dyn Packs, bundle: Option<&str>, root: PathBuf, refused: Option<String>, what: String) -> Option<ExecScope> {
+        let decl = bundle.and_then(|b| bundle::exec_decl(packs, b));
+        let refused = refused.or_else(|| self.exec_refused(root.to_str()));
+        let audit = super::exec::Audit::log(what);
+        ExecScope::new(self.exec().clone(), refused, root, crate::kernel::host::ExecProfile::Read, decl.as_ref(), &self.config().env_deny, audit)
     }
 }
 

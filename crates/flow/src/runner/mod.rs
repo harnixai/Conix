@@ -16,6 +16,7 @@
 //! turns.rs     a session task's turns: sending, judging, correcting, nudging, interrupting
 //! main.rs      the run's main session, watched: questions answered, usage counted, sub-agents noted
 //! gate.rs      a gate's work item; `command` gates
+//! exec.rs      starting a process for a project or a bundle: through the host's Exec, recorded
 //! doctor.rs    a bundle's self-check of a project, outside any run
 //! hooks.rs     webhooks: queues, retries, signatures; the transport a host may replace
 //! project.rs   a run's output directory and process directory in its project; starting a run
@@ -41,6 +42,7 @@ pub(crate) mod commands;
 mod dispatch;
 #[cfg(feature = "script")]
 mod doctor;
+pub(crate) mod exec;
 mod files;
 mod fork;
 pub(crate) mod gate;
@@ -88,8 +90,9 @@ pub use state::{Binding, TaskKey};
 pub use testing::{ScriptedHost, Turn};
 pub use hooks::redact_url;
 pub use commands::{split_command, ByKind, CommandBy, CommandCall, CommandReply};
+pub use exec::{exec_record, run_plain, PlainExec};
 #[cfg(feature = "script")]
-pub use doctor::{doctor, DoctorFinding, DoctorLevel, DoctorReport, DOCTOR_TIMEOUT};
+pub use doctor::{doctor, doctor_with, DoctorExec, DoctorFinding, DoctorLevel, DoctorReport, DOCTOR_TIMEOUT};
 pub use tools::{command_tool_spec, tool_specs, FlowTools, ToolReply, TOOL_COMMAND, TOOL_PROPOSE, TOOL_STATE, TOOL_SUBMIT};
 pub use trust::withheld;
 pub use turns::{NUDGE, NUDGE_STRUCTURED};
@@ -154,6 +157,9 @@ pub struct RunnerConfig {
     /// Whether projects are trusted, as last heard: shared with the packs the engine reads
     /// ([`CatalogPacks`]), so a project's own flows are read only while it is.
     pub trust: Arc<ProjectTrust>,
+    /// How processes are started for projects and bundles: command gates, a plan's runs,
+    /// `flow.exec` (docs/design/flows.md §7.14). [`PlainExec`] when none is given.
+    pub exec: Option<Arc<dyn crate::kernel::host::Exec>>,
 }
 
 impl Default for RunnerConfig {
@@ -176,6 +182,7 @@ impl Default for RunnerConfig {
             approvals: None,
             hook_transport: None,
             trust: Arc::default(),
+            exec: None,
         }
     }
 }
@@ -208,6 +215,7 @@ pub struct Runner {
     tasks: TaskTracker,
     cancel: CancellationToken,
     tick: Mutex<Option<JoinHandle<()>>>,
+    exec: Arc<dyn crate::kernel::host::Exec>,
 }
 
 impl Runner {
@@ -216,6 +224,7 @@ impl Runner {
         let (events, _) = broadcast::channel(EVENTS_KEPT);
         let (changes, _) = broadcast::channel(EVENTS_KEPT);
         let hooks = hooks::Hooks::new(cfg.hook_transport.clone());
+        let exec = cfg.exec.clone().unwrap_or_else(|| Arc::new(exec::PlainExec));
         let rn = Arc::new(Self {
             cfg,
             engine,
@@ -228,6 +237,7 @@ impl Runner {
             tasks: TaskTracker::new(),
             cancel: CancellationToken::new(),
             tick: Mutex::new(None),
+            exec,
         });
         let _ = rn.tools.set(FlowTools::new(Arc::downgrade(&rn)));
         rn
@@ -338,6 +348,24 @@ impl Runner {
     /// Whether projects are trusted, as last heard.
     pub fn trust(&self) -> &Arc<ProjectTrust> {
         &self.cfg.trust
+    }
+
+    /// How processes are started for projects and bundles ([`RunnerConfig::exec`]).
+    pub fn exec(&self) -> &Arc<dyn crate::kernel::host::Exec> {
+        &self.exec
+    }
+
+    /// Why a project's (or a bundle's) process may not start for a run in `project` (`None`: no
+    /// project), or `None` when it may: command gates turned on, the project trusted. One rule
+    /// for every process a project or a bundle asks for (docs/design/flows.md §7.14).
+    pub(crate) fn exec_refused(&self, project: Option<&str>) -> Option<String> {
+        if !self.cfg.command_gates {
+            return Some("commands are not turned on here (the host's switch for every command a project or a bundle runs)".into());
+        }
+        match project {
+            Some(r) if !self.cfg.trust.trusted(r) => Some("the project is not trusted: what it asks to run does not run".into()),
+            _ => None,
+        }
     }
 
     /// The hooks of the pack with each one's last delivery.

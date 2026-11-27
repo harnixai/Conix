@@ -156,8 +156,9 @@ impl Runner {
         if !bundle::segment(&call.command) || !bundle::segment(&call.bundle) {
             return Err(format!("`{}:{}` is not a command's name", call.bundle, call.command));
         }
-        let place = self.place_of(&call).await?;
+        let mut place = self.place_of(&call).await?;
         let read_only = bundle::is_read_only(place.decl.as_ref(), &call.args);
+        place.env = self.command_exec(&call, place.env, &place.workspace, read_only).await;
         if let Some(text) = help(&call, &place) {
             return Ok(CommandReply { text, written: vec![] });
         }
@@ -196,6 +197,29 @@ impl Runner {
         let out = super::script::command(place.source, input, Arc::new(reader), Arc::new(writer), place.env, COMMAND_TIMEOUT).await;
         let reply = CommandReply { text: out.text, written: out.written };
         if out.ok { Ok(reply) } else { Err(reply.shown()) }
+    }
+
+    /// What `flow.exec` starts its processes with for this call: in a run, `workspace` where the
+    /// call may write (`read` for a read-only one) and recorded in the run; outside one, `read` and
+    /// recorded in the log, whoever asks — what outlives every run is written by the command's own
+    /// writer, not by a process it starts.
+    async fn command_exec(&self, call: &CommandCall, env: super::scriptenv::Env, ws: &Path, read_only: bool) -> super::scriptenv::Env {
+        let what = format!("flow.exec in {}:{}", call.bundle, call.command);
+        let scope = match &call.run {
+            Some(run) => match self.engine().record(run).await {
+                Ok(rec) => {
+                    let (station, task) = (call.station.as_deref(), call.task.as_deref());
+                    let profile = if read_only { crate::ExecProfile::Read } else { super::exec::command_profile(&rec, ws, station, task) };
+                    self.run_exec_scope(&rec, ws.to_path_buf(), profile, station, task, what)
+                }
+                Err(_) => None,
+            },
+            None => {
+                let packs = self.engine().packs_for(ws.to_str());
+                self.bundle_exec_scope(packs.as_ref(), Some(&call.bundle), ws.to_path_buf(), None, what)
+            }
+        };
+        env.with_exec(scope)
     }
 
     async fn place_of(&self, call: &CommandCall) -> Result<Place, String> {

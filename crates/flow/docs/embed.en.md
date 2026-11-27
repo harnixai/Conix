@@ -94,6 +94,7 @@ runs: those are the traits in `kernel::host`, and the host hands them in.
 | `Tools` | the read-only tools `tool` gates call | `NoTools` |
 | `Gates` | `host` gates: the application's own checks, by name | — |
 | `Programs` | `kind: program` tasks: the application's code | — |
+| `Exec` | starts every process the library starts for a project or a bundle (command gates, a plan's runs, `flow.exec`), under the profile the caller fixed (`ExecProfile`: `Read`, `Workspace {writable}`, `Host`) and the network it may have; a backend that confines says what it enforced (`Enforcement`) | `runner::PlainExec` (a plain child process, nothing enforced; the runner's default), `runner::run_plain` for a backend that wraps the request and starts it itself |
 | `Clock` | what time it is | `SystemClock`, `FixedClock`, `ManualClock` (tests) |
 
 `Engine::new(store, packs)` builds the engine; `with_authorizer`, `with_tools`, `with_clock`,
@@ -625,6 +626,26 @@ is so as not to collide with Harnix's own next one; what changes for a host is l
   definite answer (no result, an error, nothing there, another kind of value) means required. `Mocks::facts` gives a dry
   run's gates their facts. Old records read as before; the history of a gate with no facts is unchanged.
 
+- **One way processes start** (Conix `docs/design/flows.md` §7.14): trait **`Exec`** (`run(ExecRequest) ->
+  Result<ExecOutcome, ExecError>`), with **`ExecRequest`** (`argv`, `cwd`, `profile: ExecProfile`, `network`, `env`,
+  `inherit_env`, `timeout`, `stdin`, `keep: OutputKeep` — `Head(n)` / `Tail(n)`), **`ExecOutcome`** (`code`, `signal`,
+  `stdout`, `stderr`, `timed_out`, `truncated`, `ms`, `enforced: Enforcement`), **`ExecProfile`** (`Read`,
+  `Workspace {writable}`, `Host`), **`Enforcement`** (`backend`, `filesystem`, `network`: what was actually held),
+  **`ExecError`** (`Refused`, `NotStarted`, `Lost`). **`RunnerConfig::exec`** (default `runner::PlainExec`) and
+  **`Runner::exec`**; `runner::run_plain(req, enforced)` starts a request as a plain child process (its own process
+  group, killed whole on time-out). Command gates and a plan's runs go through it (`sh -c <command>` / the plan's `argv`,
+  profile `Read`), unchanged otherwise. Every process is recorded: in a run a history line `exec` through
+  **`Engine::note_exec`** (`for`, `argv`, `cwd`, `profile`, `network`, `code`, `signal?`, `timed_out?`, `truncated?`, `ms`,
+  `enforced`, or `error`; never the output), outside one a `tracing` line (target `flow::exec`). An env name starting
+  with `*` is now a suffix (`*_API_KEY` used to match nothing).
+- **`flow.exec` and a bundle's `exec`**: `bundle.yaml` gains `exec: {network, env}` (**`BundleMeta::exec`**,
+  **`bundle::ExecDecl`** with `problems`, `bundle::exec_decl`), validated with the bundle and pinned with a run
+  (**`Pinned::exec`**). Bundle JS gets `flow.exec` (below); its profile is fixed by the caller, it runs only where
+  `RunnerConfig::command_gates` is on and the project is trusted. **`doctor_with(packs, layout, bundle, project,
+  Option<&DoctorExec>)`** offers it to a doctor (**`DoctorExec`**: `exec`, `refused`, `env_deny`; profile `Read`, recorded
+  in the log); `doctor` is `doctor_with(…, None)`, where `flow.exec` throws. **`runner::exec_record(what, &req, &got)`**
+  is the record's shape, for a host that records processes of its own.
+
 ### `FLOW_API_VERSION = 1`
 
 The library's first version: the kernel, stores, packs and dry runs move out of `harnix-ext-flow`;
@@ -698,3 +719,11 @@ gone, and a store directory without `FORMAT` is refused — clear it, or migrate
   command outside a run, and in a gate trial, the project's (or the tried directory's) file now over the defaults. A file
   that does not read throws when `flow.settings` is read.
 - `Prepared` gained `base_commit` and `settings` (build it with `..Default::default()`).
+- `flow.exec({argv, cwd?, timeout_seconds?, stdin?})` → `{code, signal, stdout, stderr, timed_out, truncated, ms,
+  enforced}`: argv only (no shell), `cwd` inside the script's directory (the run's workspace; the project outside a run),
+  each stream at most 4 MiB (head; `truncated`), the timeout at most what the script has left. Profile by caller: gate,
+  plan, `foreach` and doctor scripts, read-only subcommands, any command outside a run → `Read`; writing subcommands in a
+  run and command steps → `Workspace` (the run's directory, the bundle's data directory, the static prefix of each of
+  the station's `writes`). Network and environment as `bundle.yaml`'s `exec` declares, less the host's deny list. A
+  non-zero exit, a signal or a time-out is an answer; a refusal, a process that cannot start or a wrong call throws
+  (`code: "exec"`).

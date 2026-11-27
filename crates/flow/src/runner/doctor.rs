@@ -5,11 +5,12 @@
 //!
 //! What every bundle is checked for (that its flows validate, its version, the host's lock files)
 //! is the host's; only the bundle knows what it needs of a project, so that part is its own script.
-//! The script runs as a script gate does: read-only, deterministic, the same sandbox and time limit;
+//! The script runs as a script gate does: read-only, the same sandbox and time limit;
 //! `flow.read.*` over the project, `flow.settings` the project's file now over the defaults,
 //! `flow.git.*` in the project with no base commit, no `flow.runs`. It says what is wrong and how
 //! a person would fix it, and never fixes anything itself: a check that wrote would make running it
-//! a change to review.
+//! a change to review. `flow.exec` is offered when the host gives a [`DoctorExec`] ([`doctor_with`]),
+//! profile `read`, recorded in the log.
 //!
 //! ```js
 //! // scripts/doctor.js; input: {bundle, project, data_dir, params: {}}
@@ -105,6 +106,28 @@ struct Answer {
 /// the script's `data_dir` is `null`. `Err` only when the bundle is not there or its `bundle.yaml`
 /// does not read; whatever goes wrong with the script itself is a finding.
 pub async fn doctor(packs: &dyn Packs, layout: Option<&ProjectLayout>, bundle: &str, project: &Path) -> Result<DoctorReport, String> {
+    doctor_with(packs, layout, bundle, project, None).await
+}
+
+/// What a doctor's `flow.exec` starts its processes with, as the host says (docs/design/flows.md
+/// §7.14): its backend, why no process may start for this project (the host's switch for what
+/// projects run, the project's trust; `None`: they may), the variables never passed. The profile
+/// is `read` and the record goes to the log: a doctor only looks.
+#[derive(Clone)]
+pub struct DoctorExec {
+    pub exec: Arc<dyn crate::kernel::host::Exec>,
+    pub refused: Option<String>,
+    pub env_deny: Vec<String>,
+}
+
+/// [`doctor`], with `flow.exec` offered through `exec` (without it the script's `flow.exec` throws).
+pub async fn doctor_with(
+    packs: &dyn Packs,
+    layout: Option<&ProjectLayout>,
+    bundle: &str,
+    project: &Path,
+    exec: Option<&DoctorExec>,
+) -> Result<DoctorReport, String> {
     let text = packs.bundle_file(bundle, bundle::BUNDLE_FILE).ok_or_else(|| format!("no bundle `{bundle}` here"))?;
     let meta = bundle::BundleMeta::parse(&text).map_err(|e| format!("bundle {bundle}: {e}"))?;
     let mut report = DoctorReport { bundle: bundle.to_string(), script: None, findings: vec![], log: String::new() };
@@ -130,7 +153,12 @@ pub async fn doctor(packs: &dyn Packs, layout: Option<&ProjectLayout>, bundle: &
         d.strip_prefix(project).map(|r| r.to_string_lossy().into_owned()).unwrap_or_else(|_| d.to_string_lossy().into_owned())
     });
     let input = json!({"bundle": bundle, "project": project.to_string_lossy(), "data_dir": data_dir, "params": {}});
-    let env = super::scriptenv::Env::for_doctor(packs, layout, bundle, entry.clone(), &source, project.to_path_buf());
+    let scope = exec.and_then(|x| {
+        let audit = super::exec::Audit::log(format!("flow.exec in the doctor of {bundle}"));
+        let profile = crate::kernel::host::ExecProfile::Read;
+        super::scriptenv::ExecScope::new(x.exec.clone(), x.refused.clone(), project.to_path_buf(), profile, meta.exec.as_ref(), &x.env_deny, audit)
+    });
+    let env = super::scriptenv::Env::for_doctor(packs, layout, bundle, entry.clone(), &source, project.to_path_buf()).with_exec(scope);
     let (got, log) = super::script::value_logged(source, input, reader, env, DOCTOR_TIMEOUT).await;
     report.log = log;
     match got.and_then(answer) {

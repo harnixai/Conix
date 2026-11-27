@@ -18,10 +18,11 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use super::files::Reader;
-use super::gate::{gate_env, output_tail, Ended, ForTask, GateSite};
+use super::exec::Audit;
+use super::gate::{gate_request, output_tail, ForTask, GateSite};
 use super::scriptenv::{Env, Modules};
-use crate::kernel::engine::Engine;
-use crate::kernel::host::GateResult;
+use super::Runner;
+use crate::kernel::host::{ExecError, GateResult};
 use crate::kernel::parts::DEFAULT_SCRIPT_SECONDS;
 use crate::kernel::run::{Finding, RunRecord};
 
@@ -62,9 +63,7 @@ struct Checked {
 /// its pinned script plans.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn plan_gate(
-    allowed: bool,
-    env_deny: &[String],
-    engine: &Engine,
+    rn: &Runner,
     rec: &RunRecord,
     station: &str,
     round: u32,
@@ -72,9 +71,10 @@ pub(crate) async fn plan_gate(
     task: Option<&ForTask<'_>>,
 ) -> GateResult {
     let fail = GateResult::errored;
-    if !allowed {
+    if !rn.config().command_gates {
         return fail(format!("command gates are not turned on here: {} cannot run", g.name));
     }
+    let engine = rn.engine();
     let (Some(ws), Some(station_dir)) = (engine.workspace_for(rec), super::project::station_dir(engine, rec, station)) else {
         return fail(format!("gate {}: the run has no workspace", g.name));
     };
@@ -88,22 +88,26 @@ pub(crate) async fn plan_gate(
     };
     let ctx = super::gate::gate_context(rec, task, ws.to_str());
     let input = super::gate::script_input(rec, station, round, g, &ctx);
-    let env = Env::for_run(engine, rec, ws.clone(), Modules::script_path(&name), &source).await;
-    let site = GateSite { run: &rec.id, station, ws: &ws, station_dir: &station_dir, ctx: &ctx };
-    run_plan(env_deny, g, &site, source, input, reader, env).await
+    let scope = rn.run_exec_scope(rec, ws.clone(), crate::ExecProfile::Read, Some(station), task.map(|t| t.task), format!("flow.exec in gate {}", g.name));
+    let env = Env::for_run(engine, rec, ws.clone(), Modules::script_path(&name), &source).await.with_exec(scope);
+    let site = GateSite { run: &rec.id, station, ws: &ws, station_dir: &station_dir, ctx: &ctx, network: super::gate::exec_network(rec) };
+    let audit = Audit::run(engine.clone(), &rec.id, Some(station), task.map(|t| t.task), format!("gate {}", g.name));
+    run_plan(rn, g, &site, source, input, reader, env, &audit).await
 }
 
 /// Run the plan's script at a site, then the runs it plans. The evidence is what the script
 /// read; the log (`gate-<name>.log` in the site's directory) what it logged and what each run
 /// printed.
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn run_plan(
-    env_deny: &[String],
+    rn: &Runner,
     g: &crate::GateDef,
     site: &GateSite<'_>,
     source: String,
     input: Value,
     reader: Arc<Reader>,
     env: Env,
+    audit: &Audit,
 ) -> GateResult {
     // The plan only reads and picks: a script's own time, whatever the runs are given.
     let (planned, mut log) =
@@ -111,7 +115,7 @@ pub(crate) async fn run_plan(
     let mut result = match planned.and_then(read_plan) {
         Err(e) => GateResult::errored(format!("gate {}: the plan: {e}", g.name)),
         Ok(Planned::Result(r)) => r,
-        Ok(Planned::Runs(plan)) => run_all(env_deny, g, site, plan, &mut log).await,
+        Ok(Planned::Runs(plan)) => run_all(rn, g, site, plan, &mut log, audit).await,
     };
     result.evidence = reader.evidence();
     let dir = site.station_dir;
@@ -157,7 +161,7 @@ fn check(plan: &Plan, ws: &Path, budget: u64) -> Result<Vec<Checked>, String> {
         if r.argv.iter().any(|a| a.contains('\0')) {
             return Err(at("an argument holds a NUL".into()));
         }
-        let cwd = inside(&root, r.cwd.as_deref().unwrap_or("")).map_err(at)?;
+        let cwd = inside(&root, r.cwd.as_deref().unwrap_or(""), "the run's workspace").map_err(at)?;
         // A program by path is found where the run works, not where this process happens to be:
         // which of the two a relative path means is up to the platform otherwise.
         let program = if program.contains('/') && Path::new(program).is_relative() { cwd.join(program) } else { PathBuf::from(program) };
@@ -169,19 +173,19 @@ fn check(plan: &Plan, ws: &Path, budget: u64) -> Result<Vec<Checked>, String> {
     Ok(out)
 }
 
-/// `rel` as a directory of the workspace (`root`, canonical): relative, no `..`, and still inside
-/// once symbolic links are followed.
-fn inside(root: &Path, rel: &str) -> Result<PathBuf, String> {
+/// `rel` as a directory of `root` (canonical; `what` names it in a refusal): relative, no `..`, and
+/// still inside once symbolic links are followed.
+pub(crate) fn inside(root: &Path, rel: &str, what: &str) -> Result<PathBuf, String> {
     let p = Path::new(rel.trim());
     if p.is_absolute() {
-        return Err(format!("cwd {rel} is absolute: it is a directory of the run's workspace, written relative to it"));
+        return Err(format!("cwd {rel} is absolute: it is a directory of {what}, written relative to it"));
     }
     if p.components().any(|c| !matches!(c, Component::Normal(_) | Component::CurDir)) {
-        return Err(format!("cwd {rel} leaves the run's workspace"));
+        return Err(format!("cwd {rel} leaves {what}"));
     }
     let full = std::fs::canonicalize(root.join(p)).map_err(|e| format!("cwd {rel}: {e}"))?;
     if !full.starts_with(root) {
-        return Err(format!("cwd {rel} leaves the run's workspace by a symbolic link"));
+        return Err(format!("cwd {rel} leaves {what} by a symbolic link"));
     }
     if !full.is_dir() {
         return Err(format!("cwd {rel} is not a directory"));
@@ -192,7 +196,7 @@ fn inside(root: &Path, rel: &str) -> Result<PathBuf, String> {
 /// Run the plan's runs one after another. Each that does not exit 0 is a finding and the rest
 /// still run; one that cannot start or runs out of time ends the plan with an `error`, as it
 /// ends a command gate. The gate's `timeout_seconds` is the time for all of them.
-async fn run_all(env_deny: &[String], g: &crate::GateDef, site: &GateSite<'_>, plan: Plan, log: &mut String) -> GateResult {
+async fn run_all(rn: &Runner, g: &crate::GateDef, site: &GateSite<'_>, plan: Plan, log: &mut String, audit: &Audit) -> GateResult {
     let budget = g.timeout_seconds();
     let runs = match check(&plan, site.ws, budget) {
         Ok(r) => r,
@@ -223,25 +227,21 @@ async fn run_all(env_deny: &[String], g: &crate::GateDef, site: &GateSite<'_>, p
             findings.push(Finding::new(&r.name, format!("{}: not run, the gate's {budget}s are used up", r.name)));
             return errored(findings, format!("{} not run: the runs before it took the gate's {budget}s", r.name));
         }
-        let mut cmd = tokio::process::Command::new(&r.program);
-        cmd.args(&r.args).current_dir(&r.cwd);
-        gate_env(&mut cmd, env_deny, g, site, &context_file, &context);
-        let child = match cmd.spawn() {
-            Ok(c) => c,
-            Err(e) => {
-                log.push_str(&format!("did not start: {e}\n"));
-                findings.push(Finding::new(&r.name, format!("{}: {} did not start: {e}", r.name, shown[0])));
-                return errored(findings, format!("{} did not start: {e}", r.name));
-            }
-        };
-        let (o, e, status) = match super::gate::wait_for(child, seconds).await {
-            Ended::Exited { out, err, status } => (out, err, status),
-            Ended::TimedOut => {
+        let argv: Vec<String> = shown.clone();
+        let req = gate_request(rn, argv, r.cwd.clone(), g, site, &context_file, &context, seconds);
+        let (o, e, code) = match super::exec::run_audited(rn.exec().as_ref(), req, &audit.for_(format!("gate {} run {}", g.name, r.name))).await {
+            Ok(o) if o.timed_out => {
                 log.push_str(&format!("ran longer than {seconds}s: killed\n"));
                 findings.push(Finding::new(&r.name, format!("{}: ran longer than {seconds}s", r.name)));
                 return errored(findings, format!("{} ran longer than {seconds}s", r.name));
             }
-            Ended::Lost(e) => {
+            Ok(o) => (o.stdout, o.stderr, o.code),
+            Err(ExecError::NotStarted(e) | ExecError::Refused(e)) => {
+                log.push_str(&format!("did not start: {e}\n"));
+                findings.push(Finding::new(&r.name, format!("{}: {} did not start: {e}", r.name, shown[0])));
+                return errored(findings, format!("{} did not start: {e}", r.name));
+            }
+            Err(ExecError::Lost(e)) => {
                 findings.push(Finding::new(&r.name, format!("{}: was lost: {e}", r.name)));
                 return errored(findings, format!("{} was lost: {e}", r.name));
             }
@@ -254,7 +254,7 @@ async fn run_all(env_deny: &[String], g: &crate::GateDef, site: &GateSite<'_>, p
         }
         let tail = output_tail(&text);
         let said = if tail.is_empty() { String::new() } else { format!(": {tail}") };
-        match status.code() {
+        match code {
             Some(0) => passed.push(r.name.clone()),
             Some(code) => findings.push(Finding::new(&r.name, format!("{} exited with {code}{said}", r.name))),
             None => {

@@ -71,8 +71,9 @@ pub use kernel::engine::{
     view, worktree_may_end, CreateIn, Engine, Prepared, DEFAULT_LEASE_MS, DEFAULT_RETRIES, MAX_LEASE_MS, MAX_SUBFLOW_DEPTH,
 };
 pub use kernel::host::{
-    digest, facts_problem, AllowAll, Approvals, Authorizer, Catalog, ChangeSet, Clock, Delivery, Event, FixedClock,
-    GateResult, Gates, ManualClock, NoTools, Op, Origin, Outcome, Packs, Placement,
+    digest, facts_problem, AllowAll, Approvals, Authorizer, Catalog, ChangeSet, Clock, Delivery, Enforcement, Event, Exec,
+    ExecError, ExecOutcome, ExecProfile, ExecRequest, FixedClock, GateResult, Gates, ManualClock, NoTools, Op, Origin,
+    Outcome, OutputKeep, Packs, Placement,
     Programs, RunStore, StoreError, SystemClock, Tools, Withheld, WorkItem, EVENT_KINDS,
 };
 pub use kernel::layout::ProjectLayout;
@@ -93,7 +94,7 @@ pub use kernel::schema::minimal;
 pub use kernel::validate::{part_problems, validate, validate_yaml, Problem};
 pub use kernel::{FlowError, Result};
 #[cfg(feature = "script")]
-pub use runner::{doctor, DoctorFinding, DoctorLevel, DoctorReport, DOCTOR_TIMEOUT};
+pub use runner::{doctor, doctor_with, DoctorExec, DoctorFinding, DoctorLevel, DoctorReport, DOCTOR_TIMEOUT};
 pub use packs::{project_pack_dir, DirPacks, MemPacks, ProjectPacks, ProjectTrust, Shadowing};
 pub use store::{FileStore, Hooked, MemStore};
 

@@ -847,6 +847,19 @@ impl Engine {
         })
     }
 
+    /// Record a process started for the run (in Conix; docs/design/flows.md §7.14): a command
+    /// gate's, a plan's run, a `flow.exec` — what ran, where, under what, how it ended (`detail`).
+    /// Whatever the run's status: a process started for it is the run's to account for. Not an
+    /// event.
+    pub async fn note_exec(&self, run: &str, station: Option<&str>, task: Option<&str>, detail: Value) -> Result<Outcome> {
+        transact!(self, Actor::flow("exec"), |t| {
+            t.load(run).await?;
+            let mut m = t.m(run);
+            m.log("exec", station, task, detail.clone());
+            Ok(json!({"run": run}))
+        })
+    }
+
     /// Judge again every open station whose tasks are settled (tool gates are called again).
     pub async fn evaluate(&self, run: &str) -> Result<Outcome> {
         transact!(self, Actor::flow("evaluate"), |t| {

@@ -834,6 +834,7 @@ impl Cx<'_> {
         };
         #[cfg(feature = "script")]
         let env = crate::runner::scriptenv::Env::for_trial(self.rn.engine(), packs, gate.script_part().map(String::as_str), script.as_deref(), ws.clone());
+        let network = crate::bundle::split(&gate.name).and_then(|(b, _)| crate::bundle::exec_decl(packs, b)).is_some_and(|e| e.network);
         let trial = crate::runner::gate::Trial {
             gate,
             script,
@@ -844,6 +845,7 @@ impl Cx<'_> {
             output_dir: str_of(input, "output_dir").map(String::from),
             data_dir: str_of(input, "data_dir").map(String::from),
             no_commands,
+            network,
             #[cfg(feature = "script")]
             #[cfg(feature = "script")]
             env,

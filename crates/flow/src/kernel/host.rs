@@ -651,6 +651,159 @@ pub trait Programs: Send + Sync {
         -> Result<Value, String>;
 }
 
+// ── running a process (in Conix: docs/design/flows.md §7.14) ────────────────
+
+/// What a process started through [`Exec`] may touch. The caller's context decides it — a gate's
+/// script reads, a command that writes writes where its run may — never the code that asks for
+/// the process: a script that could pick its own profile would pick the widest.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ExecProfile {
+    /// Reads what this process may read; writes nothing (but temporary files of its own).
+    Read,
+    /// Reads as [`ExecProfile::Read`]; writes only under these directories.
+    Workspace { writable: Vec<std::path::PathBuf> },
+    /// Unconfined: what the person configured themselves for their own machine (a notification
+    /// sink in their own config), not anything a project or a bundle says.
+    Host,
+}
+
+impl ExecProfile {
+    /// Its name in an audit line: `read`, `workspace`, `host`.
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Read => "read",
+            Self::Workspace { .. } => "workspace",
+            Self::Host => "host",
+        }
+    }
+}
+
+/// Which end of an output stream is kept when it is longer than the limit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OutputKeep {
+    /// The first bytes: what a script reads as data (`flow.exec`).
+    Head(usize),
+    /// The last bytes: a gate's verdict and error are at the end of what it printed.
+    Tail(usize),
+}
+
+impl OutputKeep {
+    pub fn limit(self) -> usize {
+        match self {
+            Self::Head(n) | Self::Tail(n) => n,
+        }
+    }
+}
+
+/// One process to start: the program and its arguments as they are (no shell, unless `argv` names
+/// one), where, under which profile, with what environment, for how long at most.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExecRequest {
+    /// The program, then its arguments. Never empty.
+    pub argv: Vec<String>,
+    pub cwd: std::path::PathBuf,
+    pub profile: ExecProfile,
+    /// Whether it may reach the network.
+    pub network: bool,
+    /// Its whole environment, unless `inherit_env`: nothing of this process's but what is here.
+    pub env: Vec<(std::ffi::OsString, std::ffi::OsString)>,
+    /// This process's environment with `env` over it ([`ExecProfile::Host`] only: a person's own
+    /// sink keeps the credentials of their environment).
+    pub inherit_env: bool,
+    pub timeout: std::time::Duration,
+    /// Written to its stdin, which is then closed; `None`: stdin is empty.
+    pub stdin: Option<Vec<u8>>,
+    /// How much of each output stream is kept, and which end.
+    pub keep: OutputKeep,
+}
+
+impl ExecRequest {
+    /// A request with an empty environment, `Read`, no network, the head of 64 KiB kept.
+    pub fn new(argv: Vec<String>, cwd: impl Into<std::path::PathBuf>, timeout: std::time::Duration) -> Self {
+        Self {
+            argv,
+            cwd: cwd.into(),
+            profile: ExecProfile::Read,
+            network: false,
+            env: vec![],
+            inherit_env: false,
+            timeout,
+            stdin: None,
+            keep: OutputKeep::Head(64 * 1024),
+        }
+    }
+}
+
+/// What a backend actually enforced of a request's profile and network: `false` where it only
+/// passed the request on. An audit line carries it, so that a reader never takes a profile for a
+/// confinement that did not happen.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct Enforcement {
+    /// The backend's name (`plain`: a plain child process).
+    pub backend: String,
+    /// Whether writes outside the profile were made impossible.
+    pub filesystem: bool,
+    /// Whether the network was cut off when the request said no network.
+    pub network: bool,
+}
+
+impl Enforcement {
+    /// Nothing enforced: a plain child process under `backend`'s name.
+    pub fn none(backend: impl Into<String>) -> Self {
+        Self { backend: backend.into(), filesystem: false, network: false }
+    }
+}
+
+/// How a process started through [`Exec`] ended.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExecOutcome {
+    /// Its exit status; `None` when a signal ended it, or it was killed for running out of time.
+    pub code: Option<i32>,
+    /// The signal that ended it (unix).
+    pub signal: Option<i32>,
+    pub stdout: Vec<u8>,
+    pub stderr: Vec<u8>,
+    /// It ran out of time and was killed, its process group with it.
+    pub timed_out: bool,
+    /// Either stream was longer than the request's `keep` and was cut.
+    pub truncated: bool,
+    /// How long it ran.
+    pub ms: u64,
+    pub enforced: Enforcement,
+}
+
+/// Why a process did not run to an outcome.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExecError {
+    /// The backend would not start it as asked (a confinement it cannot give).
+    Refused(String),
+    /// It did not start (no such program, no such directory).
+    NotStarted(String),
+    /// It started, and waiting for it failed.
+    Lost(String),
+}
+
+impl std::fmt::Display for ExecError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Refused(m) => write!(f, "refused: {m}"),
+            Self::NotStarted(m) => write!(f, "did not start: {m}"),
+            Self::Lost(m) => write!(f, "was lost: {m}"),
+        }
+    }
+}
+
+/// Starts processes: every one the library starts for a project or a bundle — command gates, the
+/// runs of a plan, `flow.exec` — goes through it, so that one place says how a process is confined.
+/// The library's own is a plain child process (`runner::PlainExec`); a host that can confine one
+/// gives its own. What was run is recorded by the library around the call (a run's history, else
+/// the log), whatever the backend.
+#[async_trait]
+pub trait Exec: Send + Sync {
+    async fn run(&self, req: ExecRequest) -> Result<ExecOutcome, ExecError>;
+}
+
 // ── time ─────────────────────────────────────────────────────────────────────
 
 pub trait Clock: Send + Sync {

@@ -76,6 +76,50 @@ pub struct BundleMeta {
     /// runs outside any run to say what the project has not prepared ([`crate::runner::doctor`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub doctor: Option<String>,
+    /// What the processes its JS starts (`flow.exec`) and its command gates may have (in Conix;
+    /// docs/design/flows.md §7.14): the network, environment variables beyond the basics.
+    /// Absent: neither.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exec: Option<ExecDecl>,
+}
+
+/// What `bundle.yaml` says of the processes the bundle starts (`exec`): declared, so that what a
+/// bundle's code may reach is read in its contract rather than found in its scripts.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(deny_unknown_fields)]
+pub struct ExecDecl {
+    /// Whether they may reach the network. Recorded and handed to the host's backend; a plain
+    /// backend cannot hold a process to `false`, and its records say so.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub network: bool,
+    /// The variables of the host's environment they are given besides the basics (a name, or a
+    /// prefix ending in `*`), less those the host denies whatever is said here.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub env: Vec<String>,
+}
+
+impl ExecDecl {
+    /// What is wrong with it: each `env` entry a variable's name, or a prefix of one ending in `*`.
+    pub fn problems(&self) -> Vec<String> {
+        let mut out = vec![];
+        for (i, e) in self.env.iter().enumerate() {
+            let name = e.strip_suffix('*').unwrap_or(e);
+            let ok = !name.is_empty()
+                && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+                && !name.starts_with(|c: char| c.is_ascii_digit());
+            if !ok {
+                out.push(format!("env[{i}] {e:?} is a variable's name ([A-Za-z_][A-Za-z0-9_]*), or a prefix of one ending in `*`"));
+            }
+        }
+        out
+    }
+}
+
+/// What `bundle`'s `bundle.yaml` in `packs` says of its processes now: `None` when it says
+/// nothing, or does not read.
+pub fn exec_decl(packs: &dyn crate::kernel::host::Packs, bundle: &str) -> Option<ExecDecl> {
+    BundleMeta::parse(&packs.bundle_file(bundle, BUNDLE_FILE)?).ok()?.exec
 }
 
 /// What `bundle.yaml` says of one command.
@@ -264,7 +308,7 @@ impl BundleMeta {
         }
     }
 
-    /// What is wrong with its `flows`, `start`, `pace` and `settings`, given the stems of the flows
+    /// What is wrong with its `flows`, `start`, `pace`, `settings` and `exec`, given the stems of the flows
     /// it has and whether it has a skill of a name.
     pub fn start_problems(&self, stems: &BTreeSet<String>, has_skill: &dyn Fn(&str) -> bool) -> Vec<String> {
         let mut out = vec![];
@@ -290,6 +334,9 @@ impl BundleMeta {
         }
         if let Some(s) = &self.settings {
             out.extend(s.problems().into_iter().map(|m| format!("{BUNDLE_FILE}: settings: {m}")));
+        }
+        if let Some(e) = &self.exec {
+            out.extend(e.problems().into_iter().map(|m| format!("{BUNDLE_FILE}: exec: {m}")));
         }
         out
     }

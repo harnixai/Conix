@@ -111,6 +111,8 @@ const PRELUDE: &str = r#"(() => {
     head: () => { const s = n.gitHead(); return s == null ? null : s; },
     changed: (o) => JSON.parse(n.gitChanged(o && o.since != null ? String(o.since) : "")),
   });
+  // A process the caller's context allows (docs/design/flows.md §7.14): argv, never a command line.
+  const exec = coded("exec", (o) => JSON.parse(n.exec(JSON.stringify(o === undefined ? null : o))));
   const runs = Object.freeze({
     list: (o) => JSON.parse(n.runsList(JSON.stringify(o || {}))),
     get: (id) => j(n.runsGet(String(id))),
@@ -118,6 +120,7 @@ const PRELUDE: &str = r#"(() => {
   return Object.freeze({
     git,
     runs,
+    exec,
     // A getter: a settings file that does not read fails the script that asks, not one that does not.
     get settings() { return JSON.parse(n.settings()); },
     yaml,
@@ -223,7 +226,7 @@ fn blocking(
                 GateResult::errored(format!("the script failed: {}", message(&ctx, e)))
             }
         };
-        let flow = match install_with(&ctx, reader, trace, None, &env) {
+        let flow = match install_with(&ctx, reader, trace, None, &env, deadline) {
             Ok(f) => f,
             Err(e) => return fail(e),
         };
@@ -337,7 +340,14 @@ fn message(ctx: &Ctx<'_>, e: rquickjs::Error) -> String {
     e.to_string()
 }
 
-fn install_with<'js>(ctx: &Ctx<'js>, reader: Arc<Reader>, trace: Arc<Mutex<Trace>>, writer: Option<Arc<Writer>>, env: &Env) -> rquickjs::Result<JsValue<'js>> {
+fn install_with<'js>(
+    ctx: &Ctx<'js>,
+    reader: Arc<Reader>,
+    trace: Arc<Mutex<Trace>>,
+    writer: Option<Arc<Writer>>,
+    env: &Env,
+    deadline: Instant,
+) -> rquickjs::Result<JsValue<'js>> {
     let n = Object::new(ctx.clone())?;
     if let Some(w) = writer {
         let thrown = |ctx: &Ctx<'_>, e: String| rquickjs::Exception::throw_message(ctx, &e);
@@ -502,6 +512,17 @@ fn install_with<'js>(ctx: &Ctx<'js>, reader: Arc<Reader>, trace: Arc<Mutex<Trace
     {
         let env = env.clone();
         n.set("runsGet", Function::new(ctx.clone(), move |id: String| env.runs_get(&id).map(|v| v.to_string()))?)?;
+    }
+    {
+        // Always there, throwing where it is not offered: a script's code does not branch on where
+        // it runs, and the error says why.
+        let scope = env.exec.clone();
+        n.set("exec", Function::new(ctx.clone(), move |ctx: Ctx<'_>, opts: String| -> rquickjs::Result<String> {
+            let Some(s) = &scope else {
+                return Err(rquickjs::Exception::throw_message(&ctx, "flow.exec: not offered to this script (a bundle's gate, command, step or doctor in a host that runs commands)"));
+            };
+            s.call(&opts, deadline).map(|v| v.to_string()).map_err(|e| rquickjs::Exception::throw_message(&ctx, &format!("flow.exec: {e}")))
+        })?)?;
     }
     {
         let trace = trace.clone();
@@ -683,7 +704,7 @@ pub(crate) async fn value_logged(source: String, input: Value, reader: Arc<Reade
                         format!("the script failed: {}", message(&ctx, e))
                     }
                 };
-                let flow = install_with(&ctx, reader, t, None, &env).map_err(fail)?;
+                let flow = install_with(&ctx, reader, t, None, &env, deadline).map_err(fail)?;
                 let main: Function = evaluate(&ctx, &source, &env.modules.entry).map_err(fail)?;
                 let input = ctx.json_parse(input.to_string()).map_err(fail)?;
                 let got: JsValue = main.call((input, flow)).map_err(fail)?;
@@ -736,7 +757,7 @@ fn run_command(
                 message(&ctx, e)
             }
         };
-        let flow = install_with(&ctx, reader, trace, Some(writer), &env).map_err(fail)?;
+        let flow = install_with(&ctx, reader, trace, Some(writer), &env, deadline).map_err(fail)?;
         let main: Function = evaluate(&ctx, source, &env.modules.entry).map_err(fail)?;
         let input = ctx.json_parse(input.to_string()).map_err(fail)?;
         let got: JsValue = main.call((input, flow)).map_err(fail)?;

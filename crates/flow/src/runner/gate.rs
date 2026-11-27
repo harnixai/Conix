@@ -51,15 +51,15 @@ pub(crate) async fn judge_gate(rn: &Arc<Runner>, rec: &RunRecord, station: &str,
         // A plan picks what to run from what people declared; the runs are commands all the same.
         #[cfg(feature = "script")]
         Some(g) if g.kind == GateKind::Command && g.plan.is_some() => {
-            super::plan::plan_gate(rn.cfg.command_gates, &rn.cfg.env_deny, engine, rec, station, round, g, task).await
+            super::plan::plan_gate(rn, rec, station, round, g, task).await
         }
         #[cfg(not(feature = "script"))]
         Some(g) if g.kind == GateKind::Command && g.plan.is_some() => GateResult::errored(format!("gate {}: this build runs no scripts", g.name)),
         Some(g) if g.kind == GateKind::Command => {
-            command_gate(rn.cfg.command_gates, &rn.cfg.env_deny, engine, rec, station, g, task).await
+            command_gate(rn, rec, station, g, task).await
         }
-        Some(g) if g.kind == GateKind::Check => own_gate(engine, rec, station, round, g, task).await,
-        Some(g) if g.kind == GateKind::Script && g.script.is_some() => own_gate(engine, rec, station, round, g, task).await,
+        Some(g) if g.kind == GateKind::Check => own_gate(rn, rec, station, round, g, task).await,
+        Some(g) if g.kind == GateKind::Script && g.script.is_some() => own_gate(rn, rec, station, round, g, task).await,
         Some(g) => match (&rn.cfg.gates, g.host_function(), task) {
             (Some(gs), Some(f), None) => gs.run(rec, station, f).await,
             (Some(gs), Some(f), Some(t)) => gs.run_for_task(rec, station, t.task, t.item, f).await,
@@ -120,34 +120,36 @@ pub(crate) async fn offer_result(
 
 /// Run a `command` gate where the run works: `sh -c` in its `cwd` (references resolved; a relative
 /// one under the run's workspace), else the run's workspace; passes on exit status 0. Refused
-/// unless the host turned command gates on (`allowed`).
+/// unless the host turned command gates on.
 ///
 /// The command sees none of this process's environment but the basics (`PATH`, `HOME`, the
 /// locale, `TMPDIR`…): no provider key, no hook secret. The run reaches it there, never in the
 /// command line — `FLOW_RUN`, `FLOW_STATION`, `FLOW_WORKSPACE` (the project, or the run's own
 /// directory), `FLOW_CONTEXT_FILE` (the reference context as JSON, `context.json` of the station in
-/// the run's process directory) and, when it is small, `FLOW_CONTEXT` itself. It runs in a process
-/// group of its own, killed whole when it runs out of time; the end of its output is the result,
-/// and what was read of it is kept beside the context as `gate-<gate>.log`.
-pub(crate) async fn command_gate(
-    allowed: bool,
-    env_deny: &[String],
-    engine: &Engine,
-    rec: &RunRecord,
-    station: &str,
-    g: &crate::GateDef,
-    task: Option<&ForTask<'_>>,
-) -> GateResult {
+/// the run's process directory) and, when it is small, `FLOW_CONTEXT` itself. It is started through
+/// the host's [`crate::Exec`] (profile `read`, recorded in the run's history) in a process group of
+/// its own, killed whole when it runs out of time; the end of its output is the result, and what
+/// was read of it is kept beside the context as `gate-<gate>.log`.
+pub(crate) async fn command_gate(rn: &Runner, rec: &RunRecord, station: &str, g: &crate::GateDef, task: Option<&ForTask<'_>>) -> GateResult {
     // Everything up to the command's own conclusion is the gate not getting to one.
     let fail = GateResult::errored;
-    if !allowed {
+    if !rn.cfg.command_gates {
         return fail(format!("command gates are not turned on here: {} cannot run", g.name));
     }
+    let engine = rn.engine();
     let (Some(ws), Some(station_dir)) = (engine.workspace_for(rec), super::project::station_dir(engine, rec, station)) else {
         return fail(format!("gate {}: the run has no workspace", g.name));
     };
     let ctx = gate_context(rec, task, ws.to_str());
-    command_at(env_deny, g, &GateSite { run: &rec.id, station, ws: &ws, station_dir: &station_dir, ctx: &ctx }).await
+    let audit = super::exec::Audit::run(engine.clone(), &rec.id, Some(station), task.map(|t| t.task), format!("gate {}", g.name));
+    let site = GateSite { run: &rec.id, station, ws: &ws, station_dir: &station_dir, ctx: &ctx, network: exec_network(rec) };
+    command_at(rn, g, &site, &audit).await
+}
+
+/// Whether a run's processes may reach the network: what its bundle's `exec` declared when the
+/// run started; no bundle, no declaration, no network.
+pub(crate) fn exec_network(rec: &RunRecord) -> bool {
+    rec.parts.exec.as_ref().is_some_and(|e| e.network)
 }
 
 /// Where a gate runs: the run and station it judges, the directory it judges, where its context
@@ -158,10 +160,12 @@ pub(crate) struct GateSite<'a> {
     pub ws: &'a std::path::Path,
     pub station_dir: &'a std::path::Path,
     pub ctx: &'a Value,
+    /// Whether its processes may reach the network (the bundle's `exec.network`).
+    pub network: bool,
 }
 
 /// [`command_gate`] at a site, command gates allowed.
-pub(crate) async fn command_at(env_deny: &[String], g: &crate::GateDef, site: &GateSite<'_>) -> GateResult {
+pub(crate) async fn command_at(rn: &Runner, g: &crate::GateDef, site: &GateSite<'_>, audit: &super::exec::Audit) -> GateResult {
     let fail = GateResult::errored;
     let Some(command) = g.command.clone().filter(|c| !c.trim().is_empty()) else {
         return fail(format!("gate {} has no command", g.name));
@@ -189,17 +193,13 @@ pub(crate) async fn command_at(env_deny: &[String], g: &crate::GateDef, site: &G
     if let Err(e) = written {
         return fail(format!("gate {}: {}: {e}", g.name, cwd.display()));
     }
-    let mut cmd = tokio::process::Command::new("sh");
-    cmd.arg("-c").arg(&command).current_dir(&cwd);
-    gate_env(&mut cmd, env_deny, g, site, &context_file, &context);
-    let child = match cmd.spawn() {
-        Ok(c) => c,
-        Err(e) => return fail(format!("`{command}` did not start: {e}")),
-    };
-    let (o, e, status) = match wait_for(child, g.timeout_seconds()).await {
-        Ended::Exited { out, err, status } => (out, err, status),
-        Ended::TimedOut => return fail(format!("`{command}` ran longer than {}s", g.timeout_seconds())),
-        Ended::Lost(e) => return fail(format!("`{command}` was lost: {e}")),
+    let req = gate_request(rn, vec!["sh".into(), "-c".into(), command.clone()], cwd, g, site, &context_file, &context, g.timeout_seconds());
+    let (o, e, code) = match super::exec::run_audited(rn.exec().as_ref(), req, audit).await {
+        Ok(o) if o.timed_out => return fail(format!("`{command}` ran longer than {}s", g.timeout_seconds())),
+        Ok(o) => (o.stdout, o.stderr, o.code),
+        Err(crate::ExecError::Lost(e)) => return fail(format!("`{command}` was lost: {e}")),
+        Err(crate::ExecError::NotStarted(e)) => return fail(format!("`{command}` did not start: {e}")),
+        Err(crate::ExecError::Refused(e)) => return fail(format!("`{command}` was refused: {e}")),
     };
     let mut text = String::from_utf8_lossy(&o).into_owned();
     text.push_str(&String::from_utf8_lossy(&e));
@@ -214,12 +214,12 @@ pub(crate) async fn command_at(env_deny: &[String], g: &crate::GateDef, site: &G
             Some(r) => r,
             None => fail(format!(
                 "`{command}` printed no gate result (exit {}){}",
-                status.code().map_or("by a signal".to_string(), |c| c.to_string()),
+                code.map_or("by a signal".to_string(), |c| c.to_string()),
                 if tail.is_empty() { String::new() } else { format!(": {tail}") }
             )),
         };
     }
-    match status.code() {
+    match code {
         Some(0) => GateResult::passed(tail),
         Some(code) => GateResult::failed(format!(
             "`{command}` exited with {code}{}",
@@ -232,91 +232,36 @@ pub(crate) async fn command_at(env_deny: &[String], g: &crate::GateDef, site: &G
     }
 }
 
-/// Give a command gate's process (or a run of its plan) its environment and its pipes: none of
-/// this process's environment but the basics, the run's own variables, the ones the gate names
-/// less the ones the application denies; a process group of its own, so that running out of
-/// time kills it whole.
-pub(crate) fn gate_env(
-    cmd: &mut tokio::process::Command,
-    env_deny: &[String],
+/// The request a command gate's process (or a run of its plan) is started by: none of this
+/// process's environment but the basics, the run's own variables, the ones the gate names less the
+/// ones the application denies; profile `read` (a gate judges the work, it does not do it); the
+/// network as the bundle declared; the end of each output stream kept.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn gate_request(
+    rn: &Runner,
+    argv: Vec<String>,
+    cwd: std::path::PathBuf,
     g: &crate::GateDef,
     site: &GateSite<'_>,
     context_file: &std::path::Path,
     context: &str,
-) {
-    cmd.env_clear()
-        .env("FLOW_RUN", site.run)
-        .env("FLOW_STATION", site.station)
-        .env("FLOW_WORKSPACE", site.ws)
-        .env("FLOW_CONTEXT_FILE", context_file)
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .kill_on_drop(true);
-    for k in GATE_ENV {
-        if let Some(v) = std::env::var_os(k) {
-            cmd.env(k, v);
-        }
-    }
-    for (k, v) in passed_env(&g.env, env_deny, std::env::vars_os()) {
-        cmd.env(k, v);
-    }
+    seconds: u64,
+) -> crate::ExecRequest {
+    let mut env: Vec<(std::ffi::OsString, std::ffi::OsString)> = vec![
+        ("FLOW_RUN".into(), site.run.into()),
+        ("FLOW_STATION".into(), site.station.into()),
+        ("FLOW_WORKSPACE".into(), site.ws.into()),
+        ("FLOW_CONTEXT_FILE".into(), context_file.into()),
+    ];
+    env.extend(super::exec::passed_env(&g.env, &rn.cfg.env_deny));
     if context.len() <= GATE_CONTEXT_INLINE {
-        cmd.env("FLOW_CONTEXT", context);
+        env.push(("FLOW_CONTEXT".into(), context.into()));
     }
-    #[cfg(unix)]
-    cmd.process_group(0);
-}
-
-/// How a gate's process ended.
-pub(crate) enum Ended {
-    /// It exited: the end of what it printed on each stream, and how.
-    Exited { out: Vec<u8>, err: Vec<u8>, status: std::process::ExitStatus },
-    /// It ran out of time and was killed, with its process group.
-    TimedOut,
-    /// Waiting for it failed.
-    Lost(std::io::Error),
-}
-
-/// Wait for a process [`gate_env`] set up, reading the end of its output, for `seconds` at most.
-pub(crate) async fn wait_for(mut child: tokio::process::Child, seconds: u64) -> Ended {
-    use tokio::io::AsyncReadExt;
-    let pid = child.id();
-    let tail = |r: Option<Box<dyn tokio::io::AsyncRead + Unpin + Send>>| async move {
-        let mut kept: Vec<u8> = vec![];
-        let Some(mut r) = r else { return kept };
-        let mut buf = [0u8; 8192];
-        while let Ok(n) = r.read(&mut buf).await {
-            if n == 0 {
-                break;
-            }
-            kept.extend_from_slice(&buf[..n]);
-            if kept.len() > 2 * GATE_OUTPUT_READ {
-                kept.drain(..kept.len() - GATE_OUTPUT_READ);
-            }
-        }
-        kept
-    };
-    let out = tail(child.stdout.take().map(|o| Box::new(o) as _));
-    let err = tail(child.stderr.take().map(|o| Box::new(o) as _));
-    let waited = tokio::time::timeout(Duration::from_secs(seconds), async {
-        let (o, e, status) = tokio::join!(out, err, child.wait());
-        (o, e, status)
-    })
-    .await;
-    match waited {
-        Ok((out, err, Ok(status))) => Ended::Exited { out, err, status },
-        Ok((_, _, Err(e))) => Ended::Lost(e),
-        Err(_) => {
-            // The whole group: a test runner's children too.
-            #[cfg(unix)]
-            if let Some(pid) = pid {
-                let _ = std::process::Command::new("kill").arg("-KILL").arg(format!("-{pid}")).status();
-            }
-            let _ = child.kill().await;
-            Ended::TimedOut
-        }
-    }
+    let mut req = crate::ExecRequest::new(argv, cwd, Duration::from_secs(seconds));
+    req.env = env;
+    req.network = site.network;
+    req.keep = crate::OutputKeep::Tail(GATE_OUTPUT_READ);
+    req
 }
 
 /// The end of a gate's output that its result keeps.
@@ -335,27 +280,9 @@ fn printed_result(stdout: &str) -> Option<GateResult> {
     })
 }
 
-/// The variables of `from` a gate's `env` names, less those the application denies.
-fn passed_env(
-    wanted: &[String],
-    deny: &[String],
-    from: impl Iterator<Item = (std::ffi::OsString, std::ffi::OsString)>,
-) -> Vec<(std::ffi::OsString, std::ffi::OsString)> {
-    let named = |list: &[String], k: &str| {
-        list.iter().any(|w| match w.strip_suffix('*') {
-            Some(prefix) => k.starts_with(prefix),
-            None => w == k,
-        })
-    };
-    from.filter(|(k, _)| {
-        let k = k.to_string_lossy();
-        named(wanted, &k) && !named(deny, &k)
-    })
-    .collect()
-}
-
 /// Run a gate the library judges itself, `check` or `script`, against the run's workspace.
-async fn own_gate(engine: &Engine, rec: &RunRecord, station: &str, round: u32, g: &crate::GateDef, task: Option<&ForTask<'_>>) -> GateResult {
+async fn own_gate(rn: &Runner, rec: &RunRecord, station: &str, round: u32, g: &crate::GateDef, task: Option<&ForTask<'_>>) -> GateResult {
+    let engine = rn.engine();
     let Some(ws) = engine.workspace_for(rec) else {
         return GateResult::errored(format!("gate {}: the run has no workspace", g.name));
     };
@@ -367,26 +294,32 @@ async fn own_gate(engine: &Engine, rec: &RunRecord, station: &str, round: u32, g
     if g.kind == GateKind::Check {
         return super::checks::run(g, &ctx, rec, &reader);
     }
-    script_gate(engine, rec, station, round, g, &ctx, reader).await
+    script_gate(rn, rec, station, round, g, task, &ctx, reader).await
 }
 
 #[cfg(feature = "script")]
+#[allow(clippy::too_many_arguments)]
 async fn script_gate(
-    engine: &Engine,
+    rn: &Runner,
     rec: &RunRecord,
     station: &str,
     round: u32,
     g: &crate::GateDef,
+    task: Option<&ForTask<'_>>,
     ctx: &Value,
     reader: std::sync::Arc<super::files::Reader>,
 ) -> GateResult {
+    let engine = rn.engine();
     let name = g.script.clone().unwrap_or_default();
     let Some(source) = rec.parts.scripts.get(&name).cloned() else {
         return GateResult::errored(format!("script {name} was not in the packs when the run started"));
     };
     let input = script_input(rec, station, round, g, ctx);
     let env = match engine.workspace_for(rec) {
-        Some(ws) => super::scriptenv::Env::for_run(engine, rec, ws, super::scriptenv::Modules::script_path(&name), &source).await,
+        // A gate judges: what its script starts reads, whatever it is.
+        Some(ws) => super::scriptenv::Env::for_run(engine, rec, ws.clone(), super::scriptenv::Modules::script_path(&name), &source).await.with_exec(
+            rn.run_exec_scope(rec, ws, crate::ExecProfile::Read, Some(station), task.map(|t| t.task), format!("flow.exec in gate {}", g.name)),
+        ),
         None => super::scriptenv::Env::bare(),
     };
     let (result, trace) = super::script::run(source, input, reader, env, Duration::from_secs(g.script_seconds())).await;
@@ -429,12 +362,14 @@ pub(crate) fn script_input(rec: &RunRecord, station: &str, round: u32, g: &crate
 }
 
 #[cfg(not(feature = "script"))]
+#[allow(clippy::too_many_arguments)]
 async fn script_gate(
-    _: &Engine,
+    _: &Runner,
     _: &RunRecord,
     _: &str,
     _: u32,
     g: &crate::GateDef,
+    _: Option<&ForTask<'_>>,
     _: &Value,
     _: std::sync::Arc<super::files::Reader>,
 ) -> GateResult {
@@ -456,6 +391,8 @@ pub(crate) struct Trial {
     pub data_dir: Option<String>,
     /// Why a command may not run here; `None`: it may.
     pub no_commands: Option<String>,
+    /// Whether its processes may reach the network (its bundle's `exec.network`).
+    pub network: bool,
     /// What the script may import and reach: the packs' bundle files (nothing is pinned in a trial).
     #[cfg(feature = "script")]
     pub env: super::scriptenv::Env,
@@ -509,7 +446,7 @@ async fn try_gate(rn: &Runner, t: Trial) -> Tried {
                 return tried(GateResult::errored(format!("script {} is not in the packs", g.script.as_deref().unwrap_or("?"))));
             };
             #[cfg(feature = "script")]
-            return trial_script(source, input, reader, t.env.clone(), g.script_seconds()).await;
+            return trial_script(source, input, reader, trial_env(rn, &t), g.script_seconds()).await;
             #[cfg(not(feature = "script"))]
             trial_script(source, input, reader, g.script_seconds()).await
         }
@@ -521,18 +458,20 @@ async fn try_gate(rn: &Runner, t: Trial) -> Tried {
                 return tried(GateResult::errored(format!("command gates are not turned on here: {} cannot run", g.name)));
             }
             let dir = std::env::temp_dir().join(format!("flow-gate-try-{}-{}", std::process::id(), crate::kernel::host::digest(&ctx.to_string())));
-            let site = GateSite { run: "trial", station: &t.station, ws: &t.ws, station_dir: &dir, ctx: &ctx };
+            let site = GateSite { run: "trial", station: &t.station, ws: &t.ws, station_dir: &dir, ctx: &ctx, network: t.network };
+            // A trial is no run: what it starts goes to the log.
+            let audit = super::exec::Audit::log(format!("gate {} (tried)", g.name));
             #[cfg(feature = "script")]
             let result = match (&g.plan, t.script.clone(), super::files::Reader::new(&t.ws)) {
-                (None, _, _) => command_at(&rn.cfg.env_deny, g, &site).await,
+                (None, _, _) => command_at(rn, g, &site, &audit).await,
                 (Some(p), None, _) => GateResult::errored(format!("script {p} is not in the packs")),
                 (Some(_), _, Err(e)) => GateResult::errored(format!("gate {}: {e}", g.name)),
                 (Some(_), Some(source), Ok(reader)) => {
-                    super::plan::run_plan(&rn.cfg.env_deny, g, &site, source, input, Arc::new(reader), t.env.clone()).await
+                    super::plan::run_plan(rn, g, &site, source, input, Arc::new(reader), trial_env(rn, &t), &audit).await
                 }
             };
             #[cfg(not(feature = "script"))]
-            let result = command_at(&rn.cfg.env_deny, g, &site).await;
+            let result = command_at(rn, g, &site, &audit).await;
             let log = std::fs::read_to_string(dir.join(format!("gate-{}.log", g.name))).unwrap_or_default();
             let _ = std::fs::remove_dir_all(&dir);
             Tried { result, log }
@@ -543,6 +482,15 @@ async fn try_gate(rn: &Runner, t: Trial) -> Tried {
             (_, None) => tried(GateResult::errored(format!("gate {} is not one the host runs", g.name))),
         },
     }
+}
+
+/// What a tried gate's script reaches: the trial's, `flow.exec` reading in the directory judged,
+/// recorded in the log, refused where the trial would refuse a command.
+#[cfg(feature = "script")]
+fn trial_env(rn: &Runner, t: &Trial) -> super::scriptenv::Env {
+    let bundle = crate::bundle::split(&t.gate.name).map(|(b, _)| b);
+    let scope = rn.bundle_exec_scope(rn.engine().packs().as_ref(), bundle, t.ws.clone(), t.no_commands.clone(), format!("flow.exec in gate {} (tried)", t.gate.name));
+    t.env.clone().with_exec(scope)
 }
 
 /// The run a trial judges in: one station, nothing done yet.
@@ -574,12 +522,10 @@ async fn trial_script(_: String, _: Value, _: Arc<super::files::Reader>, _: u64)
     Tried { result: GateResult::errored("this build runs no scripts".to_string()), log: String::new() }
 }
 
-/// What a command gate's process keeps of this one's environment.
-const GATE_ENV: &[&str] = &["PATH", "HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "LC_CTYPE", "TMPDIR", "TERM", "SHELL"];
 /// The largest context also given inline (`FLOW_CONTEXT`); a larger one only by its file.
 const GATE_CONTEXT_INLINE: usize = 32 * 1024;
-/// How much of each output stream is read and held at most.
-const GATE_OUTPUT_READ: usize = 64 * 1024;
+/// How much of each output stream is kept at most (its end).
+pub(crate) const GATE_OUTPUT_READ: usize = 64 * 1024;
 
 /// How much of a command gate's output its result keeps (the end of it).
 const GATE_OUTPUT_KEPT: usize = 2000;
@@ -774,13 +720,42 @@ mod tests {
             Arc::new(MemStore::new()),
             |cfg| {
                 cfg.command_gates = true;
-                cfg.env_deny = vec!["*KEY".into(), "FLOW_GATE_ENV_PKEY".into()];
+                // A leading `*` is a suffix: denied by it alone.
+                cfg.env_deny = vec!["*KEY".into()];
             },
         )
         .await;
         g.run_it().await;
         let (station, check, detail) = g.judged().await;
         assert_eq!((station, check), (StationStatus::Passed, CheckStatus::Pass), "{detail}");
+    }
+
+    /// A command gate's process is started by the host's `Exec`: `sh -c` and the command as one
+    /// argument, profile `read`, no network; what ran (not what it printed) is in the run's history.
+    #[tokio::test]
+    async fn a_command_gate_runs_through_the_hosts_exec_and_is_recorded_in_the_run() {
+        let backend = Arc::new(super::super::exec::Recording::default());
+        let b = backend.clone();
+        let g = Gated::new("{name: build, kind: command, command: 'echo printed-not-kept'}", Arc::new(MemStore::new()), move |cfg| {
+            cfg.command_gates = true;
+            cfg.exec = Some(b);
+        })
+        .await;
+        g.run_it().await;
+        assert_eq!(g.judged().await.1, CheckStatus::Pass);
+        let reqs = backend.requests();
+        assert_eq!(reqs.len(), 1);
+        assert_eq!(reqs[0].argv, ["sh", "-c", "echo printed-not-kept"]);
+        assert_eq!((&reqs[0].profile, reqs[0].network), (&crate::ExecProfile::Read, false));
+        let history = g.engine.history(&g.run).await.unwrap();
+        let line = history.iter().find(|h| h.op == "exec").expect("an exec line");
+        assert_eq!(line.station.as_deref(), Some("a"));
+        assert_eq!(line.detail["for"], "gate build");
+        assert_eq!(line.detail["argv"], serde_json::json!(["sh", "-c", "echo printed-not-kept"]));
+        assert_eq!(line.detail["profile"], serde_json::json!({"kind": "read"}));
+        assert_eq!((line.detail["code"].as_i64(), line.detail["network"].as_bool()), (Some(0), Some(false)));
+        assert_eq!(line.detail["enforced"], serde_json::json!({"backend": "recording", "filesystem": false, "network": false}));
+        assert!(line.detail.get("stdout").is_none() && line.detail.get("stderr").is_none(), "no output in the history: {}", line.detail);
     }
 
     /// `result: json`: what it prints is the result, findings and all; nothing readable is an error.

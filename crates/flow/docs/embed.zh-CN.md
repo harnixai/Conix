@@ -85,6 +85,7 @@ Feature：
 | `Tools` | `tool` 门禁调的只读工具 | `NoTools` |
 | `Gates` | `host` 门禁：应用自己的检查，按名字 | — |
 | `Programs` | `kind: program` 的工作项：应用代码 | — |
+| `Exec` | 流程库为项目或包起的每个进程（命令门禁、`plan` 的 run、`flow.exec`）都经它起，档位（`ExecProfile`：`Read`、`Workspace {writable}`、`Host`）与能不能上网由调用方定；能隔离的后端照实说它守住了什么（`Enforcement`） | `runner::PlainExec`（普通子进程，什么都不守；派工器的缺省），`runner::run_plain` 给包一层再自己起进程的后端用 |
 | `Clock` | 现在几点 | `SystemClock`、`FixedClock`、`ManualClock`（测试） |
 
 `Engine::new(store, packs)` 建引擎，`with_authorizer`、`with_tools`、`with_clock`、`with_lease_ms`、`with_retries`、
@@ -462,6 +463,26 @@ Conix 在 Harnix 0.4.7 分叉了这个库，先把站的治理（门禁、确认
   账本记下归档——**`RunRecord::archive`**（`ArchiveRef`：`dir`、`record_sha256`），由运行器经 **`Engine::note_archive`**
   （历史操作 `archived`，不发事件）写入。`archive` 模块读回来核对：`verify(dir, ledger) -> ArchiveReport`、
   `ledger_record(engine, dir)`、`list_files`、`hash_file`。没有 `archive` 的旧记录照常读。
+
+- **进程只有一个起法**（Conix `docs/design/flows.md` §7.14）：trait **`Exec`**（`run(ExecRequest) -> Result<ExecOutcome, ExecError>`），
+  **`ExecRequest`**（`argv`、`cwd`、`profile: ExecProfile`、`network`、`env`、`inherit_env`、`timeout`、`stdin`、`keep: OutputKeep`——
+  `Head(n)` / `Tail(n)`）、**`ExecOutcome`**（`code`、`signal`、`stdout`、`stderr`、`timed_out`、`truncated`、`ms`、`enforced: Enforcement`）、
+  **`ExecProfile`**（`Read`、`Workspace {writable}`、`Host`）、**`Enforcement`**（`backend`、`filesystem`、`network`：实际守住了什么）、
+  **`ExecError`**（`Refused`、`NotStarted`、`Lost`）。**`RunnerConfig::exec`**（缺省 `runner::PlainExec`）与 **`Runner::exec`**；
+  `runner::run_plain(req, enforced)` 把请求当普通子进程起（自己的进程组，超时整组杀）。命令门禁与 `plan` 的 run 都经它（`sh -c <命令>` /
+  plan 的 `argv`，档位 `Read`），别的照旧。每个进程都记一笔：运行里经 **`Engine::note_exec`** 记一条历史 `exec`（`for`、`argv`、`cwd`、
+  `profile`、`network`、`code`、`signal?`、`timed_out?`、`truncated?`、`ms`、`enforced`，或 `error`；从不记输出），运行之外记一条 `tracing`
+  （target `flow::exec`）。环境变量名以 `*` 开头的现在按后缀匹配（`*_API_KEY` 以前什么都匹配不上）。
+- **`flow.exec` 与包的 `exec`**：`bundle.yaml` 加 `exec: {network, env}`（**`BundleMeta::exec`**、**`bundle::ExecDecl`** 带 `problems`、
+  `bundle::exec_decl`），随包校验、启动时钉进运行（**`Pinned::exec`**）。包 JS 有了 `flow.exec`（见下）：档位由调用方定，只在
+  `RunnerConfig::command_gates` 开着且项目受信时跑。**`doctor_with(packs, layout, bundle, project, Option<&DoctorExec>)`** 把它给 doctor
+  （**`DoctorExec`**：`exec`、`refused`、`env_deny`；档位 `Read`，记进日志）；`doctor` 就是 `doctor_with(…, None)`，那里 `flow.exec` 抛错。
+  **`runner::exec_record(what, &req, &got)`** 是记录的样子，给自己也起进程的宿主照着记。
+  `flow.exec({argv, cwd?, timeout_seconds?, stdin?})` → `{code, signal, stdout, stderr, timed_out, truncated, ms, enforced}`：只收 argv
+  （没有 shell），`cwd` 在脚本工作的目录里（运行的工作目录；运行之外是项目），每路输出至多 4 MiB（留开头，`truncated`），时限至多是脚本
+  剩下的。档位按调用方：门禁、`plan`、`foreach`、doctor 的脚本，只读的子命令，运行之外的一切命令 → `Read`；运行里会写的子命令与命令步骤 →
+  `Workspace`（运行目录、包的数据目录、站的 `writes` 每条的固定前缀）。网络与环境按 `bundle.yaml` 的 `exec`，减去宿主的拒绝表。退出非 0、
+  被信号杀、超时是回答；被拒、起不来、调用写错抛错（`code: "exec"`）。
 
 ### `FLOW_API_VERSION = 1`
 

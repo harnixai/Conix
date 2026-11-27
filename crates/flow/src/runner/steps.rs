@@ -52,7 +52,10 @@ async fn run_step(rn: &Runner, rec: &RunRecord, station: &str, task: &str, comma
     let read_only = crate::bundle::is_read_only(rec.parts.command_decls.get(command), args);
     let writer = super::script::Writer { workspace: ws.clone(), roots, denied, written: Default::default(), read_only };
     let input = step_input(rec, &ws, station, task, command, args, item);
-    let env = super::scriptenv::Env::for_run(engine, rec, ws.clone(), Some(format!("commands/{command}.js")), source).await;
+    // A step that writes writes where its run may: the process it starts too.
+    let profile = if read_only { crate::ExecProfile::Read } else { super::exec::command_profile(rec, &ws, Some(station), Some(task)) };
+    let scope = rn.run_exec_scope(rec, ws.clone(), profile, Some(station), Some(task), format!("flow.exec in commands/{command}.js"));
+    let env = super::scriptenv::Env::for_run(engine, rec, ws.clone(), Some(format!("commands/{command}.js")), source).await.with_exec(scope);
     // Another run's command may be writing the same bundle data: wait for it, as a session's call does.
     let _held = match (&rec.data_dir, read_only) {
         (Some(d), false) => Some(super::commands::data_lock(std::path::Path::new(d)).lock_owned().await),
@@ -139,7 +142,9 @@ async fn items_of(rn: &Runner, rec: &RunRecord, station: &str, round: u32, scrip
         "workspace": ws.to_string_lossy(),
     });
     let entry = super::scriptenv::Modules::script_path(script);
-    let env = super::scriptenv::Env::for_run(rn.engine(), rec, ws.clone(), entry, source).await;
+    // Working out the items only reads.
+    let scope = rn.run_exec_scope(rec, ws.clone(), crate::ExecProfile::Read, Some(station), None, format!("flow.exec in the items of {station}"));
+    let env = super::scriptenv::Env::for_run(rn.engine(), rec, ws.clone(), entry, source).await.with_exec(scope);
     super::script::value(source.clone(), input, Arc::new(reader), env, ITEMS_TIMEOUT).await
 }
 

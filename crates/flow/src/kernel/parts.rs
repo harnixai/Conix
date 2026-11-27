@@ -1073,12 +1073,16 @@ pub struct Pinned {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ts", ts(type = "unknown"))]
     pub settings: Option<Value>,
+    /// What `bundle.yaml` said of the bundle's processes when the run started (in Conix; `exec`):
+    /// the network, the environment they may have. Pinned with the code that starts them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exec: Option<crate::bundle::ExecDecl>,
 }
 
 impl Pinned {
     pub fn is_empty(&self) -> bool {
         self.policies.is_empty() && self.gates.is_empty() && self.scripts.is_empty() && self.commands.is_empty() && self.libs.is_empty()
-            && self.settings.is_none()
+            && self.settings.is_none() && self.exec.is_none()
     }
 }
 
@@ -1134,11 +1138,11 @@ pub fn pin(def: &FlowDef, packs: &dyn super::host::Packs) -> Pinned {
     }
     // A bundle's commands, as its `bundle.yaml` lists them.
     if let Some(b) = &def.bundle {
-        let listed = packs
+        let meta = packs
             .bundle_file(b, crate::bundle::BUNDLE_FILE)
-            .and_then(|t| serde_yaml::from_str::<crate::bundle::BundleMeta>(&t).ok())
-            .map(|m| m.commands)
-            .unwrap_or_default();
+            .and_then(|t| serde_yaml::from_str::<crate::bundle::BundleMeta>(&t).ok());
+        out.exec = meta.as_ref().and_then(|m| m.exec.clone());
+        let listed = meta.map(|m| m.commands).unwrap_or_default();
         for (c, decl) in listed.0 {
             if let Some(src) = packs.bundle_file(b, &format!("commands/{c}.js")) {
                 out.commands.insert(c.clone(), src);
