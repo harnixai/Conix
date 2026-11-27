@@ -11,12 +11,14 @@ export const GIT = [
 ];
 
 // flow.exec 不让起进程（项目没受信、总开关关着、宿主没给）时它抛错；换成人看得懂、知道该做什么的话。
+// 理由的话随宿主与语言变（运行里是流程库的英文，conix flow doctor 里是宿主照语言给的），所以认里面不随语言变的
+// 记号：开关的键名 flows.command_gates、信任的命令 /trust；流程库的原话也认。
 export function refusal(e) {
   const m = String((e && e.message) || e);
-  if (/not turned on/.test(m)) {
+  if (/not turned on|command_gates/.test(m)) {
     return "这台机器关掉了流程起进程：conix.yaml 的 flows.command_gates 是 off。xreport 要经它跑系统的 git，改回 trusted（缺省）再跑";
   }
-  if (/not trusted/.test(m)) {
+  if (/not trusted|\/trust\b/.test(m)) {
     return "这个项目还没受信：流程只在受信的项目里起进程（xreport 要跑 git log）。在 Conix 里打 /trust 信任这个项目再跑";
   }
   if (/not offered/.test(m)) {

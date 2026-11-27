@@ -101,7 +101,7 @@ flowlib:
   dr_untrusted: "the project is not trusted: {n} command gates will not run"
   dr_hint_trust: "/trust in the instance"
   dr_exec_off: "commands are off (flows.command_gates: off in conix.yaml): a bundle's doctor starts no process"
-  dr_exec_untrusted: "the project is not trusted (or that cannot be told): a bundle's doctor starts no process"
+  dr_exec_untrusted: "the project is not trusted (or that cannot be told): a bundle's doctor starts no process (/trust in the instance)"
   dr_not_ignored: "git does not ignore {path}: the runs' working files would be committed"
   dr_archives_ok: "all {n} archives verify"
   dr_archives_bad: "{n} of {total} archives do not verify: {list}"
