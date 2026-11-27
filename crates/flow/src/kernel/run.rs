@@ -593,6 +593,11 @@ pub struct ForkPoint {
     pub round: u32,
     pub commit: String,
     pub at: u64,
+    /// The id taken for the child of each task that forks this round, task by task, when the
+    /// commit was made: its worktree is `<worktrees_root>/<id>`, known before it is made, so the
+    /// children forked first are kept from reading the ones forked after (`ForkRec::siblings`).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub children: BTreeMap<String, String>,
 }
 
 /// A round started by a rework: by whom, why, and — sent back by a station left unmet — what
@@ -933,6 +938,12 @@ pub struct ForkRec {
     /// `${parent.output_dir}`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_output_dir: Option<String>,
+    /// The worktrees of its siblings, absolute, fixed when it forked: those its station's round
+    /// took ids for (`ForkPoint::children`, made yet or not) and those of its siblings still going
+    /// then. Kept from reading with its parent's. `None` in a record from before it was kept: the
+    /// siblings are then looked up as the session opens.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub siblings: Option<Vec<String>>,
 }
 
 impl WorktreeRec {

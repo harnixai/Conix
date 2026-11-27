@@ -5,8 +5,9 @@
 //! ```text
 //! claim      the task claimed, [`WorkItem::Fork`] handed out (a parent not in a worktree of its
 //!            own: the task fails, saying so)
-//! fork       the runner commits the parent's worktree (the fork commit, once a round:
-//!            `StationRec::fork`), makes `<worktrees_root>/<child>` on `<prefix>/<child>` from it,
+//! fork       the runner commits the parent's worktree and takes an id for the child of every
+//!            task that forks this round (the fork commit, once a round: `StationRec::fork`),
+//!            makes `<worktrees_root>/<child>` on `<prefix>/<child>` from it under the task's id,
 //!            and reports through [`Engine::subflow_forked`]: the child starts there
 //! end        the child over, [`WorkItem::Join`] handed out instead of the parent's task being
 //!            handed the result; the runner merges the child's branch into the parent's (when it
@@ -19,7 +20,14 @@
 //! of its own: `<parent's output dir>/children/<station>/<task>/` ([`child_output_dir`]), so two
 //! children merged back never write the same files. The parent's output directory as the child's
 //! worktree holds it — what the parent had when it forked — is `${parent.output_dir}`.
+//!
+//! The children of a round are forked one at a time and each starts — its main session opened —
+//! as soon as it is forked, and a session keeps what it was opened with. So the ids are taken for
+//! the whole round at its fork commit, not as each child is made: a child's siblings' worktrees are
+//! known when it forks (`ForkRec::siblings`), the ones not made yet included, and the child forked
+//! first is kept from reading the one forked after it as that one is from reading it.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use serde_json::{json, Value};
@@ -39,12 +47,16 @@ use super::{FlowError, Result};
 pub const CHILDREN_DIR: &str = "children";
 
 /// What the runner made for a child: the fork commit, the id it allocated for the child
-/// (`Engine::alloc_id`) and the worktree it made under it from that commit.
+/// (`Engine::alloc_id`) and the worktree it made under it from that commit; the ids of the round's
+/// children (`ForkPoint::children`, recorded with the commit by the round's first fork) and the
+/// worktrees of the child's siblings (`ForkRec::siblings`).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Forked {
     pub commit: String,
     pub child: String,
     pub worktree: WorktreeRec,
+    pub children: BTreeMap<String, String>,
+    pub siblings: Vec<String>,
 }
 
 /// Where a child in a worktree of its own works, as the kernel starts it.
@@ -83,6 +95,19 @@ fn forks(rec: &RunRecord, sid: &str, tid: &str) -> Option<(String, Value)> {
         Executor::Subflow { flow, inputs, workspace: Some(Workspace::Worktree) } => Some((flow, inputs)),
         _ => None,
     }
+}
+
+/// The tasks of a station whose children fork this round and have none yet, with their flows: the
+/// ones claimed and waiting for the runner, and the ones still ready — a later wave of a
+/// `max_parallel` station, which forks from the same commit and must be in the list of the ones
+/// going before it.
+pub(crate) fn to_fork(rec: &RunRecord, sid: &str) -> Vec<(String, String)> {
+    let Some(st) = rec.station(sid).filter(|s| s.status == StationStatus::Working) else { return vec![] };
+    st.tasks
+        .iter()
+        .filter(|t| t.status == TaskStatus::Ready || (t.status == TaskStatus::Claimed && t.child.is_none()))
+        .filter_map(|t| forks(rec, sid, &t.id).map(|(flow, _)| (t.id.clone(), flow)))
+        .collect()
 }
 
 /// What the runner was handed for a station's children in worktrees of their own and has not
@@ -189,6 +214,7 @@ impl Engine {
                         parent_path: up.path.clone(),
                         parent_branch: up.branch.clone(),
                         parent_output_dir: parent_out.as_ref().map(|p| p.to_string_lossy().into_owned()),
+                        siblings: Some(f.siblings.clone()),
                     }),
                     ..f.worktree.clone()
                 },
@@ -201,9 +227,9 @@ impl Engine {
                 m.by = Actor::flow("dispatch");
                 if had.is_none() {
                     if let Some(s) = m.rec.stations.get_mut(station) {
-                        s.fork = Some(ForkPoint { round, commit: f.commit.clone(), at: now });
+                        s.fork = Some(ForkPoint { round, commit: f.commit.clone(), at: now, children: f.children.clone() });
                     }
-                    m.log("fork", Some(station), None, json!({"round": round, "commit": f.commit}));
+                    m.log("fork", Some(station), None, json!({"round": round, "commit": f.commit, "children": f.children}));
                 }
                 m.spawn_child(station, task, &flow, &inputs, token.to_string(), Some(Box::new(own)));
             }

@@ -577,12 +577,20 @@ async fn a_dual_run_forks_two_children_from_one_commit_joins_them_and_archives()
         let skill = sent.split("## Skill `xforge/").nth(1).unwrap_or_default();
         assert!(skill.contains(&format!("{theirs}/ledgers/findings.yaml")) && !skill.contains("${parent.output_dir}"), "{task}: {skill}");
     }
-    // The later child's sessions are kept from its parent's worktree and its sibling's.
+    // Every session of either child — its main one, where its stations run, from its start — is
+    // kept from its parent's worktree and its sibling's, whichever forked first.
     let opened = d.host.opened();
-    let main_two = opened.iter().find(|s| s.key == format!("flow:{two}#@main")).unwrap();
-    assert!(main_two.deny_read.contains(&wt), "{:?}", main_two.deny_read);
-    let w1 = PathBuf::from(&d.record(&one).await.worktree.unwrap().path);
-    assert!(main_two.deny_read.contains(&w1), "{:?}", main_two.deny_read);
+    let (w1, w2) = (d.record(&one).await.worktree.unwrap().path, d.record(&two).await.worktree.unwrap().path);
+    for (child, other) in [(&one, &w2), (&two, &w1)] {
+        let mut want = vec![wt.clone(), PathBuf::from(other)];
+        want.sort();
+        let theirs: Vec<_> = opened.iter().filter(|s| s.run == *child).collect();
+        assert!(theirs.iter().any(|s| s.key == format!("flow:{child}#@main")), "{child}: no main session");
+        for s in theirs {
+            assert_eq!(s.deny_read, want, "{}", s.key);
+        }
+    }
+    assert!(opened.iter().filter(|s| s.run == run).all(|s| s.deny_read.is_empty()), "the parent is kept from nothing");
     // Both merged into the run's branch, not the project's.
     assert!(wt.join("tests_blackbox/test_truncate.py").is_file() && wt.join("tests/test_truncate.py").is_file());
     assert_eq!(git(root, "rev-parse main"), main_head);
@@ -609,6 +617,12 @@ async fn a_dual_run_forks_two_children_from_one_commit_joins_them_and_archives()
     assert_ne!(three, one, "the implementation forked again");
     assert_eq!(tasks[1].child.as_deref(), Some(two.as_str()), "the tests kept");
     assert_eq!(d.record(&three).await.base_commit.as_deref(), Some(again.commit.as_str()));
+    // Its sibling merged and gone: kept from its parent's worktree alone.
+    let theirs: Vec<_> = d.host.opened().into_iter().filter(|s| s.run == three).collect();
+    assert!(!theirs.is_empty());
+    for s in theirs {
+        assert_eq!(s.deny_read, std::slice::from_ref(&wt), "{}", s.key);
+    }
     {
         let log = d.log.lock().unwrap();
         assert!(log.iter().any(|l| l == "the redone implementation sees the tests merged in the round before"), "{log:#?}");
