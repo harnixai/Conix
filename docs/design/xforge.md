@@ -24,7 +24,7 @@ review:
 - **基线**：关着的那条基线，它的命令仍能读，**写增量的子命令报"这个项目没开接口基线"**，它的门禁回 `pass`、`summary` 写
   "不欠（governance.interface=false）"。`lib/governance.js` 的 `governance(flow)` 从 `flow.settings` 取，所有脚本与命令都用这一个；
   运行之外调命令（`/flow:xforge:xspec list`）读的是文件此刻的内容。
-- **`review.separate`**：每条路径的每个 `confirm`（检查通过、验收、major 与 dual 的范围定了、dual 的规格侧定了与两路对上了）都写 `separate: "${settings.review.separate}"`。
+- **`review.separate`**：每条路径的每个 `confirm`（检查通过、验收、major 与 dual 的范围定了、dual 的规格侧定了与两路对上了、批准破坏性改动）都写 `separate: "${settings.review.separate}"`。
   `true` 时这次运行里交付过、做过任务或发起运行的人不能确认（flows.md §4.1 的 `not: [author]`），要别人批；缺省 `false`，
   因为一个人用时作者就是批准人，强制了就走不通。
 
@@ -128,7 +128,7 @@ elements:
 | `spec-delta-shape` | check: schema | 规格增量的形状（关着规格基线时不欠） |
 | `spec-delta` | script | 增量对得上基线（已有的规矩）；每条正文有 WHEN/THEN；与别的在途运行不冲突 |
 | `interface-delta` | script | 接口增量对得上基线：编号形状、模块存在（或这次 `module` 新建）、`modified/promoted/deprecated/removed` 的元素存在、`removed` 的已 deprecated、stable 的改动都带了 `breaking`；与在途运行不冲突 |
-| `interface-compat` | script | 有 `breaking` 的改动时，`inputs.impact` 含 `interface`，且 `decisions` 台账里有一条 refs 指向这个编号、结论 accepted |
+| `interface-compat` | script | 有 `breaking` 的改动时，`inputs.impact` 含 `interface`，且 `decisions` 台账里有一条 refs 指向这个编号、结论 accepted。结果带事实 `breaking`（有没有破坏性改动；没开接口基线、没有增量都明确是 `false`），§5.2 的批准读它 |
 | `design-sections` | script | `design.md` 有 `## 做法`、`## 集成点`、`## 失败模式`、`## 迁移与回滚`、`## 被否决的方案`（至少一条 `- 方案：为什么不选`）、`## 原则对照`、`## 工作包` |
 | `constitution` | script | 设计逐条对照原则（已有） |
 | `packages-planned` | script | 交出的 packages 与 `xpkg plan` 的一一对得上；每包有路径、至少一条判据；`after` 指的包存在、无环；包的路径不重叠 |
@@ -156,7 +156,7 @@ data-migration / infra，缺省空）；各自的 `risk` schema 就是 eligibili
 |---|---|---|---|---|---|---|
 | propose 提案 | ✓（顺手划包） | ✓ | ✓ | 会话 | 运行目录 | output、proposal-sections、impact、spec-delta-shape、spec-delta、interface-delta；quick 另加 packages-planned |
 | clarify 澄清 | | | ✓ | 会话 | 运行目录 | output、ledgers-settled（questions 由人答）、confirm owner |
-| design 设计 | | ✓ | ✓ | 会话 | 运行目录 | output、design-sections、constitution、spec-delta、interface-delta、interface-compat、packages-planned、ledgers-settled |
+| design 设计 | | ✓ | ✓ | 会话 | 运行目录 | output、design-sections、constitution、spec-delta、interface-delta、interface-compat、有破坏性改动时 confirm owner「批准破坏性改动」（§5.2）、packages-planned、ledgers-settled |
 | check 独立检查 | | ✓ | ✓ | 子 Agent，只看不改 | 不能写 | output、ledgers-settled、constitution-reply、confirm reviewer |
 | apply 实施 | ✓ | ✓ | ✓ | 每包一个任务（quick 会话，solid/major 子 Agent），按 `after` 排 | `${item.paths}` | 任务级 package-check、package-tests；站 packages-done、unclaimed、unit-tests |
 | verify 验证 | ✓ | ✓ | ✓ | 会话 | 运行目录 | output、verification、unit-tests、confirm owner |
@@ -179,7 +179,7 @@ skill：`triage`（判风险与影响面、选路）、`propose`、`clarify`、`
 
 | 站 | 执行 | 写入范围 | 出口 |
 |---|---|---|---|
-| propose 提案 | 会话 | 运行目录 | 同 major，另加 interface-compat（没有父运行的设计站，破坏性的接口改动在这里就要有决定） |
+| propose 提案 | 会话 | 运行目录 | 同 major，另加 interface-compat 与有破坏性改动时的「批准破坏性改动」（§5.2）：父运行没有设计站，破坏性的接口改动在这里就要有决定 |
 | clarify 澄清 | 会话 | 运行目录 | 同 major |
 | check 规格侧检查 | 子 Agent，只看不改（`spec-check`：两个互不相见的人照字面会不会做出不一样的东西） | 不能写 | output、ledgers-settled、constitution-reply、confirm reviewer「规格侧定了」，绑提案、规格增量、接口增量、`questions` 台账 |
 | seal 封存规格侧 | 命令步骤 `xspec seal` | — | output：运行目录每个文件的摘要 |
@@ -217,6 +217,30 @@ apply（每包一个子 Agent，任务级 package-check、package-tests；站 pa
   两路不再互相独立——skill 要它照规格修，不照对面凑。重做的那一路的禁读名单里只有父运行的 worktree：另一路已经合回去，worktree 删了。
   新的子运行自己的目录是空的，上一轮为什么打回在父运行的 `ledgers/findings.yaml`。
   错在规格侧的打回 `propose`：规格侧重写、重批、重新封存，两路都重来。
+
+### 5.2 破坏性的接口改动要主人批
+
+改了 stable 元素、声明了 `breaking`，光有 decisions 台账里一条 accepted 不够：那一条模型自己就能记、自己就能定结论。
+所以判 interface-compat 的站（solid、major 的 design，dual 的 propose）都有一条只在有破坏性改动时才要的确认：
+
+```yaml
+- kind: confirm
+  who: owner
+  label: 批准破坏性改动
+  when: {gate: interface-compat, fact: breaking}
+  separate: "${settings.review.separate}"
+  binds: ["${output_dir}/interface-delta.yaml"]
+```
+
+- **要不要由门禁定**：`when` 读的是 interface-compat 从接口增量算出的事实 `breaking`（flows.md §4.2），不是站的输出——输出是
+  模型交的，写个 `breaking: false` 就把人绕过去了。增量本身是命令 `xarch` 写的，门禁按基线判它是不是破坏性的。
+- **说不清就要**：门禁出错、没跑出结果、没给这个事实，都当有破坏性改动，要主人批。所以没开接口基线、没有增量时门禁也明确回
+  `breaking: false`，不是什么都不回。没有破坏性改动时这条确认记在站的 `not_required` 里（带读到的值），不是悄悄没了。
+- **和别的确认一起**：它与 interface-compat 同在一站，判到它时门禁的结果已经在了（门禁还在跑，它就跟着等，不先问人）。
+  批的是接口增量：之后的站再改 `interface-delta.yaml`（`xarch modify` 等），那一站过不去，回这一站重批。检查站（solid、major
+  的检查通过，dual 的规格侧定了）照旧再批一遍整体；两次批的东西不同，一个是"这次可以破坏这个接口"，一个是"这份设计 / 规格侧可以照着做"。
+  驳回就是这条出口不过，按站的 `on_unmet` 打回这一站重写（design 回 design，dual 的 propose 回 propose）。
+- quick 的提案只判 interface-delta、不判 interface-compat，也就没有这条。
 
 ## 6. 演示项目
 

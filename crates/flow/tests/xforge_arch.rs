@@ -593,6 +593,9 @@ async fn interface_compat_wants_the_impact_and_an_accepted_decision_for_each_bre
     let v = b.gate("interface-compat", sample(Some(accepted)), json!({"impact": ["interface"]})).await;
     assert_eq!(v["verdict"], "pass", "{v}");
     assert!(v["summary"].as_str().unwrap().contains("fn:textkit.slugify"), "{v}");
+    // What the owner's approval at the station reads: breaking, whether the change is explained or not.
+    assert_eq!(v["facts"], json!({"breaking": true}), "{v}");
+    assert_eq!(b.gate("interface-compat", sample(None), json!({"impact": ["interface"]})).await["facts"], json!({"breaking": true}));
     let v = b.gate("interface-compat", sample(Some(accepted)), json!({"impact": ["security", "interface"]})).await;
     assert_eq!(v["verdict"], "pass", "{v}");
 
@@ -619,10 +622,13 @@ async fn interface_compat_wants_the_impact_and_an_accepted_decision_for_each_bre
     let calm = "added:\n  - {id: \"fn:textkit.x\", signature: x(), description: x, stability: stable}\ndeprecated: [\"fn:textkit.word_count\"]\n";
     let v = b.gate("interface-compat", json!({"out/interface-delta.yaml": calm, ".conix/governance/xforge.yaml": GOV_ON}), json!({})).await;
     assert_eq!((v["verdict"].as_str(), v["summary"].as_str()), (Some("pass"), Some("没有破坏性的接口改动")), "{v}");
-    // The project's switch off: not owed, even with the breaking change and nothing else.
+    assert_eq!(v["facts"], json!({"breaking": false}), "{v}");
+    // The project's switch off: not owed, even with the breaking change and nothing else — and a
+    // definite no to the approval, not a missing answer.
     let v = b.gate("interface-compat", json!({"out/interface-delta.yaml": delta}), json!({})).await;
     assert_eq!(v["summary"], "不欠（governance.interface=false）", "{v}");
     assert_eq!(v["verdict"], "pass");
+    assert_eq!(v["facts"], json!({"breaking": false}), "{v}");
 }
 
 #[tokio::test]

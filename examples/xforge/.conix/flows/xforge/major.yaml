@@ -81,6 +81,14 @@ stations:
       - {kind: gate, gate: spec-delta, rework_to: propose}
       - {kind: gate, gate: interface-delta, rework_to: propose}
       - {kind: gate, gate: interface-compat}
+      # 破坏性的接口改动要项目的主人点头：要不要由门禁 interface-compat 算出的 breaking 定，不由模型交的输出定；
+      # 门禁没结论就当要。批的是接口增量：之后它再改，后面的站过不去，回这一站重批。
+      - kind: confirm
+        who: owner
+        label: 批准破坏性改动
+        when: {gate: interface-compat, fact: breaking}
+        separate: "${settings.review.separate}"
+        binds: ["${output_dir}/interface-delta.yaml"]
       - {kind: gate, gate: packages-planned}
       - {kind: gate, gate: ledgers-settled}
     on_unmet: {rework_to: design, max: 2}

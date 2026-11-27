@@ -59,7 +59,7 @@ fn gates_of(s: &Station) -> Vec<String> {
 fn the_dual_path_and_its_children_hold_together_and_stay_out_of_the_risk_route() {
     let p = packs();
     let meta: BundleMeta = serde_yaml::from_str(&p.bundle_file("xforge", "bundle.yaml").unwrap()).unwrap();
-    assert_eq!(meta.version, "0.3.0");
+    assert_eq!(meta.version, "0.3.1");
     assert_eq!(meta.flows, ["quick", "solid", "major", "dual", "dual-impl", "dual-tests"]);
     assert_eq!(meta.start.route, ["quick", "solid", "major"], "risk picks among the three; dual is started by name");
     assert!(meta.commands.get("xspec").unwrap().read_only.contains(&"seal".to_string()));
@@ -105,7 +105,9 @@ fn the_dual_path_and_its_children_hold_together_and_stay_out_of_the_risk_route()
         ExitCond::Confirm { separate, .. } => Some((id, separate.clone())),
         _ => None,
     }).collect();
-    assert_eq!(confirms.iter().map(|(id, _)| *id).collect::<Vec<_>>(), ["clarify", "check", "join", "verify"]);
+    // The proposal's is the owner's approval of a breaking change, only when there is one.
+    assert_eq!(confirms.iter().map(|(id, _)| *id).collect::<Vec<_>>(), ["propose", "clarify", "check", "join", "verify"]);
+    assert!(dual.station("propose").unwrap().exit.iter().any(|e| e.when().is_some_and(|w| w.fact.as_deref() == Some("breaking"))));
     for (id, separate) in confirms {
         assert_eq!(separate, Some(OrSetting::Setting("${settings.review.separate}".into())), "{id}");
     }
@@ -238,6 +240,8 @@ struct Drive {
     confirmed: Mutex<HashSet<(String, String, u32)>>,
     /// What the driving saw on the way, for the checks after.
     log: Mutex<Vec<String>>,
+    /// The proposal breaks a stable function's interface instead of adding one.
+    breaking: std::sync::atomic::AtomicBool,
 }
 
 async fn drive_setup() -> Drive {
@@ -281,6 +285,7 @@ async fn drive_setup() -> Drive {
         seen: Default::default(),
         confirmed: Default::default(),
         log: Default::default(),
+        breaking: Default::default(),
     }
 }
 
@@ -375,6 +380,15 @@ impl Drive {
         let parent_out = rec.worktree.as_ref().and_then(|w| w.fork.as_ref()).and_then(|f| f.parent_output_dir.clone()).map(PathBuf::from);
         self.note(format!("{} {} {}", rec.flow, b.station, b.task));
         match (rec.flow.as_str(), b.station.as_str()) {
+            ("xforge/dual", "propose") if self.breaking.load(std::sync::atomic::Ordering::SeqCst) => {
+                let text = PROPOSAL.replace("## 影响面\n无", "## 影响面\n- 接口：slugify 多了分隔符参数，签名变了，调用方要跟着改");
+                std::fs::write(out.join("proposal.md"), text).unwrap();
+                self.cmd(id, "xspec", &["add", "textkit", "截断", "- WHEN 文本超过 n 个字符\n- THEN 返回前 n 个字符\n- WHEN 文本不超过 n 个字符\n- THEN 原样返回"]).await;
+                self.cmd(id, "xarch", &["modify", "fn:textkit.slugify", "--signature", "slugify(text: str, sep: str = '-') -> str", "--breaking"]).await;
+                self.cmd(id, "xledger", &["add", "decisions", "slugify 加分隔符参数，调用方一并改", "--ref", "fn:textkit.slugify"]).await;
+                self.cmd(id, "xledger", &["set", "decisions", "D1", "accepted", "调用方都在这个仓库里"]).await;
+                self.submit(id, json!({"summary": "slugify 可换分隔符"})).await;
+            }
             ("xforge/dual", "propose") => {
                 std::fs::write(out.join("proposal.md"), PROPOSAL).unwrap();
                 self.cmd(id, "xspec", &["add", "textkit", "截断", "- WHEN 文本超过 n 个字符\n- THEN 返回前 n 个字符\n- WHEN 文本不超过 n 个字符\n- THEN 原样返回"]).await;
@@ -546,6 +560,10 @@ async fn a_dual_run_forks_two_children_from_one_commit_joins_them_and_archives()
     let rec = d.record(&run).await;
     let wt = PathBuf::from(&rec.worktree.as_ref().unwrap().path);
     let out = PathBuf::from(rec.output_dir.clone().unwrap());
+    // Adding an element breaks nothing: the owner was not asked to approve a breaking change.
+    let left_out: Vec<_> = rec.stations["propose"].not_required.iter().map(|n| (n.label.as_str(), n.value.clone())).collect();
+    assert_eq!(left_out, [("批准破坏性改动", json!(false))]);
+    assert!(rec.stations["propose"].confirms.is_empty());
     let sealed = rec.stations["seal"].tasks[0].output.clone().unwrap();
     for f in ["proposal.md", "spec-delta.yaml", "interface-delta.yaml"] {
         assert!(sealed["files"][f].as_str().is_some_and(|s| s.len() == 64), "{f}: {sealed}");
@@ -635,4 +653,46 @@ async fn a_dual_run_forks_two_children_from_one_commit_joins_them_and_archives()
     let archived = PathBuf::from(&wt).join(rec.archive.as_ref().unwrap().dir.clone());
     assert!(archived.join("children/fork/impl/design.md").is_file() && archived.join("children/fork/tests/design.md").is_file(), "{}", archived.display());
     assert_eq!(git(root, "rev-parse main"), main_head, "the project's own branch untouched");
+}
+
+#[tokio::test]
+async fn a_breaking_interface_change_waits_at_the_proposal_for_the_owners_approval() {
+    let d = drive_setup().await;
+    d.breaking.store(true, std::sync::atomic::Ordering::SeqCst);
+    let input = CreateIn {
+        flow: "xforge/dual".into(),
+        subject: "slugify 可换分隔符".into(),
+        inputs: json!({"title": "slugify-sep", "risk": "high", "impact": ["interface"]}),
+        project_root: Some(d.root.to_string_lossy().into_owned()),
+        ..Default::default()
+    };
+    let o = d.rn.start_run(input, person()).await.unwrap();
+    let run = o.value["run"].as_str().unwrap().to_string();
+    d.rn.apply(o).await;
+    // This test is the owner here: keep the driving from confirming the proposal.
+    d.confirmed.lock().unwrap().insert((run.clone(), "propose".into(), 1));
+    let approval = "批准破坏性改动";
+    d.until(&run, "the proposal waits for the owner", |r| {
+        let st = &r.stations["propose"];
+        st.checks.iter().all(|c| c.status == CheckStatus::Pass || c.label == approval)
+            && st.checks.iter().any(|c| c.label == approval && c.status == CheckStatus::Wait)
+    })
+    .await;
+    let rec = d.record(&run).await;
+    let st = &rec.stations["propose"];
+    assert_eq!(st.status, StationStatus::Working, "the gates passed; only the person is missing");
+    let gate = st.checks.iter().find(|c| c.label.ends_with("interface-compat")).unwrap();
+    assert_eq!(gate.facts["breaking"], json!(true), "{gate:?}");
+    assert!(st.not_required.is_empty());
+    let view = d.engine.get(&run).await.unwrap();
+    let why = view.unmet["propose"].iter().find(|c| c.label == approval).unwrap().explain();
+    assert!(why.contains("required: gate xforge/interface-compat fact breaking is true"), "{why}");
+
+    d.rn.settle(d.engine.confirm(&run, "propose", true, None, person()).await).await.unwrap();
+    d.until(&run, "the proposal approved", |r| r.stations["propose"].status == StationStatus::Passed).await;
+    // What was approved is the interface delta, as it was then.
+    let rec = d.record(&run).await;
+    let vote = &rec.stations["propose"].confirms[0];
+    let bound: Vec<_> = vote.binds.as_ref().unwrap().keys().cloned().collect();
+    assert!(bound.len() == 1 && bound[0].ends_with("interface-delta.yaml"), "{bound:?}");
 }

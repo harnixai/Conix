@@ -202,11 +202,58 @@ async fn each_path_dry_runs_through_the_people_it_waits_for_to_its_end() {
     m["propose"] = json!({"summary": "s"});
     m["design"] = json!({"summary": "s", "packages": packages()});
     m["check"] = json!({"summary": "s", "ready": true});
-    let rec = dry_through("xforge/solid", "medium", json!({"stations": m.clone()}), &["check", "verify"]).await;
+    // The interface gate says nothing breaks: no one is asked to approve a breaking change.
+    let calm = json!({"xforge/interface-compat": {"breaking": false}});
+    let rec = dry_through("xforge/solid", "medium", json!({"stations": m.clone(), "facts": calm}), &["check", "verify"]).await;
     assert_eq!(rec.stations["archive"].tasks.len(), 2, "xspec archive and xarch archive");
+    let left_out: Vec<_> = rec.stations["design"].not_required.iter().map(|n| n.label.as_str()).collect();
+    assert_eq!(left_out, ["批准破坏性改动"]);
 
     m["clarify"] = json!({"summary": "s", "questions": 1});
-    dry_through("xforge/major", "high", json!({"stations": m}), &["clarify", "check", "verify"]).await;
+    dry_through("xforge/major", "high", json!({"stations": m, "facts": calm}), &["clarify", "check", "verify"]).await;
+}
+
+#[tokio::test]
+async fn a_breaking_interface_change_waits_for_the_owner_at_the_design_and_so_does_a_gate_that_says_nothing() {
+    // Each path that judges interface-compat has the owner's approval of a breaking change, read
+    // off the gate's fact and nothing a model hands in.
+    let p = packs();
+    for f in ["xforge/solid", "xforge/major", "xforge/dual"] {
+        let (def, _) = p.flow(f).unwrap();
+        let at: Vec<_> = def
+            .stations
+            .iter()
+            .filter(|s| s.exit.iter().any(|e| matches!(e, ExitCond::Gate { gate, .. } if gate == "xforge/interface-compat")))
+            .map(|s| s.id.as_str())
+            .collect();
+        assert_eq!(at, [if f == "xforge/dual" { "propose" } else { "design" }], "{f}");
+        let st = def.station(at[0]).unwrap();
+        let approvals: Vec<_> = st.exit.iter().filter_map(|e| match e {
+            ExitCond::Confirm { who, label, when: Some(w), separate, binds, .. } => Some((who.as_deref(), label.as_deref(), w.gate.as_deref(), w.fact.as_deref(), separate.clone(), binds.clone())),
+            _ => None,
+        }).collect();
+        assert_eq!(
+            approvals,
+            [(Some("owner"), Some("批准破坏性改动"), Some("xforge/interface-compat"), Some("breaking"),
+              Some(OrSetting::Setting("${settings.review.separate}".into())), Some(Binds::List(vec!["${output_dir}/interface-delta.yaml".into()])))],
+            "{f}"
+        );
+    }
+    assert!(p.flow("xforge/quick").unwrap().0.stations.iter().all(|s| s.exit.iter().all(|e| e.when().is_none())), "quick judges no interface");
+
+    let mut m = ends();
+    m["propose"] = json!({"summary": "s"});
+    m["design"] = json!({"summary": "s", "packages": packages()});
+    m["check"] = json!({"summary": "s", "ready": true});
+    let breaking = json!({"xforge/interface-compat": {"breaking": true}});
+    let rec = dry_through("xforge/solid", "medium", json!({"stations": m.clone(), "facts": breaking}), &["design", "check", "verify"]).await;
+    let design = &rec.stations["design"];
+    assert!(design.not_required.is_empty());
+    let c = design.checks.iter().find(|c| c.label == "批准破坏性改动").unwrap();
+    assert_eq!((c.status, c.when.as_ref().unwrap().required), (CheckStatus::Pass, Some(true)));
+    // A gate that gives no fact (here: a mocked one) is no answer: the owner is asked all the same.
+    m["clarify"] = json!({"summary": "s", "questions": 1});
+    dry_through("xforge/major", "high", json!({"stations": m}), &["clarify", "design", "check", "verify"]).await;
 }
 
 #[tokio::test]
