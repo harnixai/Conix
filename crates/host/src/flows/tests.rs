@@ -929,7 +929,7 @@ async fn the_global_library_is_not_run_until_a_bundle_is_installed() {
     let port::Reply::Library(lib) = flows.command(port::Command::ListLibrary).await.unwrap() else {
         panic!("library")
     };
-    assert_eq!(lib, ["xforge"]);
+    assert_eq!(lib, ["xforge", "xreport"]);
     // 帮助浮层的样例：内置包从全局库读，标着这个项目装没装。
     let samples = |r: port::Reply| match r {
         port::Reply::Samples(v) => v.into_iter().find(|s| s.name == "xforge").unwrap(),

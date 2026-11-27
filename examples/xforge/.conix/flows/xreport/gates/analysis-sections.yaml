@@ -1,0 +1,12 @@
+name: analysis-sections
+title: 分析的五节都在
+description: analysis.md 有「概览」「贡献者」「时间分布」「热点」「观察」五节。
+kind: check
+check: text
+file: "${output_dir}/analysis.md"
+matches:
+  - "(?m)^## 概览\\s*$"
+  - "(?m)^## 贡献者\\s*$"
+  - "(?m)^## 时间分布\\s*$"
+  - "(?m)^## 热点\\s*$"
+  - "(?m)^## 观察\\s*$"

@@ -408,10 +408,15 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let lib = Library::new(home.path());
         let notes = lib.bootstrap();
-        assert!(
-            matches!(&notes[..], [BootNote::Extracted { name, .. }] if name == "xforge"),
-            "{notes:?}"
-        );
+        let extracted: Vec<&str> = notes
+            .iter()
+            .filter_map(|n| match n {
+                BootNote::Extracted { name, .. } => Some(name.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(extracted, builtin::bundles(), "{notes:?}");
+        assert_eq!(notes.len(), extracted.len(), "{notes:?}");
         assert!(lib.dir("xforge").is_some());
         let reg = lib.registry().unwrap();
         let e = &reg.bundles["xforge"];

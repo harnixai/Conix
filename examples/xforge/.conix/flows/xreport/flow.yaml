@@ -1,0 +1,56 @@
+name: xreport
+title: 提交历史报告
+description: 统计一段时间的 git 提交（不用模型）、模型照统计写分析、生成报告由主人定稿。
+inputs:
+  since:
+    schema: {type: string, pattern: "^([0-9]{4}-[0-9]{2}-[0-9]{2})?$"}
+    default: ""
+    description: 起始日期 YYYY-MM-DD；不写是截止日往前 30 天（设置 range.days）
+  until:
+    schema: {type: string, pattern: "^([0-9]{4}-[0-9]{2}-[0-9]{2})?$"}
+    default: ""
+    description: 截止日期 YYYY-MM-DD，含这一天；不写是今天
+  rev:
+    schema: {type: string, minLength: 1, maxLength: 200, pattern: "^[A-Za-z0-9_][A-Za-z0-9._/~^-]*$"}
+    default: HEAD
+    description: 从哪个提交往回看：分支、标签或 sha
+  paths:
+    schema: {type: array, maxItems: 50, items: {type: string, minLength: 1, pattern: "^[^-:/]"}}
+    default: []
+    description: 只看这些路径（相对项目根，可以带通配）；不写是整个仓库
+archive:
+  name: "${date}${seq}-xreport"
+  keep: [REPORT.md, analysis.md, stats.json]
+stations:
+  - id: collect
+    title: 统计
+    executor: {kind: command, command: xstat, args: [collect]}
+    output: {type: object}
+    exit:
+      - {kind: output}
+      - {kind: gate, gate: stats-shape}
+
+  - id: analyze
+    title: 分析
+    executor: {kind: session}
+    skill: analyze
+    writes: ["${output_dir}/**"]
+    deliverables:
+      - {path: analysis.md, template: analysis.md, description: 分析：概览、贡献者、时间分布、热点、观察；数只取自 stats.json}
+    output: {type: object, required: [summary], properties: {summary: {type: string, minLength: 1}}}
+    exit:
+      - {kind: output}
+      - {kind: gate, gate: analysis-sections}
+      - {kind: gate, gate: analysis-filled}
+    on_unmet: {rework_to: analyze, max: 2}
+
+  - id: publish
+    title: 定稿
+    executor: {kind: command, command: xstat, args: [render]}
+    output: {type: object}
+    exit:
+      - {kind: output}
+      # 批的是这一份 REPORT.md：之后被改，运行结束不了。主人驳回就退回分析站重写；统计不重跑：数是 git 的，重跑也一样。
+      - {kind: confirm, who: owner, label: 报告定稿, separate: "${settings.review.separate}", binds: ["${output_dir}/REPORT.md"]}
+    on_unmet: {rework_to: analyze, max: 2}
+    rework_to: [analyze]

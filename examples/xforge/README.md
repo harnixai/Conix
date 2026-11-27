@@ -61,18 +61,34 @@ conix            # 起实例并接入
 （测试那一路只写那里，实现那一路不碰）。里面已经有几条照规格写的、只经公开接口调用的测试。合起来没过时，`/rework fork <理由>`
 两路都重新分叉；只想重做一路，在对话里让主 Agent `flow_rework {to: fork, tasks: [impl]}`。重做的那一路看得见另一路上一轮合回来的东西。
 
+## 提交历史报告：xreport
+
+`.conix/flows/xreport/` 是 Conix 内置的另一个包（约定见 `docs/design/xreport.md`）：这个项目的 git 历史在一段时间里的报告。
+在仓库里提交过几次之后打 `/flow:xreport 近一个月`，或给范围 `/flow:xreport 十一月 --since 2026-11-01 --until 2026-11-30`。
+
+| 站 | 做什么 | 把关 |
+|---|---|---|
+| 统计 | 命令步骤 `xstat collect`：经系统的 git 数提交、增删行、文件，按作者、星期、小时（作者自己的时区）、目录、文件，写 `stats.json` | 形状对 |
+| 分析 | 会话只读 `stats.json`，写 `analysis.md`：概览、贡献者、时间分布、热点、观察 | 五节都在、都有正文 |
+| 定稿 | 命令步骤 `xstat render`：头、分析、从统计生成的表，拼成 `REPORT.md` | 你确认「报告定稿」 |
+
+名字照 git（`.mailmap` 合过）；邮箱缺省不记，提交说明缺省给模型看，在 `.conix/governance/xreport.yaml` 里改
+（`privacy: {emails: true}`、`privacy: {subjects: false}`）。它要跑 git，项目没受信时统计站会说先 `/trust`。
+
 ## 目录
 
 ```
 .conix/                     脚手架（进 git）
   conix.yaml                flows.artifacts_dir: xforge —— 制品目录叫 xforge
   flows/xforge/             流程包：bundle.yaml、quick/solid/major.yaml、dual/dual-impl/dual-tests.yaml、skills/、gates/、scripts/、lib/、policies/、templates/、commands/
+  flows/xreport/            流程包：bundle.yaml、flow.yaml（统计、分析、定稿）、commands/xstat.js、lib/、gates/、scripts/、skills/、templates/
   governance/               xforge.yaml（开哪几条基线、确认要不要职责分离、工作包能选的 verify 菜单；前两项运行启动时钉住）、constitution.yaml（项目原则）、verify.sh（项目的验证）
   roles.yaml                确认的角色（reviewer、owner）
 xforge/                     制品目录，也就是 xforge 包的数据
   specs/textkit.md          规格基线（进 git）
   interfaces/textkit.yaml   接口基线（进 git）
   archive/<日期序号>-<标题>/  每次变更的归档：提案、设计、验证、增量、台账、工作包、record.json（进 git）
+  xreport/archive/          每份提交历史报告的归档：REPORT.md、analysis.md、stats.json、record.json（进 git）
   runs/<运行>/              运行中的目录（不进 git）
 src/  tests/                被改的代码与单测
 tests_blackbox/             黑盒测试（verify 菜单的 blackbox；双路开发的测试那一路写在这里）

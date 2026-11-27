@@ -466,7 +466,8 @@ exit: [{kind: children, require: all}]   # all（缺省）| any | 正整数：�
 
 Conix 内置一个按这些写的开发流程包 `xforge`（能力与 xforge 插件对齐：规格驱动、按工作包实施、独立检查、可以打回、归档时
 并进规格），源头是演示项目 `examples/xforge/.conix/flows/xforge/`，起来时放进全局流程库，`conix flow install xforge` 装进项目（§7.12）。它的流程就是流程本身，没有 `xflow` 这一层：运行的状态
-在流程里，结构化的数据由 `xspec`、`xledger`、`xpkg` 三个命令维护。
+在流程里，结构化的数据由 `xspec`、`xledger`、`xpkg` 三个命令维护。另一个内置包 `xreport`（`examples/xforge/.conix/flows/xreport/`，
+[xreport.md](xreport.md)）给这个项目的提交历史出报告：统计由命令经系统的 git 算（§7.14 的 `flow.exec`），模型只照统计写分析，人定稿。
 
 ### 7.1 包：`bundle.yaml`
 
@@ -642,7 +643,7 @@ jobs:                                  # 建议的作业（示意：内置的 xf
 
 | 处 | 位置 | 跑不跑 |
 |---|---|---|
-| 内置的 | 编进二进制（源头 `examples/xforge/.conix/flows/`），当一个包文件看 | 否：全局库的种子 |
+| 内置的 | 编进二进制（源头 `examples/xforge/.conix/flows/` 下的每个包：`xforge`、`xreport`），各当一个包文件看 | 否：全局库的种子 |
 | 全局库 | `~/.conix/flows/<包>/`（`CONIX_HOME`），旁边 `.registry.yaml`、`.backups/`、`.staging/`、`.lock` | 否 |
 | 项目 | `<项目>/.conix/flows/<包>/`，`.conix/flows.lock.yaml` 记从库里装的哪一版（进 git） | 是 |
 | 插件 | 插件目录（§7.11） | 是 |
@@ -789,8 +790,8 @@ export default function (input, flow) {
 怎么记，一处定。
 
 ```js
-// commands/xreport.js：在运行的工作目录里跑系统的 git
-const r = flow.exec({ argv: ["git", "log", "--format=%H %s", "-n", "50"], cwd: ".", timeout_seconds: 10 });
+// 内置包 xreport 的 commands/xstat.js（经 lib/git.js）：在运行的工作目录里跑系统的 git
+const r = flow.exec({ argv: ["git", "--no-pager", "-c", "core.fsmonitor=false", "log", "-z", "--numstat", "--end-of-options", rev, "--", ...paths] });
 // r = {code, signal, stdout, stderr, timed_out, truncated, ms, enforced: {backend, filesystem, network}}
 ```
 
@@ -824,7 +825,7 @@ const r = flow.exec({ argv: ["git", "log", "--format=%H %s", "-n", "50"], cwd: "
   `flow.exec` 抛错并说为什么（开关关着、项目没受信），命令门禁照旧是 `error`。宿主没给执行服务的地方（没有运行时、`doctor`
   不带执行服务地调）`flow.exec` 抛 "not offered"。
 - **记录**：每个进程都记一笔，从不记输出。运行里是运行历史的一条 `exec`（`Engine::note_exec`）：`for`（`gate semgrep`、
-  `flow.exec in commands/xreport.js`）、`argv`、`cwd`、`profile`、`network`、`code`、`signal`、`timed_out`、`truncated`、`ms`、
+  `flow.exec in xreport:xstat`）、`argv`、`cwd`、`profile`、`network`、`code`、`signal`、`timed_out`、`truncated`、`ms`、
   `enforced`，起不来时是 `error`；运行之外是宿主日志里 target `flow::exec` 的一行。argv 进记录，所以别把密钥写进参数，用 `env`。
 - **后端与接缝**：现在只有普通子进程（流程库的 `PlainExec`，Conix 的 `host::exec::ConixExec` 缺省也是它）：档位与网络
   **照传不守**，每条结果与记录的 `enforced` 都写 `{backend: plain, filesystem: false, network: false}`，读记录的人不会把档位
@@ -867,7 +868,7 @@ const r = flow.exec({ argv: ["git", "log", "--format=%H %s", "-n", "50"], cwd: "
 | 流程包的管理（全局库、registry、lock、内置包、包文件与 `MANIFEST.yaml`、`conix flow …`、体检） | `crates/host/src/flows/package.rs`、`library.rs`、`manage.rs`、`doctor.rs`、`builtin.rs`、`crates/conix/src/flow_cli.rs`、`crates/flow/src/bundle.rs`（`requires`、`RESERVED_BUNDLES`）、`crates/model/src/flow_addr.rs`（找不到包时的提示）、`port::Command::{ReloadFlows, ListLibrary}` |
 | 包的自检（`doctor`） | `crates/flow/src/runner/doctor.rs`、`runner/scriptenv.rs`（`Env::for_doctor`）、`bundle.rs`（`BundleMeta::doctor`）；`crates/flow/tests/doctor.rs` |
 | 执行服务（`Exec`、档位、记录、`flow.exec`、`bundle.yaml` 的 `exec`） | `crates/flow/src/kernel/host.rs`（`Exec`、`ExecRequest`、`ExecProfile`、`Enforcement`）、`runner/exec.rs`（`PlainExec`、`run_plain`、记录、环境）、`runner/scriptenv.rs`（`ExecScope`）、`runner/script.rs`（`flow.exec`）、`bundle.rs`（`ExecDecl`）、`kernel/parts.rs`（`Pinned::exec`）、`kernel/engine.rs`（`note_exec`）；Conix 的后端与接缝 `crates/host/src/exec.rs`；`crates/flow/tests/exec.rs` |
-| 内置的 xforge | `examples/xforge/`（项目与流程包）、`crates/host/build.rs`、`crates/host/src/flows/builtin.rs`（种子，进全局库）；`crates/flow/tests/xforge.rs`、`crates/conix/tests/live_xforge.rs` |
+| 内置的 xforge、xreport | `examples/xforge/`（项目与两个流程包）、`crates/host/build.rs`、`crates/host/src/flows/builtin.rs`（种子，进全局库）；`crates/flow/tests/xforge.rs`、`crates/flow/tests/xreport.rs`、`crates/conix/tests/live_xforge.rs` |
 
 ## 9. 往回迁
 

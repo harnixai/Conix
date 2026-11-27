@@ -42,7 +42,7 @@
   `pace`、`commands`（`read_only` 声明）；字段见 flows.md §7.1。目录里有它才当一个包读；没有它的子目录
   （`skills/`、`gates/` …）是旧的平铺布局。
 - **来源与覆盖**：跑的包只有两处：项目的 `.conix/flows/` 与插件带的。项目里有**同名、带 `bundle.yaml`** 的包，整包代替插件的同名包；
-  项目里同名目录**不带 `bundle.yaml`**，只是给它加 `local.md`（§4）。随 Conix 内置的包（`xforge`）与别处来的包放在全局流程库
+  项目里同名目录**不带 `bundle.yaml`**，只是给它加 `local.md`（§4）。随 Conix 内置的包（`xforge`、`xreport`）与别处来的包放在全局流程库
   `~/.conix/flows/`，不跑，`conix flow install` 装进项目（flows.md §7.12）。
 - **`lib/`**：包内共用的函数。脚本与命令用相对路径 `import`（`../lib/specs.js`），只认包内，不出包、没有 npm，随运行一起钉住。
   门禁与命令共用一份判法放在这里。

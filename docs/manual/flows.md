@@ -2,7 +2,7 @@
 
 流程是按站推进的多步工作（流程库来自 Harnix）。**跑的流程只在项目里**：项目自己的在 `<项目>/.conix/flows/`，
 随项目提交，**项目受信才读、才写**（见 `/trust`）；插件带来的是只读的，名字前标 `◎`，项目里存一份同名的就取代它。
-全局只有一个**流程库**（`~/.conix/flows/`）：放可以装进各个项目的包，内置的 `xforge` 也在这里，但库里的包不跑，
+全局只有一个**流程库**（`~/.conix/flows/`）：放可以装进各个项目的包，内置的 `xforge`、`xreport` 也在这里，但库里的包不跑，
 要用就 `conix flow install <包>` 装进项目（见下面的「管理流程包」）。
 
 ## 新建与修改
@@ -75,7 +75,7 @@ release: [carol]
 
 指南原文在仓库的 `crates/flow/docs/guide.zh-CN.md` 与 `crates/flow/docs/guide/`。
 
-## 流程包、制品目录与内置的 xforge
+## 流程包、制品目录与内置的包
 
 - **流程包**：一个流程一个目录，`.conix/flows/<包>/`，里面有 `bundle.yaml`、流程文件（同一件事的几条路径可以放在一起，
   比如 `solid.yaml`、`quick.yaml`）和它们用的全部件（`skills/`、`gates/`、`scripts/`、`policies/`、`templates/`、`commands/`）。
@@ -94,6 +94,10 @@ release: [carol]
   （提案、实施、验证、归档）。规格在 `conix/xforge/specs/`，站里的会话用 `xspec`、`xledger`、`xpkg` 三个命令记规格增量、
   台账、工作包，归档时增量并进规格。项目要准备的：`.conix/governance/verify.sh`（实施站的出口跑它：单测、lint），
   可选的 `.conix/governance/constitution.yaml`（设计逐条对照的原则）。完整的例子是仓库里的 `examples/xforge`。
+- **内置的 `xreport`**（`conix flow install xreport` 装进项目）：这个项目的提交历史报告，`/flow:xreport <主题> [--since 2026-11-01] [--until …]`
+  （都不给就是近 30 天）。统计由 `xstat` 经系统的 git 算，模型照统计写分析，表由统计生成，你确认「报告定稿」；归档在 `conix/xreport/archive/`。
+  名字照 git（`.mailmap` 合过）；邮箱缺省不记，提交说明缺省给模型看，`.conix/governance/xreport.yaml` 的 `privacy` 可以改。
+  要跑 git，所以项目要受信（`/trust`）。约定见 `docs/design/xreport.md`。
 - **双路开发 `xforge/dual`**：规格侧（提案、规格与接口增量）写一次、检查、你批准；之后分成两个子运行，各在自己的 worktree 里，
   一个实现、一个只照规格写黑盒测试，互相看不到；两路合回运行的分支后用黑盒测试跑实现，没过的由会话判错在哪一边，你决定打回哪一路
   （`/rework fork` 两路都重做，或在对话里让主 Agent 只打回其中一个任务）。不按风险自动选，点名起：`/flow:xforge:dual <主题> --risk high`。
@@ -123,7 +127,7 @@ release: [carol]
 
 - **项目记着装了什么**：`.conix/flows.lock.yaml`（进 git）记每个从库里装的包的版本与摘要；拿它判"项目里改过没有"。
   `skills/*/local.md` 不算。
-- **内置的包**：Conix 带的 `xforge` 在你第一次运行 `conix` 时放进全局库。库里那份没改过、新的 Conix 带了新版时自动换上
+- **内置的包**：Conix 带的 `xforge`、`xreport` 在你第一次运行 `conix` 时放进全局库。库里那份没改过、新的 Conix 带了新版时自动换上
   （打一行提示）；改过的不动，`doctor` 会说有新的内置版，`conix flow reset xforge` 换上（你的那份先备份）。
   `remove --global` 也删得掉它，`reset` 找回。
 - **以前直接用内置 xforge 的项目**：升级后 xforge 不再自动出现，`conix flow install xforge` 一条命令装进来。有进行中的运行时，

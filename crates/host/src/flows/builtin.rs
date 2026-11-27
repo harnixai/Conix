@@ -82,21 +82,24 @@ pub fn write(dir: &Path) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn xforge_is_built_in_as_a_package_that_validates() {
-        assert_eq!(super::bundles(), ["xforge"]);
-        let p = super::package("xforge").unwrap();
-        assert!(!p.version.is_empty() && p.version != "0.0.0");
-        assert!(p.files.iter().any(|(f, _)| f == "commands/xspec.js"));
+    fn the_built_in_bundles_are_packages_that_validate() {
+        assert_eq!(super::bundles(), ["xforge", "xreport"]);
+        for name in super::bundles() {
+            let p = super::package(name).unwrap();
+            assert!(!p.version.is_empty() && p.version != "0.0.0", "{name}");
+            let staged = super::package::stage(
+                name,
+                &p.files,
+                None,
+                None,
+                super::package::default_catalog(),
+            )
+            .unwrap();
+            assert_eq!(staged.digest, p.digest, "{name}");
+            assert_eq!(staged.version(), p.version, "{name}");
+        }
+        let x = super::package("xforge").unwrap();
+        assert!(x.files.iter().any(|(f, _)| f == "commands/xspec.js"));
         assert!(super::package("nope").is_none());
-        let staged = super::package::stage(
-            "xforge",
-            &p.files,
-            None,
-            None,
-            super::package::default_catalog(),
-        )
-        .unwrap();
-        assert_eq!(staged.digest, p.digest);
-        assert_eq!(staged.version(), p.version);
     }
 }
