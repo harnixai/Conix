@@ -1737,12 +1737,13 @@ impl Engine {
                         .cond
                         .and_then(|i| sdef.exit.get(i))
                         .is_some_and(|e| matches!(e, ExitCond::Gate { gate: g, .. } if g == gate));
-                    if is_gate && c.round == round && c.status == CheckStatus::Wait {
+                    if is_gate && c.round == round && c.status == CheckStatus::Wait && !c.held_by_when() {
                         c.status = result.verdict.status();
                         c.detail = result.summary.clone();
                         c.findings = result.findings.clone();
                         c.evidence = result.evidence.clone();
                         c.metrics = result.metrics.clone();
+                        c.facts = result.facts.clone();
                         c.at = now;
                         applied = true;
                     }
@@ -1751,14 +1752,14 @@ impl Engine {
             if applied {
                 // The whole result goes into the log: what was found and what it rests on, for
                 // whoever checks the run afterwards.
-                m.log(
-                    "gate_result",
-                    Some(station),
-                    None,
-                    json!({"gate": gate, "round": round, "pass": result.is_pass(), "verdict": result.verdict,
-                           "detail": result.summary, "findings": result.findings, "evidence": result.evidence,
-                           "metrics": result.metrics}),
-                );
+                let mut logged = json!({"gate": gate, "round": round, "pass": result.is_pass(), "verdict": result.verdict,
+                       "detail": result.summary, "findings": result.findings, "evidence": result.evidence,
+                       "metrics": result.metrics});
+                // Only when there are some: the histories of gates that give none read as before.
+                if !result.facts.is_empty() {
+                    logged["facts"] = json!(result.facts);
+                }
+                m.log("gate_result", Some(station), None, logged);
                 m.judge_later(station);
                 t.settle().await?;
             }

@@ -144,8 +144,8 @@ fn record(rec: &RunRecord, run_dir: &Path, kept: &[String]) -> Value {
             Some(json!({
                 "id": s.id, "title": s.title, "status": r.status, "rounds": r.rounds_total,
                 "entered_at": r.entered_at, "left_at": r.left_at, "usage": r.usage(),
-                "tasks": tasks, "checks": r.checks, "confirms": r.confirms, "approvals": r.approvals,
-                "forced": r.forced,
+                "tasks": tasks, "checks": r.checks, "not_required": r.not_required, "confirms": r.confirms,
+                "approvals": r.approvals, "forced": r.forced,
             }))
         })
         .collect();

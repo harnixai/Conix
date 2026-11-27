@@ -63,7 +63,7 @@ pub mod wire;
 
 pub use dryrun::{Mocks, Sandbox};
 pub use kernel::def::{
-    definition_schema, duration_ms, Assert, Binds, BindsWord, ConfirmVia, RejectRule, BINDS_DELIVERABLES, DecisionMap, Executor, ExitCond, FlowResult, Foreach, ForeachScript, McpApproval, McpCall, FlowDef, Guard, InputDef, MainSession,
+    definition_schema, duration_ms, Assert, Binds, BindsWord, ConfirmVia, RejectRule, BINDS_DELIVERABLES, DecisionMap, Executor, ExitCond, ExitWhen, WhenAnswer, FlowResult, Foreach, ForeachScript, McpApproval, McpCall, FlowDef, Guard, InputDef, MainSession,
     OnUnmet, OrSetting, Pace, Require, RequireWord, Retry, SessionBinding, Station, TaskSpec, Work, DEFAULT_OUTPUT_DIR, DEFAULT_REWORK_LIMIT,
     EFFORTS, MAIN_SESSION_KEY, MAX_REWORK_LIMIT,
 };
@@ -71,7 +71,7 @@ pub use kernel::engine::{
     view, worktree_may_end, CreateIn, Engine, Prepared, DEFAULT_LEASE_MS, DEFAULT_RETRIES, MAX_LEASE_MS, MAX_SUBFLOW_DEPTH,
 };
 pub use kernel::host::{
-    digest, AllowAll, Approvals, Authorizer, Catalog, ChangeSet, Clock, Delivery, Event, FixedClock,
+    digest, facts_problem, AllowAll, Approvals, Authorizer, Catalog, ChangeSet, Clock, Delivery, Event, FixedClock,
     GateResult, Gates, ManualClock, NoTools, Op, Origin, Outcome, Packs, Placement,
     Programs, RunStore, StoreError, SystemClock, Tools, Withheld, WorkItem, EVENT_KINDS,
 };
@@ -84,7 +84,7 @@ pub use kernel::protocol::{agent_tag, ask_rules, skill_body, STRUCTURED_OUTPUT_T
 pub use kernel::run::{
     run_schema, Actor, AgentDelivery, ApprovalRec, BoundSession, CheckRec, CheckStatus, ConfirmRec, Evidence, Finding, ForcedRec, ForkPoint, ForkRec, GateVerdict, History, Lease, ParentRef, Severity,
     ArchiveRef, AskRec, DeliveryRec, PauseRec, Phase, ReworkRec, RunQuery, RunRecord, RunStatus, RunSummary, RunView, StationRec,
-    StationStatus, TaskExitRec, TaskRec, TaskStatus, Trigger, Usage, Votes, Workspace, WorktreeEnd, WorktreeOutcome,
+    StationStatus, TaskExitRec, TaskRec, TaskStatus, Trigger, Usage, Votes, NotRequiredRec, WhenRec, Workspace, WorktreeEnd, WorktreeOutcome,
     WorktreeRec, AGENT_KIND, DEVICE_KIND, FLOW_KIND,
 };
 pub use kernel::route::{Route, RouteCandidate};

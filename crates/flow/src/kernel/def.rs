@@ -572,6 +572,8 @@ pub enum ExitCond {
     Output {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         label: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        when: Option<ExitWhen>,
     },
     /// A gate of the pack (`gates/<name>.yaml`) passes. `rework_to`: where an automatic rework
     /// goes when this gate fails, over the station's `on_unmet.rework_to` (it counts against
@@ -582,6 +584,8 @@ pub enum ExitCond {
         label: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         rework_to: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        when: Option<ExitWhen>,
     },
     /// Someone confirms. `who` is an opaque label handed to the authorizer (a role, in Conix).
     /// `via: mcp` asks an outside approval system through MCP tools instead of a person here;
@@ -617,6 +621,8 @@ pub enum ExitCond {
         /// again before every later station passes (`deliverables` when absent).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         binds: Option<Binds>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        when: Option<ExitWhen>,
     },
     /// The station's child runs finished, enough of them delivering (`require`, default all).
     Children {
@@ -624,7 +630,113 @@ pub enum ExitCond {
         label: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         require: Option<Require>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        when: Option<ExitWhen>,
     },
+}
+
+/// When an exit condition is required at all (in Conix: docs/design/flows.md §4.2); absent, always.
+/// What it reads comes from code that gives the same answer on the same files — a fact a gate of
+/// the run computed (`gate` + `fact`), or what a command step returned (`step` + `path`) — never
+/// from what a model hands in: a condition read off a model's output is one the model can turn off.
+/// Without `equals` or `in` the value must be `true`. Whatever gives no definite answer (no result
+/// yet, a gate that errored, nothing there, a value of another kind) makes the condition required:
+/// only a definite no lets the station go without it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(deny_unknown_fields)]
+pub struct ExitWhen {
+    /// A gate that is an exit of this station or of a station it needs: its latest result's `facts`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gate: Option<String>,
+    /// With `gate`: the key in its `facts`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fact: Option<String>,
+    /// A station whose work is one command step (`executor: {kind: command}`), this one or one it
+    /// needs: its output.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub step: Option<String>,
+    /// With `step`: a dotted path into its output.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    /// Required when the value is this one (a list: when it holds this one).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(type = "string | number | boolean"))]
+    pub equals: Option<Value>,
+    /// Required when the value is one of these (a list: when it holds one of them).
+    #[serde(default, rename = "in", skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(type = "Array<string | number | boolean>"))]
+    pub any_of: Option<Vec<Value>>,
+}
+
+/// Whether an [`ExitWhen`] makes its condition required, given the value it reads.
+#[derive(Debug, Clone, PartialEq)]
+pub enum WhenAnswer {
+    /// Definitely required: the value says so.
+    Yes,
+    /// Definitely not required.
+    No,
+    /// No definite answer, which counts as required: why.
+    Unsure(String),
+}
+
+impl ExitWhen {
+    /// What it reads, for people: `gate interface-compat fact breaking`, `step seal output files.count`.
+    pub fn source(&self) -> String {
+        match (&self.gate, &self.fact, &self.step, &self.path) {
+            (Some(g), Some(f), _, _) => format!("gate {g} fact {f}"),
+            (_, _, Some(s), Some(p)) => format!("step {s} output {p}"),
+            _ => "nothing".into(),
+        }
+    }
+
+    /// What makes it required, for people: `is true`, `= "major"`, `in ["a","b"]`.
+    pub fn test(&self) -> String {
+        match (&self.equals, &self.any_of) {
+            (Some(v), _) => format!("= {v}"),
+            (None, Some(l)) => format!("in {}", Value::Array(l.clone())),
+            (None, None) => "is true".into(),
+        }
+    }
+
+    /// Judged on the value it read: without a comparison it must be a boolean; with one, a scalar of
+    /// a kind the comparison has, or a list of such (required when it holds a match). Anything of
+    /// another kind is no answer, not a no: a fact that changed its type is not one that said false.
+    pub fn answer(&self, v: &Value) -> WhenAnswer {
+        let wanted: Vec<Value> = match (&self.equals, &self.any_of) {
+            (Some(e), _) => vec![e.clone()],
+            (None, Some(l)) => l.clone(),
+            (None, None) => {
+                return match v {
+                    Value::Bool(true) => WhenAnswer::Yes,
+                    Value::Bool(false) => WhenAnswer::No,
+                    other => WhenAnswer::Unsure(format!("{} is {other}, not true or false", self.source())),
+                }
+            }
+        };
+        let kind = |x: &Value| match x {
+            Value::Bool(_) => 1,
+            Value::Number(_) => 2,
+            Value::String(_) => 3,
+            _ => 0,
+        };
+        let same = |a: &Value, b: &Value| match (a, b) {
+            (Value::Number(x), Value::Number(y)) => x.as_f64() == y.as_f64(),
+            _ => a == b,
+        };
+        let values: Vec<&Value> = match v {
+            Value::Array(a) => a.iter().collect(),
+            one => vec![one],
+        };
+        if let Some(bad) = values.iter().find(|x| kind(x) == 0 || !wanted.iter().any(|w| kind(w) == kind(x))) {
+            return WhenAnswer::Unsure(format!("{} is {v}: {bad} is not of the kind {} compares with", self.source(), self.test()));
+        }
+        if values.iter().any(|x| wanted.iter().any(|w| same(x, w))) {
+            WhenAnswer::Yes
+        } else {
+            WhenAnswer::No
+        }
+    }
 }
 
 /// How many of a station's child runs must deliver (docs/design/flows.md §6.2, in Conix):
@@ -821,6 +933,19 @@ pub fn duration_ms(s: &str) -> Option<u64> {
 }
 
 impl ExitCond {
+    /// When it is required at all; `None`: always.
+    pub fn when(&self) -> Option<&ExitWhen> {
+        match self {
+            Self::Output { when, .. } | Self::Gate { when, .. } | Self::Confirm { when, .. } | Self::Children { when, .. } => when.as_ref(),
+        }
+    }
+
+    pub fn when_mut(&mut self) -> Option<&mut ExitWhen> {
+        match self {
+            Self::Output { when, .. } | Self::Gate { when, .. } | Self::Confirm { when, .. } | Self::Children { when, .. } => when.as_mut(),
+        }
+    }
+
     pub fn kind(&self) -> &'static str {
         match self {
             Self::Output { .. } => "output",
@@ -833,7 +958,7 @@ impl ExitCond {
     /// A name for people: the `label`, or one made from the kind.
     pub fn label(&self) -> String {
         let (label, made) = match self {
-            Self::Output { label } => (label, "output".to_string()),
+            Self::Output { label, .. } => (label, "output".to_string()),
             Self::Gate { label, gate, .. } => (label, format!("gate {gate}")),
             Self::Confirm { label, who, .. } => (
                 label,

@@ -10,7 +10,7 @@
 //! | work | in a dry run |
 //! |---|---|
 //! | a session or program task | handed in by the dispatcher: `mocks.stations.<id>` (one value, or a table by task id for a station of several tasks), else the contract's `examples` / `default`, else [`minimal`] of the contract; a session task first records the message its session would have been sent (`preview`) |
-//! | a gate | passes, unless `mocks.gates.<gate>` is `false` |
+//! | a gate | passes, unless `mocks.gates.<gate>` is `false`; gives the facts `mocks.facts.<gate>`, none when not given (an exit whose `when` reads one is then required) |
 //! | a `tool` exit | answers `mocks.tools.<tool>`, `{}` when not given |
 //! | a confirmation, an external task | waits for a person, through the same methods as a real run |
 //! | a subflow | a child run in the sandbox |
@@ -63,6 +63,8 @@ pub struct Mocks {
     pub stations: BTreeMap<String, Value>,
     /// Gate → whether a `command` or `host` gate passes (`true` when absent).
     pub gates: BTreeMap<String, bool>,
+    /// Gate → the facts its result gives (none when absent: a `when` that reads one is required).
+    pub facts: BTreeMap<String, Map<String, Value>>,
     /// Tool → what a `tool` gate's tool gets back (`{}` when absent).
     pub tools: BTreeMap<String, Value>,
     /// Station id → the items a `foreach: {script}` gives (`[]` when absent).
@@ -643,15 +645,9 @@ impl Sandbox {
                 } else {
                     "mocked: does not pass"
                 };
-                let r = engine
-                    .gate_result(
-                        &run,
-                        &station,
-                        round,
-                        &gate,
-                        if pass { GateResult::passed(detail) } else { GateResult::failed(detail) },
-                    )
-                    .await;
+                let mut result = if pass { GateResult::passed(detail) } else { GateResult::failed(detail) };
+                result.facts = d.mocks.facts.get(&gate).cloned().unwrap_or_default();
+                let r = engine.gate_result(&run, &station, round, &gate, result).await;
                 let stepped = Stepped {
                     kind: "gate".into(),
                     run,

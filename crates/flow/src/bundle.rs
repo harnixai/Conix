@@ -612,7 +612,7 @@ pub fn read_flow(bundle: &str, dir: &Path, stem: &str) -> Option<(FlowDef, Strin
     qualify(&mut def, bundle, &|s: &str| stems.contains(s));
     for st in def.stations.iter_mut().filter(|s| !s.deliverables.is_empty()) {
         let gate = qualified(bundle, &format!("{DELIVERABLES_GATE}{stem}.{}", st.id));
-        st.exit.insert(0, ExitCond::Gate { gate, label: Some("deliverables".into()), rework_to: None });
+        st.exit.insert(0, ExitCond::Gate { gate, label: Some("deliverables".into()), rework_to: None, when: None });
     }
     Some((def, text))
 }
@@ -669,6 +669,10 @@ pub fn qualify(def: &mut FlowDef, bundle: &str, has_flow: &dyn Fn(&str) -> bool)
         for e in s.exit.iter_mut().chain(s.task_exit.iter_mut()) {
             if let ExitCond::Gate { gate, .. } = e {
                 *gate = in_bundle(bundle, gate);
+            }
+            // The gate a `when` reads is one of these exits': named the same way, or it names none.
+            if let Some(g) = e.when_mut().and_then(|w| w.gate.as_mut()) {
+                *g = in_bundle(bundle, g);
             }
         }
         if let Some(crate::kernel::def::Foreach::Script(f)) = &mut s.foreach {

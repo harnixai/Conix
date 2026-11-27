@@ -459,6 +459,51 @@ pub struct CheckRec {
     #[serde(default, skip_serializing_if = "serde_json::Map::is_empty")]
     #[cfg_attr(feature = "ts", ts(type = "Record<string, unknown>"))]
     pub metrics: serde_json::Map<String, Value>,
+    /// A gate's facts (`GateResult::facts`), what a later `when` reads.
+    #[serde(default, skip_serializing_if = "serde_json::Map::is_empty")]
+    #[cfg_attr(feature = "ts", ts(type = "Record<string, unknown>"))]
+    pub facts: serde_json::Map<String, Value>,
+    /// An exit with a `when`: whether it was required in this judgement, and why.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub when: Option<WhenRec>,
+}
+
+/// How an exit's `when` came out (in Conix: docs/design/flows.md §4.2).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct WhenRec {
+    /// `true`: required — the value said so, or gave no definite answer (`why` says which);
+    /// `false`: not required, the value said so; absent: not known yet — the gate of this station it
+    /// reads is still running, so the exit waits with it and asks for nothing meanwhile.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub required: Option<bool>,
+    pub why: String,
+    /// The value read, when there was one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(type = "unknown"))]
+    pub value: Option<Value>,
+}
+
+/// An exit its `when` made not required this round: kept on the station, so that an exit left out
+/// shows as left out, with what said so.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct NotRequiredRec {
+    /// Index into the station's `exit`.
+    pub cond: usize,
+    pub label: String,
+    pub round: u32,
+    pub when: super::def::ExitWhen,
+    #[cfg_attr(feature = "ts", ts(type = "unknown"))]
+    pub value: Value,
+}
+
+impl CheckRec {
+    /// An exit whose `when` has not made it required (not known yet, or not required): a check
+    /// that stands for no judgement of the exit itself — nothing asked for, no result to wait for.
+    pub fn held_by_when(&self) -> bool {
+        self.when.as_ref().is_some_and(|w| w.required != Some(true))
+    }
 }
 
 /// How many findings an explanation spells out; the rest are counted.
@@ -475,6 +520,10 @@ impl CheckRec {
         parts.extend(self.findings.iter().take(FINDINGS_SHOWN).map(Finding::line_text));
         if self.findings.len() > FINDINGS_SHOWN {
             parts.push(format!("{} more", self.findings.len() - FINDINGS_SHOWN));
+        }
+        // A conditional exit says why it is there: most of all when no definite answer made it so.
+        if let Some(w) = self.when.as_ref().filter(|w| w.required == Some(true)) {
+            parts.push(format!("required: {}", w.why));
         }
         if parts.is_empty() {
             self.label.clone()
@@ -560,6 +609,9 @@ pub struct StationRec {
     pub tasks: Vec<TaskRec>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub checks: Vec<CheckRec>,
+    /// The exits its latest judgement found not required (`when`), with what said so.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub not_required: Vec<NotRequiredRec>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub confirms: Vec<ConfirmRec>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -626,6 +678,7 @@ impl StationRec {
             rule_digest: BTreeMap::new(),
             tasks: vec![],
             checks: vec![],
+            not_required: vec![],
             confirms: vec![],
             forced: None,
             entered_at: None,

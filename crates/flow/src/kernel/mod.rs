@@ -20,6 +20,7 @@ pub mod schema;
 pub(crate) mod txn;
 pub(crate) mod work;
 pub mod validate;
+pub(crate) mod when;
 
 
 /// Why an operation did not happen.

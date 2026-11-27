@@ -520,6 +520,21 @@ pub struct GateResult {
     #[serde(default, skip_serializing_if = "serde_json::Map::is_empty")]
     #[cfg_attr(feature = "ts", ts(type = "Record<string, unknown>"))]
     pub metrics: serde_json::Map<String, Value>,
+    /// What the gate's code worked out about the run, for an exit's `when` to read (in Conix:
+    /// docs/design/flows.md §3): each a scalar or a list of scalars ([`facts_problem`]).
+    #[serde(default, skip_serializing_if = "serde_json::Map::is_empty")]
+    pub facts: serde_json::Map<String, Value>,
+}
+
+/// What is wrong with a gate result's `facts`: each value a string, number or boolean, or a list of
+/// them. Not `null`, not an object: a `when` tells a fact that is not there from one that says no,
+/// and a fact that could be either would blur the two.
+pub fn facts_problem(facts: &serde_json::Map<String, Value>) -> Option<String> {
+    let scalar = |v: &Value| matches!(v, Value::Bool(_) | Value::Number(_) | Value::String(_));
+    facts.iter().find_map(|(k, v)| {
+        let ok = !k.trim().is_empty() && (scalar(v) || v.as_array().is_some_and(|a| a.iter().all(scalar)));
+        (!ok).then(|| format!("facts.{k} is {v}: a fact is a string, number or boolean, or a list of them"))
+    })
 }
 
 /// The shape before the fork, `{pass, detail}`, still read: a host's checks written for it keep
@@ -543,8 +558,13 @@ impl<'de> Deserialize<'de> for GateResult {
             evidence: Vec<Evidence>,
             #[serde(default)]
             metrics: serde_json::Map<String, Value>,
+            #[serde(default)]
+            facts: serde_json::Map<String, Value>,
         }
         let r = Raw::deserialize(d)?;
+        if let Some(m) = facts_problem(&r.facts) {
+            return Err(serde::de::Error::custom(m));
+        }
         let verdict = match (r.verdict, r.pass) {
             (Some(v), _) => v,
             (None, Some(true)) => GateVerdict::Pass,
@@ -557,6 +577,7 @@ impl<'de> Deserialize<'de> for GateResult {
             findings: r.findings,
             evidence: r.evidence,
             metrics: r.metrics,
+            facts: r.facts,
         })
     }
 }
@@ -569,6 +590,7 @@ impl GateResult {
             findings: vec![],
             evidence: vec![],
             metrics: serde_json::Map::new(),
+            facts: serde_json::Map::new(),
         }
     }
 
