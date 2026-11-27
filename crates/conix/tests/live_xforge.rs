@@ -318,16 +318,19 @@ async fn the_builtin_xforge_runs_a_change_from_proposal_to_archive_with_its_own_
     })
     .await;
     let rec = rec_of(&lv);
-    // package-tests 真起了进程：它的日志（站目录里的 gate-package-tests.log）每跑一项记一行 `== <名字> [argv] in <目录>`。
+    // package-tests 真起了进程：它的日志（站目录里的 gate-xforge-package-tests.log）每跑一项记一行 `== <名字> [argv] in <目录>`。
     // 只看"过了"不够——没登记验证的包也是过。
-    let logs = find_files(Path::new(&out), "gate-package-tests.log");
+    let logs = find_files(Path::new(&out), "gate-xforge-package-tests.log");
     let ran: Vec<String> = logs
         .iter()
         .filter_map(|l| std::fs::read_to_string(l).ok())
         .filter(|t| t.lines().any(|l| l.starts_with("== ")))
         .collect();
     assert!(!ran.is_empty(), "门禁 package-tests 没跑任何验证：{logs:?}");
-    eprintln!("---- gate-package-tests.log\n{}", ran.join("\n----\n"));
+    eprintln!(
+        "---- gate-xforge-package-tests.log\n{}",
+        ran.join("\n----\n")
+    );
     eprintln!("==== 结束（打回 {reworks} 次，按建议退到提案：{proposed_back}）");
     report(&rec);
     for s in &done.stations {
@@ -914,14 +917,14 @@ async fn the_builtin_xforge_dual_forks_an_implementation_and_black_box_tests_and
     );
 
     // 门禁 blackbox 真跑了黑盒测试（日志每跑一项记一行 `== blackbox …`），最后一轮过了。
-    let logs = find_files(Path::new(&out), "gate-blackbox.log");
+    let logs = find_files(Path::new(&out), "gate-xforge-blackbox.log");
     let ran: Vec<String> = logs
         .iter()
         .filter_map(|l| std::fs::read_to_string(l).ok())
         .filter(|t| t.lines().any(|l| l.starts_with("== blackbox")))
         .collect();
     assert!(!ran.is_empty(), "门禁 blackbox 没跑：{logs:?}");
-    eprintln!("---- gate-blackbox.log\n{}", ran.join("\n----\n"));
+    eprintln!("---- gate-xforge-blackbox.log\n{}", ran.join("\n----\n"));
     let join = rec["stations"]["join"]["checks"]
         .as_array()
         .cloned()

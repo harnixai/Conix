@@ -118,6 +118,13 @@ pub(crate) async fn offer_result(
     }
 }
 
+/// The file a gate's log is kept in, beside its station's context: `gate-<name>.log` as one file
+/// name — a bundle's `xforge/unit-tests` is `gate-xforge-unit-tests.log`; the name as it is would
+/// make its bundle a directory that is not there, and the log would not be written.
+pub(crate) fn log_name(gate: &str) -> String {
+    format!("gate-{}.log", super::project::file_name(gate))
+}
+
 /// Run a `command` gate where the run works: `sh -c` in its `cwd` (references resolved; a relative
 /// one under the run's workspace), else the run's workspace; passes on exit status 0. Refused
 /// unless the host turned command gates on.
@@ -203,7 +210,7 @@ pub(crate) async fn command_at(rn: &Runner, g: &crate::GateDef, site: &GateSite<
     };
     let mut text = String::from_utf8_lossy(&o).into_owned();
     text.push_str(&String::from_utf8_lossy(&e));
-    let log = station_dir.join(format!("gate-{}.log", g.name));
+    let log = station_dir.join(log_name(&g.name));
     if let Err(e) = std::fs::write(&log, &text) {
         tracing::warn!(run = site.run, gate = g.name, error = %e, "a gate's log not written");
     }
@@ -325,7 +332,7 @@ async fn script_gate(
     let (result, trace) = super::script::run(source, input, reader, env, Duration::from_secs(g.script_seconds())).await;
     if !trace.log.is_empty() {
         if let Some(dir) = super::project::station_dir(engine, rec, station) {
-            let log = dir.join(format!("gate-{}.log", g.name));
+            let log = dir.join(log_name(&g.name));
             if let Err(e) = std::fs::create_dir_all(&dir).and_then(|_| std::fs::write(&log, &trace.log)) {
                 tracing::warn!(run = rec.id, gate = g.name, error = %e, "a gate's log not written");
             }
@@ -472,7 +479,7 @@ async fn try_gate(rn: &Runner, t: Trial) -> Tried {
             };
             #[cfg(not(feature = "script"))]
             let result = command_at(rn, g, &site, &audit).await;
-            let log = std::fs::read_to_string(dir.join(format!("gate-{}.log", g.name))).unwrap_or_default();
+            let log = std::fs::read_to_string(dir.join(log_name(&g.name))).unwrap_or_default();
             let _ = std::fs::remove_dir_all(&dir);
             Tried { result, log }
         }
@@ -825,6 +832,13 @@ mod tests {
     #[cfg(feature = "script")]
     fn gate_check(rec: &RunRecord) -> crate::kernel::run::CheckRec {
         rec.stations["a"].checks.iter().find(|c| c.kind == "gate").unwrap().clone()
+    }
+
+    /// A bundle's gate is named `<bundle>/<gate>`: its log is still one file in the station's directory.
+    #[test]
+    fn a_bundles_gate_keeps_its_log_in_one_file() {
+        assert_eq!(log_name("xforge/unit-tests"), "gate-xforge-unit-tests.log");
+        assert_eq!(log_name("tests"), "gate-tests.log");
     }
 
     /// Every run exits 0: passes, the runs in order where the run works, their output in the log.

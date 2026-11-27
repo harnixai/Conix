@@ -119,7 +119,7 @@ pub(crate) async fn run_plan(
     };
     result.evidence = reader.evidence();
     let dir = site.station_dir;
-    if let Err(e) = std::fs::create_dir_all(dir).and_then(|_| std::fs::write(dir.join(format!("gate-{}.log", g.name)), &log)) {
+    if let Err(e) = std::fs::create_dir_all(dir).and_then(|_| std::fs::write(dir.join(super::gate::log_name(&g.name)), &log)) {
         tracing::warn!(run = site.run, gate = g.name, error = %e, "a gate's log not written");
     }
     result

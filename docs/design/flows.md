@@ -134,7 +134,7 @@ timeout_seconds: 900
   `DEEPSEEK_*`）与它自己的 `CONIX_*`、`AGIX_*`。
 - **`result: json`**：stdout 整体（或最后一个非空行）是一个门禁结果（§3），按它判；解析不了算 `error`。
   **`exit_code`**：0 过，非 0 不过，stdout/stderr 的尾巴进 `summary`；起不来、超时算 `error`。
-- 运行目录下的 `gate-<名>.log` 留着读到的输出（沿用）。
+- 运行目录下的 `gate-<名>.log` 留着读到的输出（沿用；包里的门禁名带 `/`，文件名里换成 `-`：`gate-xforge-unit-tests.log`）。
 - **谁能跑**：命令门禁会在本机执行任意命令，只在受信的项目里跑；`conix.yaml` 的 `flows.command_gates: off` 整机关掉
   （缺省 `trusted`）。这与 Agix 对项目 hook、项目 MCP stdio server 的规矩一致：项目受信，它的配置才能在本机执行命令。
   这个开关管的是项目与包定义的**全部**执行：命令门禁、`plan` 的 run、包 JS 的 `flow.exec`（§7.14）。

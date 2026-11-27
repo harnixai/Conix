@@ -396,7 +396,7 @@ pub(crate) fn station_dir(engine: &Engine, rec: &RunRecord, station: &str) -> Op
 }
 
 /// A name as one file name: what a path cannot hold made `-`, never `.` or `..`.
-fn file_name(name: &str) -> String {
+pub(crate) fn file_name(name: &str) -> String {
     let s: String = name
         .chars()
         .map(|c| if c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.') { c } else { '-' })
