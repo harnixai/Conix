@@ -851,7 +851,9 @@ async fn installing_and_updating_a_bundle_from_the_command_line_reloads_the_runn
     assert!(find(&flows(&c).await, "xreport").is_none(), "还没装");
     assert!(jobs(&c).await.is_empty());
 
+    // 起点取在命令之前：命令行返回时两件事的帧可能都已经到了。
     c.skip_past();
+    let from = c.mark();
     let out = lv.conix_flow_ok(&["install", "xreport", "--yes", "--jobs", "yes"]);
     assert!(
         out.contains("Added the job xreport-weekly (disabled)")
@@ -862,7 +864,6 @@ async fn installing_and_updating_a_bundle_from_the_command_line_reloads_the_runn
             && out.contains(&format!("Told instance {} to re-read its jobs", live::NAME)),
         "{out}"
     );
-    let from = c.mark();
     c.wait_event("流程标签多出 xreport", QUICK, |e| match e {
         Event::FlowUpserted(f) if f.name == "xreport" => Some(()),
         _ => None,
