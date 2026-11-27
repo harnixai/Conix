@@ -113,7 +113,7 @@ elements:
 - `xarch modify` 一个 `stable` 元素必须带 `--breaking`（不带就报错，告诉它要么改成兼容的、要么声明破坏）；`remove` 只能删基线里已经
   `deprecated` 的元素；新元素缺省 `experimental`，`--stable` 是补登记已经在用的接口。
 - `xledger set/reply` 按 §2.3 的规矩查 `by`，不合就报错说谁能给。
-- `xspec seal`：这次运行目录里每个文件（`children/`、`_run/` 除外）→ 字节的 sha256，作为返回值，不写文件。dual 的 `seal` 站用（§5.1）。
+- `xspec seal`：这次运行目录里每个文件（`children/`、`_run/` 与 `ledgers/` 下的发现、决定、风险除外：合起来、验证两站分叉之后还往里记）→ 字节的 sha256，作为返回值，不写文件。dual 的 `seal` 站用（§5.1）。
 - `xpkg plan --verify` 可以写几次，每次一项，当场按 §1 的菜单核对：名字在菜单里、参数一个不多一个不少、值整串匹配；
   不合就报错（说菜单里有什么、该怎么写），什么都不写。`xpkg verify-menu` 列出菜单（只读，运行之外也能调）。
 

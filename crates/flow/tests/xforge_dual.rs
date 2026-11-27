@@ -400,6 +400,10 @@ impl Drive {
             ("xforge/dual", "clarify") => self.submit(id, json!({"summary": "没有会改变范围的问题", "questions": 0})).await,
             ("xforge/dual", "check") => {
                 self.principles(id).await;
+                // A finding left for later, as a real check does: the ledger exists when the spec side
+                // is sealed, and join adds to it after the fork.
+                self.cmd(id, "xledger", &["add", "findings", "接口登记没说要不要进 __all__", "--ref", "fn:textkit.truncate"]).await;
+                self.cmd(id, "xledger", &["set", "findings", "F1", "deferred", "不阻塞两路，验证时看"]).await;
                 self.submit(id, json!({"summary": "规格侧说得清", "ready": true})).await;
             }
             ("xforge/dual", "join") => {
@@ -408,10 +412,10 @@ impl Drive {
                     let ran = sh(&ws, "python3 -B -m unittest discover -s tests_blackbox -q 2>&1 || true");
                     assert!(ran.contains("FAILED (failures=1)") && ran.contains("'ab' != 'abc'"), "the first implementation is one short: {ran}");
                     self.cmd(id, "xledger", &["add", "findings", "test_longer_text_is_cut_to_n：期望 abc，实际 ab。建议：实现错，因为 TK-R3 说返回前 n 个字符", "--ref", "TK-R3,tests_blackbox/test_truncate.py"]).await;
-                    self.call(id, TOOL_PROPOSE, json!({"kind": "rework", "to": "fork", "reason": "只重做 impl：F1"})).await;
-                    self.submit(id, json!({"summary": "1 个用例没过，错在实现", "failures": 1, "rework": {"tasks": ["impl"], "reason": "F1"}})).await;
+                    self.call(id, TOOL_PROPOSE, json!({"kind": "rework", "to": "fork", "reason": "只重做 impl：F2"})).await;
+                    self.submit(id, json!({"summary": "1 个用例没过，错在实现", "failures": 1, "rework": {"tasks": ["impl"], "reason": "F2"}})).await;
                 } else {
-                    self.cmd(id, "xledger", &["set", "findings", "F1", "resolved", "重做的实现截到 n 个，黑盒测试都过了"]).await;
+                    self.cmd(id, "xledger", &["set", "findings", "F2", "resolved", "重做的实现截到 n 个，黑盒测试都过了"]).await;
                     self.submit(id, json!({"summary": "黑盒测试都过了", "failures": 0})).await;
                 }
             }
@@ -569,6 +573,11 @@ async fn a_dual_run_forks_two_children_from_one_commit_joins_them_and_archives()
     let sealed = rec.stations["seal"].tasks[0].output.clone().unwrap();
     for f in ["proposal.md", "spec-delta.yaml", "interface-delta.yaml"] {
         assert!(sealed["files"][f].as_str().is_some_and(|s| s.len() == 64), "{f}: {sealed}");
+    }
+    // The ledgers the parent goes on writing after the fork (join files a finding when the two sides
+    // disagree) are not sealed: a reworked child would find "the spec side changed" and could not undo it.
+    for running in ["ledgers/findings.yaml", "ledgers/decisions.yaml", "ledgers/risks.yaml"] {
+        assert!(sealed["files"].get(running).is_none(), "{running}: {sealed}");
     }
     let first = rec.stations["fork"].fork.clone().unwrap();
     let tasks = &rec.stations["fork"].tasks;
