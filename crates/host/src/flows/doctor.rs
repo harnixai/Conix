@@ -420,6 +420,9 @@ pub async fn project(ctx: &Ctx, opts: &ProjectOpts) -> Report {
             Some(i18n::t!("flowlib.dr_hint_trust")),
         );
     }
+    if gates > 0 && opts.commands && opts.trusted == Some(true) {
+        sandbox(ctx, &mut r).await;
+    }
     // 制品目录与 `.wkts/` 第一次用时 Conix 与引擎各自写好忽略规则；还没有的不报。
     for path in [
         format!("{}/runs/", opts.artifacts_dir),
@@ -492,6 +495,52 @@ pub async fn project(ctx: &Ctx, opts: &ProjectOpts) -> Report {
         }
     }
     r
+}
+
+/// 这台机器的沙箱兜不兜得住门禁的进程（flows.md §7.14）：起一个什么都不做的进程问执行服务。兜不住时门禁不跑
+/// （除非全局 `flows.exec_unconfined: allow`），只守住一部分的照实列出差在哪。没有引擎的地方（单元测试）不报。
+async fn sandbox(ctx: &Ctx, r: &mut Report) {
+    let req = harnix_flow::ExecRequest::new(
+        vec!["true".into()],
+        &ctx.project,
+        std::time::Duration::from_secs(20),
+    );
+    let p = Where::Project;
+    match crate::exec::service().run(req).await {
+        Ok(o) if o.enforced.backend == "plain" => {}
+        Ok(o) if o.enforced.filesystem && o.enforced.network => {}
+        Ok(o) if o.enforced.unmet.is_empty() => r.add(
+            Level::Warn,
+            p,
+            None,
+            i18n::t!("flowlib.dr_sandbox_none"),
+            Some(i18n::t!("flowlib.dr_hint_sandbox")),
+        ),
+        Ok(o) => r.add(
+            Level::Warn,
+            p,
+            None,
+            i18n::t!(
+                "flowlib.dr_sandbox_partial",
+                unmet = o.enforced.unmet.join("; ")
+            ),
+            None,
+        ),
+        Err(harnix_flow::ExecError::Refused(m)) => r.add(
+            Level::Error,
+            p,
+            None,
+            i18n::t!("flowlib.dr_sandbox_refused", why = m),
+            Some(i18n::t!("flowlib.dr_hint_sandbox")),
+        ),
+        Err(e) => r.add(
+            Level::Warn,
+            p,
+            None,
+            i18n::t!("flowlib.dr_sandbox_unknown", why = e.to_string()),
+            None,
+        ),
+    }
 }
 
 /// 一个包自己的体检：流程库按项目的包（`DirPacks` 读 `.conix/flows/`）与布局跑 `bundle.yaml` 的 `doctor:` 脚本。

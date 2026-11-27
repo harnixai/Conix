@@ -854,7 +854,8 @@ const r = flow.exec({ argv: ["git", "--no-pager", "-c", "core.fsmonitor=false", 
   - `enforced` 照实记：`{backend: agix, filesystem, network, unmet}`，Agix 报 `full` 时两项为真；`partial`（Linux 上一部分
     规则做不到）两项都记假、`unmet` 列出差在哪。**沙箱兜不住**（Linux 上没装 bwrap）时 Agix 拒绝、进程不起（门禁 `error`、
     `flow.exec` 抛错）；全局 `conix.yaml` 的 `flows.exec_unconfined: allow` 才在沙箱外跑，记录里 `enforcement` 照样写 `none`。
-    这一项只认全局配置：项目定不了这台机器隔不隔离。
+    这一项只认全局配置：项目定不了这台机器隔不隔离。`conix flow doctor` 在项目有命令门禁、受信、开关开着时起一个什么都
+    不做的进程问一次：兜不住报 error（给出装 bubblewrap 或 `exec_unconfined` 的提示），只守住一部分报 warn 并列出差在哪。
   - 命令行（`conix flow doctor` 跑包的自检）没有实例：第一次要起进程时才起一个引擎（`host::exec::LazyExec`），不登记
     进程组；用户自己的通知出口（`host` 档）不进沙箱。没有引擎的地方（单元测试）退回普通子进程，记 `{backend: plain}`。
 - **确定性**：不碰进程的包 JS 照旧确定；用了 `flow.exec` 就不承诺（外部程序的输出流程库管不了）。门禁的证据仍只是它读过的
