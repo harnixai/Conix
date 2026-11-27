@@ -917,7 +917,8 @@ async fn the_builtin_xforge_dual_forks_an_implementation_and_black_box_tests_and
     );
 
     // 门禁 blackbox 真跑了黑盒测试（日志每跑一项记一行 `== blackbox …`），最后一轮过了。
-    let logs = find_files(Path::new(&out), "gate-xforge-blackbox.log");
+    // 过程目录（门禁的日志在那里）在项目里，不在 worktree 里：它不随分支合回。
+    let logs = find_files(Path::new(&to), "gate-xforge-blackbox.log");
     let ran: Vec<String> = logs
         .iter()
         .filter_map(|l| std::fs::read_to_string(l).ok())
@@ -947,7 +948,7 @@ async fn the_builtin_xforge_dual_forks_an_implementation_and_black_box_tests_and
         .find(|h| {
             h["detail"]["for"]
                 .as_str()
-                .is_some_and(|f| f.contains("gate blackbox"))
+                .is_some_and(|f| f.starts_with("gate xforge/blackbox"))
         })
         .unwrap_or_else(|| panic!("没有门禁 blackbox 的 exec 记录：{execs:#?}"));
     eprintln!("---- exec {}", bb["detail"]);
@@ -957,6 +958,25 @@ async fn the_builtin_xforge_dual_forks_an_implementation_and_black_box_tests_and
     );
     if cfg!(target_os = "macos") {
         assert_eq!(bb["detail"]["enforced"]["filesystem"], true, "{bb}");
+    }
+    // 子运行的门禁起的进程也读不到父运行与兄弟的 worktree：与会话同一份禁读名单，记在它的 exec 里。
+    for (task, other) in [("impl", "tests"), ("tests", "impl")] {
+        let gates: Vec<Value> = lv
+            .run_history(&children[task])
+            .into_iter()
+            .filter(|h| h["op"] == "exec")
+            .collect();
+        assert!(!gates.is_empty(), "{task} 的门禁没起进程");
+        for h in &gates {
+            let denied: Vec<&str> = h["detail"]["deny_read"]
+                .as_array()
+                .map(|a| a.iter().filter_map(Value::as_str).collect())
+                .unwrap_or_default();
+            assert!(
+                denied.contains(&wt.as_str()) && denied.contains(&path_of(other).as_str()),
+                "{task} 的进程该读不到父运行与 {other}：{h}"
+            );
+        }
     }
 
     // 归档在父运行的 worktree 里：两条基线都并进了，两路的设计都留着。
