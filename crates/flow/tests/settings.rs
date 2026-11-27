@@ -52,6 +52,7 @@ fn write_bundle(dir: &Path, flows: &[(&str, &str)]) {
 
 struct Rig {
     rn: Arc<Runner>,
+    host: Arc<ScriptedHost>,
     engine: Arc<Engine>,
     root: PathBuf,
     _dirs: Vec<tempfile::TempDir>,
@@ -82,9 +83,9 @@ async fn rig(flows: &[(&str, &str)]) -> Rig {
             .with_workspaces(data.path().join("workspaces"))
             .with_layout(layout),
     );
-    let rn = Runner::new(engine.clone(), host, cfg);
+    let rn = Runner::new(engine.clone(), host.clone(), cfg);
     rn.start().await;
-    Rig { rn, engine, root, _dirs: vec![packs_dir, data, project] }
+    Rig { rn, host, engine, root, _dirs: vec![packs_dir, data, project] }
 }
 
 impl Rig {
@@ -281,4 +282,68 @@ fn the_form_is_checked_when_the_flow_is_read() {
     }
     let meta = bundle::BundleMeta::parse("name: g\nsettings: {file: a.yaml, defaults: [1]}\n").unwrap();
     assert!(meta.start_problems(&Default::default(), &|_| true).iter().any(|m| m.contains("defaults is a mapping")));
+}
+
+/// The models a run's sessions and sub-agents are told: what the settings name, pinned with it; a
+/// station whose `when` reads a switch the settings leave off is skipped.
+const LINES: &str = "name: lines
+main: {model: '${settings.lines.build.model}', provider: '${settings.lines.build.provider}'}
+stations:
+  - id: off
+    when: [{path: settings.stages.off, eq: true}]
+    executor: {kind: external}
+    output: {type: object}
+    exit: [{kind: output}]
+  - id: look
+    executor: {kind: agent, model: '${settings.lines.review.model}'}
+    skill: w
+    output: {type: object}
+    exit: [{kind: output}]
+";
+
+const SKILL: &str = "---\nname: w\ndescription: look\n---\nLook.\n";
+
+#[tokio::test]
+async fn a_model_and_a_stations_switch_come_from_the_pinned_settings() {
+    let r = rig(&[("lines.yaml", LINES), ("skills/w/SKILL.md", SKILL)]).await;
+    r.governance("lines:\n  build: {model: m-build, provider: p-build}\n  review: {model: m-review}\nstages: {off: false}\n");
+    let run = r.start("gov/lines").await.unwrap();
+    // Edited after the start: the run keeps the models it started with.
+    r.governance("lines:\n  build: {model: other}\n");
+    let host = &r.host;
+    let main = eventually("the main session opened", async || host.opened().into_iter().find(|s| s.run == run && s.main)).await;
+    assert_eq!(r.at(&run, "off").await, StationStatus::Skipped, "stages.off is false");
+    assert_eq!((main.placement.model.as_deref(), main.placement.provider.as_deref()), (Some("m-build"), Some("p-build")));
+    let told = eventually("the sub-agent's task sent", async || {
+        let sent = host.sent().into_iter().map(|(_, t)| t).find(|t| t.contains("This task is a sub-agent's"))?;
+        Some(sent)
+    })
+    .await;
+    assert!(told.contains("`model: \"m-review\"`"), "{told}");
+
+    // Lines the file leaves out: the host's default model, not an error.
+    let r = rig(&[("lines.yaml", LINES), ("skills/w/SKILL.md", SKILL)]).await;
+    r.governance("stages: {off: true}\n");
+    let run = r.start("gov/lines").await.unwrap();
+    let host = &r.host;
+    let main = eventually("the main session opened", async || host.opened().into_iter().find(|s| s.run == run && s.main)).await;
+    assert_eq!((main.placement.model, main.placement.provider), (None, None));
+    assert_eq!(r.at(&run, "off").await, StationStatus::Working, "stages.off is true: the station is entered");
+}
+
+#[test]
+fn a_model_names_the_settings_or_nothing_else_and_only_in_a_bundle_that_has_them() {
+    let p = MemPacks::new();
+    let problems = |yaml: &str| -> Vec<String> { validate_yaml(yaml, &p).iter().map(ToString::to_string).collect() };
+    let agent = |model: &str| format!("name: f\nstations: [{{id: a, executor: {{kind: agent, model: '{model}'}}, output: {{type: object}}, exit: [{{kind: output}}]}}]");
+    // Another reference would let what a station handed in pick a later station's model.
+    let e = problems(&agent("${inputs.m}"));
+    assert!(e.iter().any(|m| m.contains("model \"${inputs.m}\": a name, or one ${settings.<path>}")), "{e:?}");
+    let e = problems(&agent("${settings.lines.review.model}"));
+    assert!(e.iter().any(|m| m.contains("reads the bundle's settings, and its bundle.yaml declares none")), "{e:?}");
+    let e = problems("name: f\nmain: {model: '${settings.m}'}\nstations: [{id: a, exit: []}]");
+    assert!(e.iter().any(|m| m.contains("main.model") && m.contains("declares none")), "{e:?}");
+    let e = problems("name: f\nstations: [{id: a, when: [{path: settings.x, eq: true}], exit: []}]");
+    assert!(e.iter().any(|m| m.contains("reference settings.x: settings are the bundle's")), "{e:?}");
+    assert!(problems(&agent("ds-chat")).is_empty());
 }

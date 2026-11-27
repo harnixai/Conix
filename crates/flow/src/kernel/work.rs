@@ -84,8 +84,8 @@ pub(crate) fn task_work(
             ..
         } => (
             Some(Placement {
-                model: model.clone(),
-                provider: provider.clone(),
+                model: named(model, &ctx),
+                provider: named(provider, &ctx),
                 effort: effort.clone(),
                 instance: instance.clone(),
                 template: template.clone(),
@@ -102,6 +102,15 @@ pub(crate) fn task_work(
         _ => (None, None, None),
     };
     let commands: Vec<String> = rec.parts.commands.keys().cloned().collect();
+    // A sub-agent's model and type as the task is told them: what the run's settings name.
+    let executor = match &spec.executor {
+        Executor::Agent { agent_type, model, description } => Executor::Agent {
+            agent_type: named(agent_type, &ctx),
+            model: named(model, &ctx),
+            description: description.clone(),
+        },
+        e => e.clone(),
+    };
     let protocol = match (&spec.executor, st) {
         (Executor::Session { .. } | Executor::Agent { .. }, Some(st)) => Some(protocol::render(&protocol::TaskContext {
             def: &rec.def,
@@ -116,7 +125,7 @@ pub(crate) fn task_work(
             writes: writes.as_ref(),
             gates: &rec.parts.gates,
             delivery: delivery.unwrap_or(Delivery::StructuredOutput),
-            executor: Some(&spec.executor),
+            executor: Some(&executor),
             guard: rec.def.guard,
             root: workspace.as_ref().and_then(|p| p.to_str()),
             output_dir: rec.output_dir.as_deref(),
@@ -176,6 +185,20 @@ pub(crate) fn task_work(
 }
 
 /// Template parameters, their references resolved against `ctx`.
+/// A model, provider or agent type as written, or what its `${settings.<path>}` names: nothing
+/// there (or not a word) leaves it unset, the host's default — a line of the governance file left
+/// out is the instance's model, not an error at dispatch.
+pub(crate) fn named(v: &Option<String>, ctx: &Value) -> Option<String> {
+    let v = v.as_deref()?;
+    if !v.contains("${") {
+        return Some(v.to_string());
+    }
+    match resolve_str(v, ctx) {
+        Value::String(s) if !s.trim().is_empty() => Some(s),
+        _ => None,
+    }
+}
+
 fn resolve_params(params: &BTreeMap<String, String>, ctx: &Value) -> BTreeMap<String, String> {
     params
         .iter()
@@ -206,8 +229,8 @@ pub(crate) fn main_placement(
     let m = rec.def.main.clone().unwrap_or_default();
     (
         Placement {
-            model: m.model,
-            provider: m.provider,
+            model: named(&m.model, ctx),
+            provider: named(&m.provider, ctx),
             effort: m.effort,
             instance: m.instance,
             template: m.template,

@@ -2,7 +2,9 @@
 //!
 //! Both read the same thing: a JSON context built from the run —
 //! `{run, subject, inputs, stations: {<id>: {status, round, output}}, item, task, workspace,
-//! output_dir}`.
+//! output_dir, settings}` — `settings` the bundle's settings the run pinned when it started (in
+//! Conix), so a station's `when` or a model may read the project's governance file, and an edit to
+//! that file mid-run changes neither.
 //! A reference names a path into it (`${stations.collect.output.modules}`); an
 //! assertion in `when` does too (`path: inputs.mode`). A `tool` exit's
 //! assertions select from the tool's result instead.
@@ -16,7 +18,7 @@ use super::def::{Assert, FlowDef, Work};
 use super::run::{RunRecord, TaskStatus};
 
 /// The roots a reference may start with.
-pub const ROOTS: &[&str] = &["run", "subject", "inputs", "stations", "item", "task", "workspace", "output_dir", "data_dir", "base_commit", "parent"];
+pub const ROOTS: &[&str] = &["run", "subject", "inputs", "stations", "item", "task", "workspace", "output_dir", "data_dir", "base_commit", "parent", "settings"];
 
 /// The directory a run works in under the application's workspaces (`<root>/<run>`, the run's id
 /// made safe as a name): `${workspace}`.
@@ -82,6 +84,7 @@ pub fn context_in(run: &RunRecord, item: Option<&Value>, task: Option<&str>, wor
         "data_dir": run.data_dir.as_deref().map_or(Value::Null, |d| Value::String(d.into())),
         "base_commit": run.base_commit.as_deref().map_or(Value::Null, |d| Value::String(d.into())),
         "parent": parent_of(run),
+        "settings": run.parts.settings.clone().unwrap_or(Value::Null),
     })
 }
 

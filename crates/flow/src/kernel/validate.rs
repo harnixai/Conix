@@ -754,8 +754,8 @@ fn executor_problems(c: &mut Ctx, id: &str, t: &TaskSpec) {
         }
         Executor::Agent { agent_type, model, .. } => {
             for (what, v) in [("agent_type", agent_type), ("model", model)] {
-                if v.as_ref().is_some_and(|s| s.trim().is_empty()) {
-                    c.at(id, format!("agent task {}: {what} is empty", t.id));
+                if let Some(m) = named_problem(c, what, v) {
+                    c.at(id, format!("agent task {}: {m}", t.id));
                 }
             }
             needs_output(c, id, &t.id, "agent");
@@ -912,9 +912,12 @@ fn main_problems(c: &mut Ctx) {
         None => {}
     }
     let empty = |v: &Option<String>| v.as_ref().is_some_and(|s| s.trim().is_empty());
+    for (what, v) in [("model", &m.model), ("provider", &m.provider)] {
+        if let Some(p) = named_problem(c, what, v) {
+            c.flow(format!("main.{p}"));
+        }
+    }
     for (what, v) in [
-        ("model", &m.model),
-        ("provider", &m.provider),
         ("instance", &m.instance),
         ("template", &m.template),
         ("space", &m.space),
@@ -955,9 +958,12 @@ fn effort_problem(effort: Option<&str>) -> Option<String> {
 
 fn placement_problems(c: &mut Ctx, id: &str, task: &str, p: Placed) {
     let empty = |v: &Option<String>| v.as_ref().is_some_and(|s| s.trim().is_empty());
+    for (what, v) in [("model", p.model), ("provider", p.provider)] {
+        if let Some(m) = named_problem(c, what, v) {
+            c.at(id, format!("session task {task}: {m}"));
+        }
+    }
     for (what, v) in [
-        ("model", p.model),
-        ("provider", p.provider),
         ("instance", p.instance),
         ("template", p.template),
         ("space", p.space),
@@ -1000,7 +1006,8 @@ fn placement_problems(c: &mut Ctx, id: &str, task: &str, p: Placed) {
     if let Some(s) = check(&c.catalog.spaces, p.space) {
         c.at(id, format!("space {s} is not in the catalog"));
     }
-    if let (Some(m), false) = (p.model, c.catalog.models.is_empty()) {
+    // A model the settings name is known only once a run pins them: the host's to refuse then.
+    if let (Some(m), false) = (p.model.as_ref().filter(|m| !m.contains("${")), c.catalog.models.is_empty()) {
         let known = c.catalog.models.contains(m)
             || p.provider
                 .as_ref()
@@ -1113,9 +1120,34 @@ fn ref_problems(c: &mut Ctx, s: &Station, refs: &[String]) {
                     format!("reference {r}: item only exists in a foreach station"),
                 );
             }
+            "settings" if !declares_settings(c) => {
+                c.at(&s.id, format!("reference {r}: settings are the bundle's, and its bundle.yaml declares none"));
+            }
             _ => {}
         }
     }
+}
+
+/// The flow's bundle declares `settings` (in Conix): what `${settings.*}` reads.
+fn declares_settings(c: &Ctx) -> bool {
+    c.def.bundle.as_deref().and_then(|b| crate::bundle::meta_of(c.packs, b)).is_some_and(|m| m.settings.is_some())
+}
+
+/// A model, provider or agent type written as a reference (in Conix): only one `${settings.<path>}`
+/// — the project's governance file names the model, pinned with the run. Any other reference would
+/// let what a station handed in, a model's words, pick the model a later station runs on.
+fn named_problem(c: &Ctx, what: &str, v: &Option<String>) -> Option<String> {
+    let v = v.as_deref()?;
+    if v.trim().is_empty() {
+        return Some(format!("{what} is empty"));
+    }
+    if !v.contains("${") {
+        return None;
+    }
+    if crate::kernel::def::settings_ref(v).is_none() {
+        return Some(format!("{what} {v:?}: a name, or one ${{settings.<path>}}"));
+    }
+    (!declares_settings(c)).then(|| format!("{what} {v:?} reads the bundle's settings, and its bundle.yaml declares none"))
 }
 
 fn schema_problems(c: &mut Ctx, station: Option<&str>, what: &str, schema: &Value) {
