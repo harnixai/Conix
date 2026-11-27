@@ -746,8 +746,17 @@ impl Flows {
         let flows = self.packs().flows();
         lib.names()
             .into_iter()
-            .filter(|n| !installed.contains(n) && !flows.iter().any(|f| f == n))
+            .filter(|n| {
+                !installed.contains(n) && !flows.iter().any(|f| f == n) && !self.in_project(n)
+            })
             .collect()
+    }
+
+    /// 项目的 `.conix/flows/` 里有这个包（或同名的平铺流程）：不看信任——没受信时流程库不读它，但它装着。
+    fn in_project(&self, bundle: &str) -> bool {
+        let flows = Path::new(&self.project).join(package::PROJECT_FLOWS);
+        harnix_flow::bundle::bundle_in(&flows, bundle).is_some()
+            || flows.join(format!("{bundle}.yaml")).is_file()
     }
 
     /// 找不到的流程或包：全局库里有就提示怎么装。
@@ -778,9 +787,10 @@ impl Flows {
             .unwrap_or_default()
         {
             let bundle = r.flow.split('/').next().unwrap_or(&r.flow).to_string();
-            let present = flows
-                .iter()
-                .any(|f| f == &r.flow || f.split('/').next() == Some(&bundle));
+            let present = self.in_project(&bundle)
+                || flows
+                    .iter()
+                    .any(|f| f == &r.flow || f.split('/').next() == Some(&bundle));
             if !present {
                 missing.entry(bundle).or_default().push(r.id);
             }
