@@ -1135,7 +1135,10 @@ async fn a_person_merges_or_discards_a_finished_runs_worktree_through_the_port()
         panic!("a text")
     };
     // 回给人的那句照界面的语言说（这里是测试进程的语言）：分支、合进了哪里都在。
-    assert!(text.contains("conix/flow/") && text.contains("main"), "{text}");
+    assert!(
+        text.contains("conix/flow/") && text.contains("main"),
+        "{text}"
+    );
     assert!(
         project.join("made.txt").is_file(),
         "the work is in the project now"

@@ -896,9 +896,16 @@ fn flaky() -> (Arc<Hooked<MemStore>>, Arc<AtomicUsize>) {
     let conflicts = Arc::new(AtomicUsize::new(0));
     let left = conflicts.clone();
     let store = Hooked::new(MemStore::new()).check_commits(move |_| {
-        match left.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1)) {
-            Ok(_) => Err(StoreError::Conflict("injected".into())),
-            Err(_) => Ok(()),
+        // Not `fetch_update`: deprecated on newer toolchains, and its successor is not on older ones.
+        let mut n = left.load(Ordering::SeqCst);
+        loop {
+            if n == 0 {
+                break Ok(());
+            }
+            match left.compare_exchange(n, n - 1, Ordering::SeqCst, Ordering::SeqCst) {
+                Ok(_) => break Err(StoreError::Conflict("injected".into())),
+                Err(now) => n = now,
+            }
         }
     });
     (Arc::new(store), conflicts)
