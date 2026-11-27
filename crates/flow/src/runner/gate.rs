@@ -149,7 +149,7 @@ pub(crate) async fn command_gate(rn: &Runner, rec: &RunRecord, station: &str, g:
     };
     let ctx = gate_context(rec, task, ws.to_str());
     let audit = super::exec::Audit::run(engine.clone(), &rec.id, Some(station), task.map(|t| t.task), format!("gate {}", g.name));
-    let site = GateSite { run: &rec.id, station, ws: &ws, station_dir: &station_dir, ctx: &ctx, network: exec_network(rec) };
+    let site = GateSite { run: &rec.id, station, ws: &ws, station_dir: &station_dir, ctx: &ctx, network: exec_network(rec), settings: rec.parts.settings.as_ref() };
     command_at(rn, g, &site, &audit).await
 }
 
@@ -169,6 +169,92 @@ pub(crate) struct GateSite<'a> {
     pub ctx: &'a Value,
     /// Whether its processes may reach the network (the bundle's `exec.network`).
     pub network: bool,
+    /// The settings its `${settings.<path>}` read: what the run pinned; in a trial, the project's
+    /// file now.
+    pub settings: Option<&'a Value>,
+}
+
+/// One `writable` entry as written: a directory relative to where the run works, inside it, not
+/// git's own.
+pub(crate) fn writable_rel(d: &str) -> Result<(), String> {
+    let p = std::path::Path::new(d.trim());
+    if d.trim().is_empty() {
+        return Err("empty".into());
+    }
+    if p.is_absolute() {
+        return Err("absolute: a directory of where the run works, written relative to it".into());
+    }
+    if p.components().any(|c| !matches!(c, std::path::Component::Normal(_) | std::path::Component::CurDir)) {
+        return Err("leaves where the run works".into());
+    }
+    if p.components().next().is_some_and(|c| c.as_os_str() == ".git") {
+        return Err("git's own directory".into());
+    }
+    Ok(())
+}
+
+/// What a gate's process may write and whether it may reach the network: the gate's `writable`
+/// and `network` (read in the site's settings when they are references) with `more` — a plan's
+/// run asks for its own — over them. Each directory must be git-ignored where the run works: what
+/// a gate may write is never part of the work it judges. A missing one is made (it is ignored).
+pub(crate) fn gate_access(g: &crate::GateDef, site: &GateSite<'_>, more: &[String], network: Option<bool>) -> Result<(Vec<std::path::PathBuf>, bool), String> {
+    use crate::kernel::def::OrSetting;
+    // Nothing there (no settings here, nothing at the path) grants nothing more: unlike a rule a
+    // confirm counts by, the safe reading of a missing grant is no grant.
+    let setting = |s: &str| -> Result<Value, String> {
+        let path = crate::kernel::def::settings_ref(s).ok_or_else(|| format!("{s:?} is not one ${{settings.<path>}}"))?;
+        Ok(site.settings.and_then(|v| crate::kernel::refs::select(v, path)).cloned().unwrap_or(Value::Null))
+    };
+    let mut dirs: Vec<String> = match &g.writable {
+        None => vec![],
+        Some(OrSetting::Value(d)) => d.clone(),
+        Some(OrSetting::Setting(s)) => match setting(s)? {
+            Value::Null => vec![],
+            v => serde_json::from_value(v.clone()).map_err(|_| format!("writable {s} is {v}, not a list of directories"))?,
+        },
+    };
+    dirs.extend(more.iter().cloned());
+    let net = match (network, &g.network) {
+        (Some(n), _) => n,
+        (None, None) => site.network,
+        (None, Some(OrSetting::Value(n))) => *n,
+        (None, Some(OrSetting::Setting(s))) => match setting(s)? {
+            Value::Null => site.network,
+            Value::Bool(b) => b,
+            v => return Err(format!("network {s} is {v}, not true or false")),
+        },
+    };
+    let root = std::fs::canonicalize(site.ws).map_err(|e| format!("{}: {e}", site.ws.display()))?;
+    let mut out = vec![];
+    for d in &dirs {
+        writable_rel(d).map_err(|e| format!("writable {d}: {e}"))?;
+        let rel = d.trim().trim_end_matches('/');
+        // As a directory (`target/`): an ignore rule written for directories only matches so.
+        match super::git::ignored(&root, &format!("{rel}/")) {
+            Some(true) => {}
+            Some(false) => return Err(format!("writable {d} is not git-ignored where the run works: a gate may write only what is not part of the work")),
+            None => return Err(format!("writable {d}: git could not say whether it is ignored (is the run's workspace a git repository?)")),
+        }
+        let full = root.join(rel);
+        std::fs::create_dir_all(&full).map_err(|e| format!("writable {d}: {e}"))?;
+        let full = std::fs::canonicalize(&full).map_err(|e| format!("writable {d}: {e}"))?;
+        if !full.starts_with(&root) {
+            return Err(format!("writable {d} leaves where the run works by a symbolic link"));
+        }
+        out.push(full);
+    }
+    out.sort();
+    out.dedup();
+    Ok((out, net))
+}
+
+/// Give `req` what [`gate_access`] granted.
+pub(crate) fn granted(mut req: crate::ExecRequest, (dirs, network): (Vec<std::path::PathBuf>, bool)) -> crate::ExecRequest {
+    if !dirs.is_empty() {
+        req.profile = crate::ExecProfile::Workspace { writable: dirs };
+    }
+    req.network = network;
+    req
 }
 
 /// [`command_gate`] at a site, command gates allowed.
@@ -200,7 +286,11 @@ pub(crate) async fn command_at(rn: &Runner, g: &crate::GateDef, site: &GateSite<
     if let Err(e) = written {
         return fail(format!("gate {}: {}: {e}", g.name, cwd.display()));
     }
-    let req = gate_request(rn, vec!["sh".into(), "-c".into(), command.clone()], cwd, g, site, &context_file, &context, g.timeout_seconds());
+    let access = match gate_access(g, site, &[], None) {
+        Ok(a) => a,
+        Err(e) => return fail(format!("gate {}: {e}", g.name)),
+    };
+    let req = granted(gate_request(rn, vec!["sh".into(), "-c".into(), command.clone()], cwd, g, site, &context_file, &context, g.timeout_seconds()), access);
     let (o, e, code) = match super::exec::run_audited(rn.exec().as_ref(), req, audit).await {
         Ok(o) if o.timed_out => return fail(format!("`{command}` ran longer than {}s", g.timeout_seconds())),
         Ok(o) => (o.stdout, o.stderr, o.code),
@@ -465,7 +555,11 @@ async fn try_gate(rn: &Runner, t: Trial) -> Tried {
                 return tried(GateResult::errored(format!("command gates are not turned on here: {} cannot run", g.name)));
             }
             let dir = std::env::temp_dir().join(format!("flow-gate-try-{}-{}", std::process::id(), crate::kernel::host::digest(&ctx.to_string())));
-            let site = GateSite { run: "trial", station: &t.station, ws: &t.ws, station_dir: &dir, ctx: &ctx, network: t.network };
+            #[cfg(feature = "script")]
+            let settings = t.env.settings.as_ref().ok();
+            #[cfg(not(feature = "script"))]
+            let settings = None;
+            let site = GateSite { run: "trial", station: &t.station, ws: &t.ws, station_dir: &dir, ctx: &ctx, network: t.network, settings };
             // A trial is no run: what it starts goes to the log.
             let audit = super::exec::Audit::log(format!("gate {} (tried)", g.name));
             #[cfg(feature = "script")]
@@ -770,6 +864,47 @@ mod tests {
         assert_eq!((line.detail["code"].as_i64(), line.detail["network"].as_bool()), (Some(0), Some(false)));
         assert_eq!(line.detail["enforced"], serde_json::json!({"backend": "recording", "filesystem": false, "network": false}));
         assert!(line.detail.get("stdout").is_none() && line.detail.get("stderr").is_none(), "no output in the history: {}", line.detail);
+    }
+
+    /// `writable`: a gate's process may write a directory git ignores where the run works (made
+    /// when missing) and nothing that is part of the work; `network` over the bundle's.
+    #[tokio::test]
+    async fn a_command_gate_writes_only_ignored_directories_it_names() {
+        if std::process::Command::new("git").arg("--version").output().is_err() {
+            return;
+        }
+        let gated = |def: &'static str| async move {
+            let backend = Arc::new(super::super::exec::Recording::default());
+            let b = backend.clone();
+            let g = Gated::with(def, Arc::new(MemStore::new()), move |cfg| {
+                cfg.command_gates = true;
+                cfg.exec = Some(b);
+            }, |p| p, &[(".gitignore", "target/\n"), ("src/lib.rs", "")])
+            .await;
+            let ws = g._ws.path().join(&g.run);
+            assert!(std::process::Command::new("git").args(["init", "-q"]).current_dir(&ws).status().unwrap().success());
+            g.run_it().await;
+            (g, backend, ws)
+        };
+        let (g, backend, ws) = gated("{name: build, kind: command, command: 'true', writable: [target], network: true}").await;
+        assert_eq!(g.judged().await.1, CheckStatus::Pass);
+        let req = &backend.requests()[0];
+        let target = std::fs::canonicalize(ws.join("target")).unwrap();
+        assert_eq!((&req.profile, req.network), (&crate::ExecProfile::Workspace { writable: vec![target] }, true));
+
+        let (g, backend, _) = gated("{name: build, kind: command, command: 'true', writable: [src]}").await;
+        let (_, check, detail) = g.judged().await;
+        assert_eq!(check, CheckStatus::Error, "{detail}");
+        assert!(detail.contains("src is not git-ignored"), "{detail}");
+        assert!(backend.requests().is_empty(), "nothing ran");
+    }
+
+    #[test]
+    fn writable_is_a_directory_inside_where_the_run_works() {
+        assert!(writable_rel("target").is_ok() && writable_rel("node_modules/.cache").is_ok());
+        for bad in ["", "/tmp", "../x", "a/../../b", ".git", ".git/hooks"] {
+            assert!(writable_rel(bad).is_err(), "{bad:?}");
+        }
     }
 
     /// `result: json`: what it prints is the result, findings and all; nothing readable is an error.

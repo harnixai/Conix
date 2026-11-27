@@ -48,15 +48,24 @@ struct Run {
     cwd: Option<String>,
     #[serde(default)]
     timeout_seconds: Option<u64>,
+    /// Directories it may write besides the gate's own `writable`: relative to the run's
+    /// workspace, each git-ignored there (the script relays what people declared for it).
+    #[serde(default)]
+    writable: Vec<String>,
+    /// Whether it may reach the network, over the gate's.
+    #[serde(default)]
+    network: Option<bool>,
 }
 
-/// A run of the plan, checked: what to start, where, for how long at most.
+/// A run of the plan, checked: what to start, where, for how long at most, what it may write.
 struct Checked {
     name: String,
     program: PathBuf,
     args: Vec<String>,
     cwd: PathBuf,
     seconds: Option<u64>,
+    writable: Vec<String>,
+    network: Option<bool>,
 }
 
 /// Judge a `command` gate with a `plan` in a run: as a command gate, the commands being the ones
@@ -90,7 +99,7 @@ pub(crate) async fn plan_gate(
     let input = super::gate::script_input(rec, station, round, g, &ctx);
     let scope = rn.run_exec_scope(rec, ws.clone(), crate::ExecProfile::Read, Some(station), task.map(|t| t.task), format!("flow.exec in gate {}", g.name));
     let env = Env::for_run(engine, rec, ws.clone(), Modules::script_path(&name), &source).await.with_exec(scope);
-    let site = GateSite { run: &rec.id, station, ws: &ws, station_dir: &station_dir, ctx: &ctx, network: super::gate::exec_network(rec) };
+    let site = GateSite { run: &rec.id, station, ws: &ws, station_dir: &station_dir, ctx: &ctx, network: super::gate::exec_network(rec), settings: rec.parts.settings.as_ref() };
     let audit = Audit::run(engine.clone(), &rec.id, Some(station), task.map(|t| t.task), format!("gate {}", g.name));
     run_plan(rn, g, &site, source, input, reader, env, &audit).await
 }
@@ -137,7 +146,7 @@ fn read_plan(v: Value) -> Result<Planned, String> {
     if is_result {
         return serde_json::from_value::<GateResult>(v).map(Planned::Result).map_err(|e| format!("not a gate result: {e}"));
     }
-    serde_json::from_value::<Plan>(v).map(Planned::Runs).map_err(|e| format!("neither a gate result nor {{runs: [{{name, argv, cwd?, timeout_seconds?}}]}}: {e}"))
+    serde_json::from_value::<Plan>(v).map(Planned::Runs).map_err(|e| format!("neither a gate result nor {{runs: [{{name, argv, cwd?, timeout_seconds?, writable?, network?}}]}}: {e}"))
 }
 
 /// Check every run before any starts: a plan that is wrong anywhere runs nothing.
@@ -168,7 +177,18 @@ fn check(plan: &Plan, ws: &Path, budget: u64) -> Result<Vec<Checked>, String> {
         if r.timeout_seconds == Some(0) {
             return Err(at("timeout_seconds is 0".into()));
         }
-        out.push(Checked { name: r.name.clone(), program, args: args.to_vec(), cwd, seconds: r.timeout_seconds.map(|s| s.min(budget)) });
+        for d in &r.writable {
+            super::gate::writable_rel(d).map_err(|e| at(format!("writable {d}: {e}")))?;
+        }
+        out.push(Checked {
+            name: r.name.clone(),
+            program,
+            args: args.to_vec(),
+            cwd,
+            seconds: r.timeout_seconds.map(|s| s.min(budget)),
+            writable: r.writable.clone(),
+            network: r.network,
+        });
     }
     Ok(out)
 }
@@ -228,7 +248,14 @@ async fn run_all(rn: &Runner, g: &crate::GateDef, site: &GateSite<'_>, plan: Pla
             return errored(findings, format!("{} not run: the runs before it took the gate's {budget}s", r.name));
         }
         let argv: Vec<String> = shown.clone();
-        let req = gate_request(rn, argv, r.cwd.clone(), g, site, &context_file, &context, seconds);
+        let access = match super::gate::gate_access(g, site, &r.writable, r.network) {
+            Ok(a) => a,
+            Err(e) => {
+                findings.push(Finding::new(&r.name, format!("{}: {e}", r.name)));
+                return errored(findings, format!("{} not run: {e}", r.name));
+            }
+        };
+        let req = super::gate::granted(gate_request(rn, argv, r.cwd.clone(), g, site, &context_file, &context, seconds), access);
         let (o, e, code) = match super::exec::run_audited(rn.exec().as_ref(), req, &audit.for_(format!("gate {} run {}", g.name, r.name))).await {
             Ok(o) if o.timed_out => {
                 log.push_str(&format!("ran longer than {seconds}s: killed\n"));

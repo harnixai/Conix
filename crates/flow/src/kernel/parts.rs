@@ -886,6 +886,16 @@ pub struct GateDef {
     /// None by default. The application's own deny list wins over it (`RunnerConfig::env_deny`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub env: Vec<String>,
+    /// `command`: directories its processes may write besides a temporary one of their own —
+    /// relative to where the run works, each one git-ignored there (a build's `target/`, a cache):
+    /// a gate judges the work and may not change what it judges. The list, or one
+    /// `${settings.<path>}` (the project's governance file declares them). None by default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub writable: Option<super::def::OrSetting<Vec<String>>>,
+    /// `command`: whether its processes may reach the network; the bundle's `exec.network` when
+    /// absent. A value or one `${settings.<path>}`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub network: Option<super::def::OrSetting<bool>>,
     /// `command`: how its result is read (`exit_code` when absent).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub result: Option<CommandResult>,

@@ -1298,7 +1298,13 @@ fn gate_problems(g: &GateDef, packs: &dyn Packs) -> Vec<String> {
     // Which fields go with which kind (and, for `check`, with which checker): one that is set on
     // a gate it does not go with is a mistake the author should hear about, not a silent no-op.
     let tool_fields = g.tool.is_some() || !g.args.is_null() || !g.assert.is_empty();
-    let command_only = g.command.is_some() || g.plan.is_some() || g.cwd.is_some() || !g.env.is_empty() || g.result.is_some();
+    let command_only = g.command.is_some()
+        || g.plan.is_some()
+        || g.cwd.is_some()
+        || !g.env.is_empty()
+        || g.result.is_some()
+        || g.writable.is_some()
+        || g.network.is_some();
     let check_fields = g.check.is_some()
         || !g.paths.is_empty()
         || g.non_empty.is_some()
@@ -1318,7 +1324,7 @@ fn gate_problems(g: &GateDef, packs: &dyn Packs) -> Vec<String> {
             extra.push("tool, args and assert go with a tool gate");
         }
         if command && command_only {
-            extra.push("command, plan, cwd, env and result go with a command gate");
+            extra.push("command, plan, cwd, env, result, writable and network go with a command gate");
         }
         if check && check_fields {
             extra.push("check and its fields go with a check gate");
@@ -1386,6 +1392,24 @@ fn gate_problems(g: &GateDef, packs: &dyn Packs) -> Vec<String> {
                     && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
                 if !ok {
                     out.push(format!("env {e:?}: a variable name, which may end in *"));
+                }
+            }
+            match &g.writable {
+                Some(crate::kernel::def::OrSetting::Value(dirs)) => {
+                    for d in dirs {
+                        if let Err(e) = crate::runner::gate::writable_rel(d) {
+                            out.push(format!("writable {d:?}: {e}"));
+                        }
+                    }
+                }
+                Some(crate::kernel::def::OrSetting::Setting(s)) if crate::kernel::def::settings_ref(s).is_none() => {
+                    out.push(format!("writable {s:?}: the directories, or one ${{settings.<path>}}"))
+                }
+                _ => {}
+            }
+            if let Some(crate::kernel::def::OrSetting::Setting(s)) = &g.network {
+                if crate::kernel::def::settings_ref(s).is_none() {
+                    out.push(format!("network {s:?}: true, false, or one ${{settings.<path>}}"));
                 }
             }
             others(&mut out, "command", true, false, true, true, false);

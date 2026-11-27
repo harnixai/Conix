@@ -833,7 +833,7 @@ impl Cx<'_> {
             (None, None, None) => return Err("nothing to judge: give `files` (a sample), or work in a project".into()),
         };
         #[cfg(feature = "script")]
-        let env = crate::runner::scriptenv::Env::for_trial(self.rn.engine(), packs, gate.script_part().map(String::as_str), script.as_deref(), ws.clone());
+        let env = crate::runner::scriptenv::Env::for_trial(self.rn.engine(), packs, &gate.name, gate.script_part().map(String::as_str), script.as_deref(), ws.clone());
         let network = crate::bundle::split(&gate.name).and_then(|(b, _)| crate::bundle::exec_decl(packs, b)).is_some_and(|e| e.network);
         let trial = crate::runner::gate::Trial {
             gate,

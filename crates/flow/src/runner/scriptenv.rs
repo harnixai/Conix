@@ -347,12 +347,15 @@ impl Env {
     /// For a gate tried outside any run: the bundle's files as the packs hold them (a trial pins
     /// nothing), git in the directory judged with no base commit, no runs, and the settings of
     /// the directory judged as if it were the project.
-    pub fn for_trial(engine: &Engine, packs: &dyn Packs, script: Option<&str>, text: Option<&str>, ws: PathBuf) -> Self {
+    ///
+    /// `gate` is the gate's name: its bundle's settings, whether or not it has a script (a command
+    /// gate's `writable` reads them too).
+    pub fn for_trial(engine: &Engine, packs: &dyn Packs, gate: &str, script: Option<&str>, text: Option<&str>, ws: PathBuf) -> Self {
         let modules = match (script.and_then(bundle::split), script.and_then(Modules::script_path), text) {
             (Some((b, _)), Some(entry), Some(text)) => Modules::from_packs(packs, b, entry, text),
             _ => Modules::none(),
         };
-        let settings = match script.and_then(bundle::split) {
+        let settings = match bundle::split(gate).or_else(|| script.and_then(bundle::split)) {
             Some((b, _)) => live_settings(packs, b, &ws),
             None => Ok(json!({})),
         };
