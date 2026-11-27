@@ -608,6 +608,14 @@ is so as not to collide with Harnix's own next one; what changes for a host is l
   A round's fork commit also takes the id of the child of every task that forks that round (`ForkPoint::children`), and a
   child's siblings' worktrees are fixed as it forks (`ForkRec::siblings`, the ones not made yet included): a child forked
   first is kept from the sibling forked after it, and a session is opened with the same list every time.
+- **A bundle's doctor**: `bundle.yaml` gains `doctor: <script>` (`BundleMeta::doctor`; a script of the bundle, checked
+  with every flow of it). **`doctor(packs, layout, bundle, project)`** (feature `script`) runs it for a project outside any
+  run, read-only as a script gate (`DOCTOR_TIMEOUT`, 30 s): input `{bundle, project, data_dir, params: {}}`, `flow.settings`
+  the project's file now, `flow.git.*` in the project with no base, no `flow.runs`. It returns a **`DoctorReport`**
+  (`bundle`, `script`, `findings: Vec<DoctorFinding>`, `log`; `count`, `worst`): each `{level: DoctorLevel (info | warn |
+  error), message, path?, fix?}` as the script gave it; a script that throws or answers in another shape is one `error`
+  naming it. `Err` only for a bundle that is not there or whose `bundle.yaml` does not read. Nothing is fixed: `fix` is
+  words for a person.
 
 ### `FLOW_API_VERSION = 1`
 

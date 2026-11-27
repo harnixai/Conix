@@ -1,7 +1,8 @@
 //! The library's public surface, written down: what a host implements (the traits in
 //! `kernel::host` and the runner's `SessionHost`), the types those traits hand it and take from it
 //! (the runner's `OpenSpec`, `Frame` and the rest among them), the names `lib.rs` re-exports, how
-//! the stores and packs are built, what the runner offers, and the authoring tools' host and offer. A change that removes or alters an
+//! the stores and packs are built, what the runner offers, the authoring tools' host and offer, and
+//! a bundle's doctor. A change that removes or alters an
 //! entry breaks the hosts that use it, and `FLOW_API_VERSION` goes up with it; an addition goes on
 //! the list, with a line in the version section of `docs/embed.en.md` and `docs/embed.zh-CN.md`.
 //!
@@ -311,6 +312,11 @@ const EXPORTS: &[(&str, &str)] = &[
     ("Problem", "kernel::validate"),
     ("FlowError", "kernel"),
     ("Result", "kernel"),
+    ("doctor", "runner"),
+    ("DoctorFinding", "runner"),
+    ("DoctorLevel", "runner"),
+    ("DoctorReport", "runner"),
+    ("DOCTOR_TIMEOUT", "runner"),
     ("project_pack_dir", "packs"),
     ("DirPacks", "packs"),
     ("MemPacks", "packs"),
@@ -608,6 +614,26 @@ const AUTHOR: &[(&str, &str)] = &[
     ("parts_used", "fnparts_used(packs:&dynPacks,def:&FlowDef)->Value"),
 ];
 
+/// A bundle's doctor (`src/runner/doctor.rs`, in Conix): the function a host calls, what it gets
+/// back, the report's own methods.
+const DOCTOR: &[(&str, &str)] = &[
+    ("doctor", "asyncfndoctor(packs:&dynPacks,layout:Option<&ProjectLayout>,bundle:&str,project:&Path)->Result<DoctorReport,String>"),
+    ("DOCTOR_TIMEOUT", "const:Duration"),
+    ("DoctorLevel::Info", ""),
+    ("DoctorLevel::Warn", ""),
+    ("DoctorLevel::Error", ""),
+    ("DoctorFinding.level", "DoctorLevel"),
+    ("DoctorFinding.message", "String"),
+    ("DoctorFinding.path", "Option<String>"),
+    ("DoctorFinding.fix", "Option<String>"),
+    ("DoctorReport.bundle", "String"),
+    ("DoctorReport.script", "Option<String>"),
+    ("DoctorReport.findings", "Vec<DoctorFinding>"),
+    ("DoctorReport.log", "String"),
+    ("DoctorReport::count", "fncount(&self,level:DoctorLevel)->usize"),
+    ("DoctorReport::worst", "fnworst(&self)->Option<DoctorLevel>"),
+];
+
 const HOST: &str = "src/kernel/host.rs";
 const RUNNER_HOST: &str = "src/runner/host.rs";
 const LIB: &str = "src/lib.rs";
@@ -813,6 +839,32 @@ fn author() -> Vec<(String, String)> {
     out
 }
 
+/// The doctor: its public function and constant, its types, the report's methods.
+fn doctor() -> Vec<(String, String)> {
+    const FILE: &str = "src/runner/doctor.rs";
+    let mut out = Vec::new();
+    for item in parse(FILE).items {
+        match item {
+            syn::Item::Fn(f) if public(&f.vis) => out.push((f.sig.ident.to_string(), squash(&f.sig))),
+            syn::Item::Const(c) if public(&c.vis) => out.push((c.ident.to_string(), format!("const:{}", squash(&c.ty)))),
+            syn::Item::Impl(i) if i.trait_.is_none() => {
+                let syn::Type::Path(p) = &*i.self_ty else { continue };
+                let Some(ty) = p.path.segments.last().map(|s| s.ident.to_string()) else { continue };
+                for item in &i.items {
+                    if let syn::ImplItem::Fn(f) = item {
+                        if public(&f.vis) {
+                            out.push((format!("{ty}::{}", f.sig.ident), squash(&f.sig)));
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    out.extend(types_in(FILE, &["DoctorLevel", "DoctorFinding", "DoctorReport"]));
+    out
+}
+
 fn exports() -> Vec<(String, String)> {
     fn flatten(prefix: &str, tree: &syn::UseTree, out: &mut Vec<(String, String)>) {
         match tree {
@@ -903,5 +955,11 @@ fn the_runner_offers_what_it_did() {
 #[test]
 fn the_authoring_tools_keep_their_shape() {
     let problems = compare("authoring item", "AUTHOR", AUTHOR, &author());
+    assert!(problems.is_empty(), "{}", problems.join("\n"));
+}
+
+#[test]
+fn the_doctor_keeps_its_shape() {
+    let problems = compare("doctor item", "DOCTOR", DOCTOR, &doctor());
     assert!(problems.is_empty(), "{}", problems.join("\n"));
 }

@@ -16,6 +16,7 @@
 //! turns.rs     a session task's turns: sending, judging, correcting, nudging, interrupting
 //! main.rs      the run's main session, watched: questions answered, usage counted, sub-agents noted
 //! gate.rs      a gate's work item; `command` gates
+//! doctor.rs    a bundle's self-check of a project, outside any run
 //! hooks.rs     webhooks: queues, retries, signatures; the transport a host may replace
 //! project.rs   a run's output directory and process directory in its project; starting a run
 //! worktree.rs  a run in a worktree of its project: made at start, merged, kept or discarded after
@@ -38,6 +39,8 @@ mod archive;
 mod checks;
 pub(crate) mod commands;
 mod dispatch;
+#[cfg(feature = "script")]
+mod doctor;
 mod files;
 mod fork;
 pub(crate) mod gate;
@@ -85,6 +88,8 @@ pub use state::{Binding, TaskKey};
 pub use testing::{ScriptedHost, Turn};
 pub use hooks::redact_url;
 pub use commands::{split_command, ByKind, CommandBy, CommandCall, CommandReply};
+#[cfg(feature = "script")]
+pub use doctor::{doctor, DoctorFinding, DoctorLevel, DoctorReport, DOCTOR_TIMEOUT};
 pub use tools::{command_tool_spec, tool_specs, FlowTools, ToolReply, TOOL_COMMAND, TOOL_PROPOSE, TOOL_STATE, TOOL_SUBMIT};
 pub use trust::withheld;
 pub use turns::{NUDGE, NUDGE_STRUCTURED};

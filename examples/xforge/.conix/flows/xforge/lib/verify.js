@@ -53,6 +53,17 @@ export function menuProblems(menu) {
   return out;
 }
 
+// 双路开发合起来时跑的那一项（xforge/dual 的门禁 blackbox）：菜单里名叫 blackbox，不带参数。
+export const BLACKBOX = "blackbox";
+
+// 黑盒那一项能不能拿来跑：null 是能；"missing" 是菜单里没有，"params" 是它带了参数（合起来时没有谁来填）。
+// 菜单本身的毛病归 menuProblems。门禁 blackbox 与自检 doctor 共用这一份，自检说能跑的，门禁不会说不能。
+export function blackboxProblem(menu) {
+  if (!menu || typeof menu !== "object" || !Object.prototype.hasOwnProperty.call(menu, BLACKBOX)) return "missing";
+  const m = menu[BLACKBOX];
+  return m && typeof m === "object" && m.params && typeof m.params === "object" && Object.keys(m.params).length ? "params" : null;
+}
+
 // --verify 的写法 <名字>[:<参数>=<值>[,<参数>=<值>]] → {name, params}。
 export function parseEntry(text) {
   const s = String(text || "").trim();

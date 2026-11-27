@@ -17,6 +17,7 @@ use serde_json::{json, Value};
 use crate::bundle;
 use crate::kernel::engine::Engine;
 use crate::kernel::host::Packs;
+use crate::kernel::layout::ProjectLayout;
 use crate::kernel::run::{RunQuery, RunRecord, RunStatus};
 
 /// The newest runs of a project `flow.runs` can see.
@@ -143,8 +144,13 @@ pub(crate) struct GitView {
 
 impl GitView {
     pub fn new(dir: PathBuf, base: Option<String>, engine: &Engine) -> Self {
+        Self::in_layout(dir, base, engine.layout())
+    }
+
+    /// The same, for a host that has the project's layout but no engine (a bundle's doctor).
+    pub fn in_layout(dir: PathBuf, base: Option<String>, layout: Option<&ProjectLayout>) -> Self {
         let mut exclude = vec![];
-        match engine.layout() {
+        match layout {
             Some(l) => {
                 exclude.push(l.dir.clone());
                 exclude.extend(l.artifacts.clone());
@@ -219,6 +225,17 @@ impl Env {
         let runs = if modules.mentions(text, "runs") { snapshot(engine, root.to_str()).await } else { vec![] };
         let settings = live_settings(packs, bundle, &root);
         Self { modules, git: Some(GitView::new(root, None, engine)), runs: Arc::new(runs), settings }
+    }
+}
+
+impl Env {
+    /// For a bundle's doctor (in Conix): its files as the packs hold them now, git in the project
+    /// with no base commit, the project's settings now. No runs: what a project has prepared does
+    /// not depend on what is in flight, and the check must say the same twice in a row.
+    pub fn for_doctor(packs: &dyn Packs, layout: Option<&ProjectLayout>, bundle: &str, entry: String, text: &str, root: PathBuf) -> Self {
+        let modules = Modules::from_packs(packs, bundle, entry, text);
+        let settings = live_settings(packs, bundle, &root);
+        Self { modules, git: Some(GitView::in_layout(root, None, layout)), runs: Default::default(), settings }
     }
 }
 

@@ -148,7 +148,7 @@ elements:
 ## 5. 流程
 
 `bundle.yaml`：`flows: [quick, solid, major, dual, dual-impl, dual-tests]`，`start: {route: [quick, solid, major], triage: triage}`，
-`pace: auto`，`requires: {conix: ">=0.1.11"}`。按风险选路只在前三条里选；双路开发 `dual` 点名起（§5.1）。
+`pace: auto`，`requires: {conix: ">=0.1.11"}`，`doctor: doctor`（§7）。按风险选路只在前三条里选；双路开发 `dual` 点名起（§5.1）。
 三条流程的 `inputs` 一样：`title`（必填）、`risk`（**没有缺省**：没给就分诊）、`impact`（数组，取值 interface / security /
 data-migration / infra，缺省空）；各自的 `risk` schema 就是 eligibility：quick 只收 low，solid 收 low、medium，major 都收。
 
@@ -224,3 +224,23 @@ apply（每包一个子 Agent，任务级 package-check、package-tests；站 pa
 `slugify`、`word_count` 登记为 stable），`.conix/governance/xforge.yaml` 两条基线都开，verify 菜单有 `unit`、`test:file=…`、`compile`、
 `blackbox`（`tests_blackbox/`，已有几条照规格写的黑盒测试）。`crates/flow/tests/xforge*.rs` 不调模型地查这个包（`xforge_dual.rs`
 用真实的派工器把一次 dual 从提案走到归档，会话由测试代演），`crates/conix/tests/live_xforge.rs` 用真实模型走 solid。
+
+## 7. 自检：`scripts/doctor.js`
+
+包的自检（flows.md §7.13）：宿主的 `conix flow doctor` 在运行之外为一个项目跑它，查这个项目给 xforge 备齐了没有。只读，
+每条发现带 `path`（项目里的文件）与 `fix`（人该怎么改），自己什么都不改。判法用命令与门禁用的那几份（`lib/governance.js`、
+`lib/verify.js`、`lib/specs.js`、`lib/arch.js`），所以自检说没问题的，`xpkg plan --verify` 与门禁不会说有问题，反过来也一样。
+
+| 查什么 | 不对时 |
+|---|---|
+| 治理文件（§1）读得成、顶层是映射 | `error`：每条流程都会拒绝启动；后两行不再查（在同一个文件里） |
+| `governance.spec`、`governance.interface`、`review.separate` 是布尔值；`governance`、`review` 是映射 | `error`：`separate` 不是布尔值启动就拒；`spec: "no"` 不报错但意思反了（"不写 false 就开"） |
+| 治理文件里 xforge 不认识的键（顶层与 `governance`、`review` 下） | `warn`：多半是写错了名字 |
+| `verify` 菜单：`menuProblems`，与 `xpkg plan --verify`、`package-tests` 同一份（名字、字段、`argv`、`params` 的正则、没声明与没用到的参数、`cwd`） | 每条一个 `error`；没有菜单是 `info` |
+| `verify.blackbox`：`blackboxProblem`，与门禁 `blackbox` 同一份 | 没有：`warn`（"xforge/dual 需要 verify.blackbox"，别的路径不用它）；带参数：`error` |
+| 开着的基线：`<数据目录>/specs/*.md`、`<数据目录>/interfaces/*.yaml` 读得成 | 读不成 `error`；还是空的 `info`（第一次变更的 `xspec init`、`xarch module` 与归档会建） |
+| `.conix/governance/constitution.yaml`：`principles` 是非空列表，编号是 `P<数字>`、不重复 | 没有文件 `warn`（门禁只提醒）；空的、编号认不出或重复 `error`（门禁对照不上）；没有 `title` 是 `warn` |
+| `.conix/governance/verify.sh` 在 | `warn`：实施站、验证站的 `unit-tests` 不过 |
+| 项目是 git 仓库、有提交（`flow.git.head()`） | `warn`：`unclaimed`、`package-check` 判不了改了什么 |
+
+演示项目（§6）什么都不报；`crates/flow/tests/xforge_doctor.rs` 查它，以及上面每一种坏法。
