@@ -26,6 +26,7 @@ flows:
   run:
     running: "running"
     waiting: "waiting: {reason}"
+    waiting_confirm: "awaiting your confirmation"
     pausing: "pausing"
     paused: "paused"
     finished: "finished"

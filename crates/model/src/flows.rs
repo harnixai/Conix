@@ -295,6 +295,10 @@ fn progress_base(r: &RunSummary) -> String {
 pub(crate) fn run_status(s: &RunStatus) -> (&'static str, String, Tone) {
     let text = match s {
         RunStatus::Running => i18n::t!("flows.run.running"),
+        // 等人确认是人最要看见的一种：原因是流程库的词（`confirm`），照原样写出来是半句英文。
+        RunStatus::Waiting { reason } if reason == "confirm" => {
+            i18n::t!("flows.run.waiting_confirm")
+        }
         RunStatus::Waiting { reason } => i18n::t!("flows.run.waiting", reason = reason),
         RunStatus::Pausing => i18n::t!("flows.run.pausing"),
         RunStatus::Paused => i18n::t!("flows.run.paused"),
