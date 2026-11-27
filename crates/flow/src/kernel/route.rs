@@ -185,13 +185,15 @@ pub fn pace_of(def: &FlowDef, packs: &dyn Packs, given: Option<Pace>) -> Pace {
         .unwrap_or_default()
 }
 
-/// The problems of a bundle's `bundle.yaml` a flow of it is judged with: what its `flows` and
-/// `start` name that the bundle does not have.
+/// The problems of a bundle's `bundle.yaml` a flow of it is judged with: what its `flows`,
+/// `start` and `doctor` name that the bundle does not have.
 pub(crate) fn bundle_problems(def: &FlowDef, packs: &dyn Packs) -> Vec<String> {
     let Some(b) = def.bundle.as_deref() else { return vec![] };
     let Some(meta) = bundle::meta_of(packs, b) else { return vec![] };
     let stems = bundle::offered_stems(packs, b);
-    meta.start_problems(&stems, &|s| packs.skill(&bundle::in_bundle(b, s)).is_some())
+    let mut out = meta.start_problems(&stems, &|s| packs.skill(&bundle::in_bundle(b, s)).is_some());
+    out.extend(meta.doctor_problems(&|s| packs.part(crate::kernel::parts::PartKind::Script, &bundle::in_bundle(b, s)).is_some()));
+    out
 }
 
 // ── switching ────────────────────────────────────────────────────────────────

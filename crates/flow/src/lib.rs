@@ -92,6 +92,8 @@ pub use kernel::run::{ProposalKind, ProposalRec, ProposalStatus, RoutedBy, Route
 pub use kernel::schema::minimal;
 pub use kernel::validate::{part_problems, validate, validate_yaml, Problem};
 pub use kernel::{FlowError, Result};
+#[cfg(feature = "script")]
+pub use runner::{doctor, DoctorFinding, DoctorLevel, DoctorReport, DOCTOR_TIMEOUT};
 pub use packs::{project_pack_dir, DirPacks, MemPacks, ProjectPacks, ProjectTrust, Shadowing};
 pub use store::{FileStore, Hooked, MemStore};
 

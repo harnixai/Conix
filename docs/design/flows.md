@@ -434,6 +434,7 @@ commands:
 settings:                              # 项目的治理文件，启动时读、钉进运行
   file: .conix/governance/xforge.yaml
   defaults: {governance: {spec: true, interface: false}, review: {separate: false}}
+doctor: doctor                         # 自检脚本 scripts/doctor.js（§7.13）
 ```
 
 | 字段 | 意思 |
@@ -444,6 +445,7 @@ settings:                              # 项目的治理文件，启动时读、
 | `pace` | `auto`（缺省）或 `step`（§7.4） |
 | `commands` | 包的命令（§7.6）。写成列表（`[xspec, xledger]`）时每个命令的全部子命令都算会写；写成映射时 `read_only` 列出只读的子命令 |
 | `settings` | 项目里的设置文件（`file`，相对项目根、不出项目）与缺省（`defaults`，映射）。见下 |
+| `doctor` | 包的自检脚本（`scripts/<名>.js`），宿主在运行之外为一个项目跑它，查这个项目给包备齐了没有（§7.13）。与别的脚本引用一样读包时校验：名字不对、文件不在，包里的流程都报错 |
 
 - **`read_only`** 按命令名后的第一个词匹配，照 Agix `[[command]]` 的约定。声明它是为了让运行之外也能放心地查
   （`/flow:xforge:xspec list`）：会写的命令运行之外只有人能调（§7.6）。
@@ -509,6 +511,7 @@ settings:                              # 项目的治理文件，启动时读、
 |---|---|---|---|---|
 | 门禁脚本 | `scripts/<名>.js` | 门禁 `kind: script`；`kind: command` 的 `plan` | 否 | 门禁结果（§3）；`plan` 也可以回要跑的 `runs`（§2.2） |
 | 选值脚本 | `scripts/<名>.js` | `foreach: {script: …}`、`start.route` 的 `script` | 否 | 一个值（工作项列表、流程名） |
+| 自检脚本 | `scripts/<名>.js` | `bundle.yaml` 的 `doctor`，宿主在运行之外调（§7.13） | 否 | `{findings}` |
 | 命令 | `commands/<名>.js` | `flow_command`、`/…:<命令>`、站 `executor: {kind: command}` | 运行目录（`_run/` 除外）、`${data_dir}` | 文本或值 |
 | 库 | `lib/<名>.js` | 上面三种 `import` | 无 | 无 |
 
@@ -598,6 +601,32 @@ files: [{path, sha256, size}, …]
   输入框里 `/flow:export <包> [文件]`、`/flow:import <文件> [--force]` 发 `ExportFlow` / `ImportFlow` 给实例（文件相对项目根，
   导出不写文件就放项目根），导入后实例重列流程，流程标签随之更新。打包与核对在 `crates/host/src/flows/package.rs`，命令行与实例共用。
 
+### 7.13 包的自检：`doctor`
+
+`conix flow doctor` 查全局的流程库与一个项目装的包。通用的检查归宿主：包与流程校验得过、版本、锁文件。**包自己要项目备什么，
+只有包知道**（xforge 要治理文件读得成、verify 菜单合规），所以这一段是包的脚本：`bundle.yaml` 写 `doctor: <脚本>`，宿主为项目调
+流程库的 `doctor(packs, layout, 包, 项目)`，按条列出结果。
+
+```js
+// scripts/doctor.js：input = {bundle, project, data_dir, params: {}}
+export default function (input, flow) {
+  return { findings: [{ level: "warn", message: "缺 .conix/governance/constitution.yaml", path: ".conix/governance/constitution.yaml", fix: "写一份 principles: […]" }] };
+}
+```
+
+- **与门禁脚本同一个沙箱**（§2.3）：只读、确定，时限 30 秒，同样的内存与返回值上限。`flow.read.*`、`glob`、`stat` 限在项目里；
+  `flow.settings` 是项目此刻的文件合并缺省（同运行之外的命令，读不成时读它就抛错，由脚本报成 `error`）；`flow.git.*` 在项目里、
+  没有基线（`changed` 要给 `since`）；包内 `import` 照常。**没有 `flow.runs`**：项目备没备好与在途的运行无关，连查两次要说一样的话。
+  `data_dir` 是包的数据目录（相对项目根，宿主没给布局时是 `null`）。
+- **回什么**：`{findings: [{level: error|warn|info, message, path?, fix?}]}`，`path` 是项目里的文件，`fix` 是给人看的建议。
+  `error`：照项目现在的样子包跑不了（某条流程会拒绝启动、某道门禁必然 `error`）；`warn`：会缺什么、某处会被拒，别的能跑；
+  `info`：知道就好（第一次运行会建的目录）。形状不对（多了字段、`level` 不认识、`message` 空）、抛错、超时、读出界，都成一条点名脚本的
+  `error`。没写 `doctor` 的包回空报告。
+- **从不修**：没有写、没有命令，`fix` 也只是一句话，宿主不执行它。为什么：自检是"看一眼"，跑一次就改了文件的检查，人得先审它改了什么；
+  修由人或由包的命令（经人）做。
+- 落点：`crates/flow/src/runner/doctor.rs`（`doctor`、`DoctorReport`、`DoctorFinding`、`DoctorLevel`）、`bundle.rs`（`BundleMeta::doctor`、
+  `doctor_problems`）；宿主的 `conix flow doctor` 调它。
+
 ## 8. 落点
 
 | 内容 | 位置 |
@@ -626,6 +655,7 @@ files: [{path, sha256, size}, …]
 | 工作项（`foreach` 脚本、`after`、`task_exit`） | `kernel/work.rs`、`kernel/def.rs`、`kernel/txn.rs`、`runner/dispatch.rs` |
 | 流程地址与本地路由、补全 | `crates/model/src/flows.rs`、`crates/model/src/composer.rs`（interaction §4.5） |
 | 流程包的导出与导入（zip、`MANIFEST.yaml`、核对、`/flow:export`、`conix flow …`） | `crates/host/src/flows/package.rs`、`crates/conix/src/flow_cli.rs`、`crates/flow/src/bundle.rs`（`requires`、`RESERVED_BUNDLES`）、`crates/model/src/flow_addr.rs`（路由）、`port::Command::{ExportFlow, ImportFlow}` |
+| 包的自检（`doctor`） | `crates/flow/src/runner/doctor.rs`、`runner/scriptenv.rs`（`Env::for_doctor`）、`bundle.rs`（`BundleMeta::doctor`）；`crates/flow/tests/doctor.rs` |
 | 内置的 xforge | `examples/xforge/`（项目与流程包）、`crates/host/build.rs`、`crates/host/src/flows/builtin.rs`；`crates/flow/tests/xforge.rs`、`crates/conix/tests/live_xforge.rs` |
 
 ## 9. 往回迁

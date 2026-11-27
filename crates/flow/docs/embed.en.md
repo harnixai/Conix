@@ -605,6 +605,14 @@ is so as not to collide with Harnix's own next one; what changes for a host is l
   handing the parent's task its result: merged back into the parent's branch, its worktree removed, reported through
   **`Engine::subflow_joined`**; a conflict fails the parent's task with the files. **`OpenSpec::deny_read`**: directories
   a child's session must not read (its parent's and its siblings' worktrees); the host denies them, its sandbox too.
+- **A bundle's doctor**: `bundle.yaml` gains `doctor: <script>` (`BundleMeta::doctor`; a script of the bundle, checked
+  with every flow of it). **`doctor(packs, layout, bundle, project)`** (feature `script`) runs it for a project outside any
+  run, read-only as a script gate (`DOCTOR_TIMEOUT`, 30 s): input `{bundle, project, data_dir, params: {}}`, `flow.settings`
+  the project's file now, `flow.git.*` in the project with no base, no `flow.runs`. It returns a **`DoctorReport`**
+  (`bundle`, `script`, `findings: Vec<DoctorFinding>`, `log`; `count`, `worst`): each `{level: DoctorLevel (info | warn |
+  error), message, path?, fix?}` as the script gave it; a script that throws or answers in another shape is one `error`
+  naming it. `Err` only for a bundle that is not there or whose `bundle.yaml` does not read. Nothing is fixed: `fix` is
+  words for a person.
 
 ### `FLOW_API_VERSION = 1`
 

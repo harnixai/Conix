@@ -72,6 +72,10 @@ pub struct BundleMeta {
     /// What running it needs of the host (checked when a package is imported).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub requires: Option<BundleRequires>,
+    /// Its self-check for a project (in Conix): a script of the bundle (`scripts/<name>.js`) a host
+    /// runs outside any run to say what the project has not prepared ([`crate::runner::doctor`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub doctor: Option<String>,
 }
 
 /// What `bundle.yaml` says of one command.
@@ -288,6 +292,18 @@ impl BundleMeta {
             out.extend(s.problems().into_iter().map(|m| format!("{BUNDLE_FILE}: settings: {m}")));
         }
         out
+    }
+
+    /// What is wrong with its `doctor`, given whether it has a script of a name: the same as any
+    /// other script it names, so a bundle whose check cannot run is refused when read, not when a
+    /// person asks for the check.
+    pub fn doctor_problems(&self, has_script: &dyn Fn(&str) -> bool) -> Vec<String> {
+        match &self.doctor {
+            None => vec![],
+            Some(d) if !segment(d) || !is_name(d) => vec![format!("{BUNDLE_FILE}: doctor {d:?} is a script's name ([a-z][a-z0-9-]*, scripts/<name>.js)")],
+            Some(d) if !has_script(d) => vec![format!("{BUNDLE_FILE}: doctor names the script {d}, which the bundle does not have (scripts/{d}.js)")],
+            Some(_) => vec![],
+        }
     }
 }
 

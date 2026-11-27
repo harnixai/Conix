@@ -442,6 +442,12 @@ Conix 在 Harnix 0.4.7 分叉了这个库，先把站的治理（门禁、确认
   记父运行的 worktree、分支、映射过来的输出目录（`${parent.output_dir}`）。子运行结束交出 **`WorkItem::Join`**（代替直接交回
   父任务）：合回父运行的分支、删掉 worktree，经 **`Engine::subflow_joined`** 报回，冲突时父任务失败、列出冲突的文件。
   **`OpenSpec::deny_read`**：子运行的会话不能读的目录（父运行与兄弟子运行的 worktree），宿主要连沙箱一起拒读。
+- **包的自检（doctor）**：`bundle.yaml` 加 `doctor: <脚本>`（`BundleMeta::doctor`；包里的脚本，随包里每个流程一起校验）。
+  **`doctor(packs, layout, bundle, project)`**（feature `script`）在运行之外为一个项目跑它，与脚本门禁一样只读
+  （`DOCTOR_TIMEOUT`，30 秒）：输入 `{bundle, project, data_dir, params: {}}`，`flow.settings` 是项目此刻的文件，`flow.git.*`
+  在项目里、没有基线，没有 `flow.runs`。回 **`DoctorReport`**（`bundle`、`script`、`findings: Vec<DoctorFinding>`、`log`；
+  `count`、`worst`）：每条 `{level: DoctorLevel（info | warn | error）, message, path?, fix?}` 照脚本给的；脚本抛错、回的形状不对，
+  是一条点名脚本的 `error`。只有包不在、`bundle.yaml` 读不成时回 `Err`。什么都不修：`fix` 是写给人看的话。
 - **试运行用会话所在的流程包**：`Sandbox::start_in(input, by, packs)`；`flow_dry_run` 用会话读的那份（项目的流程、件），
   不再只看应用自己的包——项目里的流程以前试运行时找不到。
 - **事后可核对的归档**（Conix）：`record.json` 带 `format` 与 `files: [{path, sha256, size}]`（归档里其余每个文件），
