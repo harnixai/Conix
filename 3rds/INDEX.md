@@ -47,3 +47,4 @@ workspace 的成员。为什么分叉、改成什么样见 `docs/design/flows.md
 | 包建议的作业：`bundle.yaml` 的 `jobs`（`BundleMeta::jobs`、`JobDecl`、`JobKindDecl` / `SimpleJobDecl` / `FlowJobDecl`，写成 `{simple: …}` / `{flow: …}`；`JOB_GUARD_KEYS`）；`jobs_problems` 只查形状（ID、5 段 cron、只能是这个包的流程），随 `start_problems` 校验；`JobDecl::flow_of` 把 `<包>` 换成全名。cron 解析、加进项目在 Conix | flows.md §7.1、§7.12 | — | 否（作业 in Conix） |
 | 执行请求带禁读名单（`ExecRequest::deny_read`）：运行里的进程在记录它的那一处（`run_audited`）补上 `fork::deny_read`，双路的子运行的门禁与 `flow.exec` 读不到父运行与兄弟的 worktree；`Enforcement::unmet`（后端只守住一部分时差在哪），记录里有 `deny_read` | flows.md §7.14、§6.5 | — | 否 |
 | 门禁日志的文件名 `gate::log_name`：门禁名经 `project::file_name` 成一个文件名（`xforge/unit-tests` → `gate-xforge-unit-tests.log`），带 `/` 的包内门禁名原样拼路径会写不进去 | flows.md §2.2 | bb4ac48 | 是 |
+| worktree 运行的归档目录按 worktree 根（加 `prefix`）记：worktree 在项目的 `.wkts/` 里，先按项目根算会记成 `.wkts/<运行>/…`，合并之后就不对了（`archive::relative_to`） | flows.md §6.5 | — | 是 |

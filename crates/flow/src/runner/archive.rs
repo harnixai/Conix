@@ -62,9 +62,15 @@ pub(crate) fn archive(engine: &Engine, rec: &RunRecord, process: &Path) -> Optio
 /// `dir` as the ledger names it: relative to the project, or to the run's worktree, which holds
 /// the same tree; absolute when it is under neither.
 fn project_relative(rec: &RunRecord, dir: &Path) -> String {
-    let roots = rec.project_root.iter().map(Path::new).chain(rec.worktree.as_ref().map(|w| Path::new(w.path.as_str())));
+    // The worktree first: it is inside the project (`.wkts/`), and the archive's place is where it
+    // lands once the branch is merged, not where the worktree happens to sit until then.
+    let worktree = rec.worktree.as_ref().map(|w| Path::new(w.path.as_str()).join(&w.prefix));
+    relative_to(dir, worktree.into_iter().chain(rec.project_root.iter().map(PathBuf::from)))
+}
+
+fn relative_to(dir: &Path, roots: impl IntoIterator<Item = PathBuf>) -> String {
     for root in roots {
-        if let Ok(rel) = dir.strip_prefix(root) {
+        if let Ok(rel) = dir.strip_prefix(&root) {
             return rel.to_string_lossy().replace('\\', "/");
         }
     }
@@ -170,4 +176,19 @@ fn record(rec: &RunRecord, run_dir: &Path, kept: &[String]) -> Value {
 
 fn pretty(v: &Value) -> String {
     serde_json::to_string_pretty(v).unwrap_or_default() + "\n"
+}
+
+#[cfg(test)]
+mod place_tests {
+    use super::*;
+
+    /// A worktree run's archive is named by where it lands in the project once merged.
+    #[test]
+    fn an_archive_in_a_worktree_inside_the_project_is_named_from_the_worktree() {
+        let (wt, project) = (PathBuf::from("/p/.wkts/r1"), PathBuf::from("/p"));
+        let dir = wt.join("xforge/archive/1-x");
+        assert_eq!(relative_to(&dir, [wt.clone(), project.clone()]), "xforge/archive/1-x");
+        assert_eq!(relative_to(Path::new("/p/conix/archive/2"), [wt, project]), "conix/archive/2");
+        assert_eq!(relative_to(Path::new("/elsewhere/a"), [PathBuf::from("/p")]), "/elsewhere/a");
+    }
 }
