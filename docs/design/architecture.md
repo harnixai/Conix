@@ -261,7 +261,7 @@ loop {
 ├── scenes/  daemon/  plugins/ …  ┘ 对项目里的会话只有索引（§8.4）。模型、provider、权限都沿用 settings.json
 ├── conix.yaml                    Conix 自己的配置（YAML）：界面、实例（个人项目）、作业护栏；不存在时写一份带注释的缺省配置
 ├── keybindings.json              快捷键覆盖
-├── flows/<包>/                   全局流程库（flows.md §7.12）：可装进项目的流程包，不参与运行；内置的 xforge 起来时放进来
+├── flows/<包>/                   全局流程库（flows.md §7.12）：可装进项目的流程包，不参与运行；内置的 xforge、xreport 起来时放进来
 │   ├── .registry.yaml            每个包的来源（builtin / import / backfill）、版本、摘要，内置的还有它是从哪一版解出来的
 │   └── .backups/  .staging/  .lock  换下来的、写到一半的、flock
 ├── known-projects.json           认领过的项目：凭证 → 项目路径（§8.9）
@@ -531,7 +531,7 @@ schema；`job_validate` 不落盘，回下 5 次触发时刻与护栏的实际�
 - **装配**（`flows::start`，实例起来时一次）：
   - 运行记录：`FileStore`，`.conix/state/conix/flow-runs/`。
   - 流程包：项目自己的 `<项目>/.conix/flows/`，**项目受信才读、才写**；垫在下面的只有只读的插件包。没有内置层，
-    全局流程库也不读（§8.1）：内置的 xforge 要 `conix flow install` 装进项目。会话都在实例的项目里，`flow_create` 存进项目自己的
+    全局流程库也不读（§8.1）：内置的 xforge、xreport 要 `conix flow install` 装进项目。会话都在实例的项目里，`flow_create` 存进项目自己的
     流程包，所以项目没受信时存不进去，工具照实说。信任取 Agix 的 `project.status`；人用 `/trust`（端口
     `TrustProject` → `project.trust`）信任或取消，之后派工器重新问一遍，项目的流程跟着出现或消失。
   - `ProjectLayout`：项目层目录 `.conix`（与 Agix 的同一个），worktree 在仓库根的 `.wkts/<运行>/`、分支
