@@ -90,7 +90,11 @@ impl std::fmt::Display for MergeFailed {
 
 fn git(dir: &Path) -> Command {
     let mut c = Command::new("git");
-    c.arg("-C").arg(dir);
+    // The repository's own config is the project's: `core.fsmonitor` there names a program git
+    // starts for any command that looks at the tree, which would let a checkout run code on this
+    // machine whether the project is trusted or not. No pager either, though nothing here has a
+    // terminal: a pager configured to be some program is a program all the same.
+    c.arg("--no-pager").args(["-c", "core.fsmonitor=false"]).arg("-C").arg(dir);
     c.env("GIT_TERMINAL_PROMPT", "0").env("LC_ALL", "C").env("LANG", "C");
     c
 }
@@ -192,7 +196,7 @@ pub(crate) fn changed_since(dir: &Path, since: &str, exclude: &[String]) -> Resu
     if !holds(dir, &["rev-parse", "--verify", "-q", &format!("{since}^{{commit}}")])? {
         return Err(format!("{since:?} is not a commit of this repository"));
     }
-    let mut all = list(&["diff", "--name-only", "--no-renames", "--relative", "-z", since, "--"])?;
+    let mut all = list(&["diff", "--no-ext-diff", "--no-textconv", "--name-only", "--no-renames", "--relative", "-z", since, "--"])?;
     all.extend(list(&["ls-files", "--others", "--exclude-standard", "-z"])?);
     all.sort();
     all.dedup();
@@ -258,7 +262,7 @@ pub(crate) fn snapshot(dir: &Path, own: Option<&str>, wkts: Option<&str>, messag
         }
     }
     run(dir, &args.iter().map(String::as_str).collect::<Vec<_>>())?;
-    if holds(dir, &["diff", "--cached", "--quiet"])? {
+    if holds(dir, &["diff", "--no-ext-diff", "--no-textconv", "--cached", "--quiet"])? {
         return Ok(None);
     }
     let args = ["commit", "-q", "--no-verify", "-m", message];
@@ -354,7 +358,7 @@ fn merge_in(dir: &Path, theirs: &str, message: &str) -> Result<String, MergeFail
     if o.status.success() {
         return run(dir, &["rev-parse", "HEAD"]).map_err(MergeFailed::Other);
     }
-    let files: Vec<String> = run(dir, &["diff", "--name-only", "--diff-filter=U"])
+    let files: Vec<String> = run(dir, &["diff", "--no-ext-diff", "--no-textconv", "--name-only", "--diff-filter=U"])
         .unwrap_or_default()
         .lines()
         .map(String::from)
@@ -401,6 +405,33 @@ pub(crate) mod tests {
     pub(crate) fn commit_all(dir: &Path, message: &str) {
         run(dir, &["add", "-A", "--", ".", ":(exclude).harnix"]).unwrap();
         run(dir, &["commit", "-q", "-m", message]).unwrap();
+    }
+
+    /// A repository's own config may name programs git starts (an fsmonitor, an external diff, a
+    /// textconv): none of them runs for the library's reads.
+    #[cfg(unix)]
+    #[test]
+    fn the_programs_a_repositorys_config_names_are_not_run() {
+        use std::os::unix::fs::PermissionsExt;
+        if !have_git() {
+            return;
+        }
+        let r = repo();
+        let p = r.path();
+        let mark = p.join("ran");
+        let prog = p.join("prog.sh");
+        std::fs::write(&prog, format!("#!/bin/sh\necho x >> {}\n", mark.display())).unwrap();
+        std::fs::set_permissions(&prog, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let prog = prog.to_string_lossy().into_owned();
+        run(p, &["config", "core.fsmonitor", &prog]).unwrap();
+        run(p, &["config", "diff.external", &prog]).unwrap();
+        run(p, &["config", "diff.x.textconv", &prog]).unwrap();
+        std::fs::write(p.join(".gitattributes"), "*.txt diff=x\n").unwrap();
+        let base = head(p).unwrap();
+        std::fs::write(p.join("a.txt"), "changed\n").unwrap();
+        let changed = changed_since(p, &base, &[]).unwrap();
+        assert!(changed.contains(&"a.txt".to_string()), "{changed:?}");
+        assert!(!mark.exists(), "a program of the repository's config ran");
     }
 
     #[test]

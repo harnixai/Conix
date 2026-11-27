@@ -532,8 +532,16 @@ async fn bundle_doctor(ctx: &Ctx, opts: &ProjectOpts, name: &str) -> Vec<Finding
 /// `git check-ignore`：项目不在 git 里、git 不在时是 `None`。
 fn ignored(project: &Path, rel: &str) -> Option<bool> {
     let probe = format!("{rel}conix-doctor-probe");
+    // 关掉 fsmonitor：它是仓库自己的配置里写的程序，体检不该替一个没审过的仓库跑它。
     let out = std::process::Command::new("git")
-        .args(["check-ignore", "-q", "--no-index", &probe])
+        .args([
+            "-c",
+            "core.fsmonitor=false",
+            "check-ignore",
+            "-q",
+            "--no-index",
+            &probe,
+        ])
         .current_dir(project)
         .output()
         .ok()?;

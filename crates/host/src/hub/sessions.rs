@@ -623,8 +623,15 @@ impl Hub {
     /// 项目里的文件，相对项目根：仓库里用 `git ls-files`（跟着 `.gitignore`，含没提交的新文件），
     /// 不是仓库就没有（不去整个目录树里乱走）。至多一万个，`@` 补全够用。
     pub(super) async fn project_files(&self) -> Vec<String> {
+        // 关掉 fsmonitor：`ls-files` 会去问仓库配置里写的那个程序，补全不该替没受信的项目跑它。
         let out = tokio::process::Command::new("git")
-            .args(["ls-files", "-co", "--exclude-standard"])
+            .args([
+                "-c",
+                "core.fsmonitor=false",
+                "ls-files",
+                "-co",
+                "--exclude-standard",
+            ])
             .current_dir(&self.0.project)
             .output()
             .await;
