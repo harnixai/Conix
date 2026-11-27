@@ -263,6 +263,14 @@ exit:
 命令不进会话，经端口（`RunOp`）直接发给实例，记成 `Actor{kind: "person", id: <操作系统用户名>}`。
 打回（`/rework [运行] <站> [理由]`）也能这样打，但它不是只有人能做：模型照样有 `flow_rework`。给人一条命令是因为检查留下
 问题、要不要打回往往是人看了才定的，不该还要绕道对话叫模型去打；打回的目标站推断不出来，所以站一定要写，理由给重做的站看。
+站后面可以带任务：`/rework <站>/<任务>[,<任务>]` 只重做那一站的这几个任务（`RunOp::Rework{tasks}`，同 `flow_rework` 的 `tasks`），
+站里别的任务的结果留着，如 xforge/dual 只重做实现那一路（xforge.md §5.1）。
+
+**运行的 worktree 由人收尾**：在自己 worktree 里跑的运行（`workspace: worktree`）结束后，分支不自动合进用户的分支，
+人打 `/worktree [运行] merge | keep | discard`（`RunOp::EndWorktree{how}`，流程库 `Runner::end_worktree`）：合进项目当前的分支
+（能快进就快进，否则合并提交），留着分支，或连同分支丢掉（丢掉在底栏再确认一次）。合并冲突时项目不动、worktree 还在，
+回的错误列出冲突的文件。能不能收尾由实例判（`RunView::worktree.decidable`：运行结束了、不是子运行、没合也没丢；留着的分支还能再合或丢），
+流程标签运行下面一行 `⎇` 写着它现在怎样。子运行的 worktree 由派工器合回父运行（§6.5），人不收尾。
 
 **`via: person`**：实例的 socket 是 0600，接得进来的只有实例的主人，所以"人"就是这个操作系统用户。
 - `who` 写了角色：项目的 `.conix/roles.yaml`（进 git，`reviewer: [alice, bob]`）里列了这个角色、主人不在里面，
@@ -854,6 +862,7 @@ const r = flow.exec({ argv: ["git", "--no-pager", "-c", "core.fsmonitor=false", 
 | Conix 的审批（MCP） | `crates/host/src/flows/approvals.rs`（新） |
 | `[x-conix] governed`、`command_gates` | `crates/host/src/plugins/mod.rs`、`crates/host/src/config` |
 | 人做的决定（`/confirm` 等） | `crates/model/src/flows.rs`（`person_op`）、`port::RunOp::Confirm{reject, reason}` |
+| 人收尾运行的 worktree（`/worktree`）、只打回几个任务（`/rework <站>/<任务>`） | `crates/model/src/flows.rs`（`worktree_op`、`person_op`）、`port::RunOp::EndWorktree{how}`、`RunOp::Rework{tasks}`、`RunView::worktree`；`crates/host/src/flows/mod.rs`（`end_worktree`）、`map.rs`（`worktree`） |
 | 写流程的会话：试门禁、指南分章 | `crates/flow/src/author.rs`（`flow_gate_try`、`flow_guide {topic}`）、`runner/gate.rs`（`try_gate`）、`docs/guide/` |
 | 演示项目 | `examples/demo/`（流程、门禁、脚本、作业）；`crates/flow/tests/demo.rs` 不调模型地查它，`crates/conix/tests/live_demo.rs` 用真实模型跑它 |
 | 流程包、制品目录、归档、制品声明、包的命令 | `crates/flow/src/bundle.rs`、`packs.rs`、`kernel/layout.rs`（`with_artifacts_dir`）、`runner/archive.rs`、`runner/project.rs`（骨架）、`runner/script.rs`（`Writer`、`command`）、`runner/tools.rs`（`flow_command`） |

@@ -677,6 +677,9 @@ fn footer(s: &State) -> tui::Footer {
             Confirm::StopTask(_, t) => i18n::t!("view.confirm.stop_task", title = t),
             Confirm::ClearGoal(_) => i18n::t!("view.confirm.clear_goal"),
             Confirm::DeleteSession(_, t) => i18n::t!("view.confirm.delete_session", title = t),
+            Confirm::DiscardWorktree(r, b) => {
+                i18n::t!("view.confirm.discard_worktree", run = r.0, branch = b)
+            }
         };
         Line::toned(text, Tone::Attention)
     });

@@ -3,6 +3,7 @@
 
 use port::{
     BundleInfo, ProposalStatus, RunOp, RunStatus, RunView, StationId, StationStatus, StationView,
+    WorktreeEnd,
 };
 
 use crate::backend::{advance, apply_run_op};
@@ -105,6 +106,7 @@ pub(crate) fn goto(view: &mut RunView, station: &StationId) -> Result<String, St
                     view,
                     &RunOp::Rework {
                         to: station.clone(),
+                        tasks: vec![],
                         reason: None,
                     },
                 );
@@ -215,4 +217,28 @@ pub(crate) fn command_text(
         ("xpkg", "plan") if !has_run => Err("要在运行里：xpkg plan 用到运行目录".into()),
         _ => Ok(format!("{command} {}: ok", args.join(" "))),
     }
+}
+
+/// 结束了的运行的 worktree 收尾（`RunOp::EndWorktree`）：同实例，只认能收尾的；分支名里带 `conflict` 的合并
+/// 当作冲突，给界面演示冲突的样子。
+pub(crate) fn end_worktree(view: &mut RunView, how: WorktreeEnd) -> Result<String, String> {
+    let Some(w) = view.worktree.as_mut().filter(|w| w.decidable) else {
+        return Err(format!("运行 {} 没有能收尾的 worktree", view.summary.id));
+    };
+    if how == WorktreeEnd::Merged && w.branch.contains("conflict") {
+        return Err(format!(
+            "把 {} 合进项目有冲突：src/lib.rs；项目没动，worktree 还在 {}",
+            w.branch, w.path
+        ));
+    }
+    w.outcome = Some(how);
+    w.decidable = how == WorktreeEnd::Kept;
+    Ok(match how {
+        WorktreeEnd::Merged => {
+            w.into = Some("main".into());
+            format!("{} 合进了 main（快进）", w.branch)
+        }
+        WorktreeEnd::Kept => format!("留下了分支 {}，worktree 删了", w.branch),
+        WorktreeEnd::Discarded => format!("丢掉了 {} 与它的 worktree", w.branch),
+    })
 }

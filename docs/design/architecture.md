@@ -93,7 +93,7 @@ pub trait Backend: Send + Sync + 'static {
 | 对话 | `Submit{session, text, mode: Turn \| Steer \| Queue}`、`Interrupt`、`Answer{session, prompt, answer}`、`SetModel`、`Commands{session}`、`SideQuestion{session, text}` |
 | goal | `SetGoal`、`UpdateGoal{action: Pause \| Resume \| Edit \| Clear}` |
 | 任务 | `StopTask`、`MessageTask`、`TaskOutput{task, from_byte}`、`SessionTasks{session}`（这个会话与它的子 Agent 的整棵任务树；流程、作业页画树时要没被 Watch 的会话的任务） |
-| 流程 | `ListFlows`、`GetFlow{name}`、`ListRuns{flow}`、`ListEndedRuns{limit, before_ms}`（不分流程，结束新的在前）、`GetRun{id}`（带钉住的定义的摘要与它现在怎样了：`def_digest`、`def_state`）、`StartRun{flow, subject, inputs}`、`RunOp{run, op}` |
+| 流程 | `ListFlows`、`GetFlow{name}`、`ListRuns{flow}`、`ListEndedRuns{limit, before_ms}`（不分流程，结束新的在前）、`GetRun{id}`（带钉住的定义的摘要与它现在怎样了：`def_digest`、`def_state`）、`StartRun{flow, subject, inputs}`、`RunOp{run, op}`（`op` 里 `Rework{to, tasks}` 可以只重做几个任务，`EndWorktree{how}` 收尾结束了的运行的 worktree，`GetRun` 的 `worktree` 写着能不能收尾） |
 | 作业 | `ListJobs`、`SaveJob`、`DeleteJob`、`SetJobEnabled`、`RunJobNow`、`JobHistory{job}` |
 
 ### 3.3 事件（`Event`）

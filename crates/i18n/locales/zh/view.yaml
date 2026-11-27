@@ -72,6 +72,7 @@ view:
     stop_task: "停止「{title}」？ · y 确认 / 其他键放弃"
     clear_goal: "清除这个 goal？ · y 确认 / 其他键放弃"
     delete_session: "删掉会话「{title}」？转录、附属数据连同子 Agent 一起删，删了就没了 · y 确认 / 其他键放弃"
+    discard_worktree: "丢掉运行 {run} 的 worktree 与分支 {branch}？里面的改动没合进项目就没了 · y 确认 / 其他键放弃"
   models:
     title: "选一个模型"
     keys: "↑↓ 选择 · Enter 换到它（下一轮生效）· Esc 不换"

@@ -688,9 +688,14 @@ impl Flows {
             }
             RunOp::Release { station } => e.release(run, &station.0, by).await,
             RunOp::Force { station, reason } => e.force(run, &station.0, reason, by).await,
-            RunOp::Rework { to, reason } => {
+            RunOp::Rework { to, tasks, reason } => {
                 let reason = reason.as_deref().unwrap_or("rework from Conix");
-                e.rework(run, &to.0, None, reason, by).await
+                let tasks =
+                    (!tasks.is_empty()).then(|| tasks.iter().map(|t| t.0.clone()).collect());
+                e.rework(run, &to.0, tasks, reason, by).await
+            }
+            RunOp::EndWorktree { how } => {
+                return self.end_worktree(run, *how).await.map(|_| ());
             }
             // 有失败的任务就重做任务；没有就把没过的门禁重跑一遍（门禁 error 之后人看过了，或文件手工改好了）。
             RunOp::Retry { station } => {
@@ -711,6 +716,42 @@ impl Flows {
             }
         };
         self.runner.settle(r).await.map(|_| ()).map_err(flow_err)
+    }
+
+    /// 人定结束了的运行的 worktree 怎么收尾（flows.md §6.4）：合进项目当前的分支、留分支、丢掉。回给人看的
+    /// 一句；合并冲突时项目不动，报冲突的文件。
+    async fn end_worktree(&self, run: &str, how: port::WorktreeEnd) -> Result<String, PortError> {
+        use harnix_flow::WorktreeEnd as W;
+        let kind = match how {
+            port::WorktreeEnd::Merged => W::Merged,
+            port::WorktreeEnd::Kept => W::Kept,
+            port::WorktreeEnd::Discarded => W::Discarded,
+        };
+        let out = self
+            .runner
+            .end_worktree(run, kind, Self::by())
+            .await
+            .map_err(|e| match e {
+                harnix_flow::runner::EndError::Flow(f) => flow_err(f),
+                other => PortError::Failed(other.to_string()),
+            })?;
+        self.runner.apply(out).await;
+        let rec = self.engine.record(run).await.map_err(flow_err)?;
+        let w = rec.worktree.as_ref();
+        let o = w.and_then(|w| w.outcome.as_ref());
+        let branch = w.map(|w| w.branch.as_str()).unwrap_or_default();
+        Ok(match (how, o) {
+            (port::WorktreeEnd::Merged, Some(o)) => format!(
+                "merged {branch} into {} ({}) at {}",
+                o.into.as_deref().unwrap_or("the project"),
+                o.how.as_deref().unwrap_or("merge"),
+                o.commit.as_deref().map_or("", |c| &c[..c.len().min(7)]),
+            ),
+            (port::WorktreeEnd::Kept, _) => {
+                format!("kept the branch {branch}; its worktree is removed")
+            }
+            _ => format!("discarded {branch} and its worktree"),
+        })
     }
 
     /// 流程包变了（存、删了流程或件）：每个流程的摘要重推一遍，没了的推 `FlowRemoved`。
@@ -965,6 +1006,12 @@ impl FlowPort for Flows {
                 op: RunOp::Switch { to, reason },
             } => Ok(Reply::Text {
                 text: self.switch(&run.0, &to, reason.as_deref()).await?,
+            }),
+            Command::RunOp {
+                run,
+                op: RunOp::EndWorktree { how },
+            } => Ok(Reply::Text {
+                text: self.end_worktree(&run.0, how).await?,
             }),
             Command::GetFlow { name } => Ok(Reply::Flow(Box::new(self.detail(&name).await?))),
             Command::ListRuns { flow } => {

@@ -606,6 +606,9 @@ impl ScriptedBackend {
                                 .map_err(PortError::Failed)?,
                         )
                     }
+                    port::RunOp::EndWorktree { how } => Some(
+                        crate::flowops::end_worktree(&mut view, *how).map_err(PortError::Failed)?,
+                    ),
                     _ => {
                         apply_run_op(&mut view, op);
                         None
@@ -904,6 +907,7 @@ impl ScriptedBackend {
             def_digest: String::new(),
             def_state: port::DefState::Current,
             proposals: vec![],
+            worktree: None,
         };
         advance(&mut view);
         Ok(view)
@@ -1131,7 +1135,7 @@ pub(crate) fn apply_run_op(view: &mut RunView, op: &RunOp) {
             advance(view);
         }
         // 站操作与换路由 `flowops` 定做什么，再落到上面这些。
-        RunOp::Goto { .. } | RunOp::Switch { .. } => {}
+        RunOp::Goto { .. } | RunOp::Switch { .. } | RunOp::EndWorktree { .. } => {}
         RunOp::Retry { station: id } => {
             if let Some(i) = station(view, id) {
                 view.stations[i].status = StationStatus::Working;
