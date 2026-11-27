@@ -189,9 +189,11 @@ fn ends() -> Value {
 
 #[tokio::test]
 async fn each_path_dry_runs_through_the_people_it_waits_for_to_its_end() {
+    // The interface gate says nothing breaks: no one is asked to approve a breaking change.
+    let calm = json!({"xforge/interface-compat": {"breaking": false}});
     let mut m = ends();
     m["propose"] = json!({"summary": "s", "packages": packages()});
-    let rec = dry_through("xforge/quick", "low", json!({"stations": m}), &["verify"]).await;
+    let rec = dry_through("xforge/quick", "low", json!({"stations": m, "facts": calm}), &["verify"]).await;
     // A dry run reads no project: the bundle's defaults, under which whoever started it confirmed.
     let settings = rec.parts.settings.as_ref().unwrap();
     assert_eq!((&settings["governance"], &settings["review"]), (&json!({"spec": true, "interface": false}), &json!({"separate": false})));
@@ -202,8 +204,6 @@ async fn each_path_dry_runs_through_the_people_it_waits_for_to_its_end() {
     m["propose"] = json!({"summary": "s"});
     m["design"] = json!({"summary": "s", "packages": packages()});
     m["check"] = json!({"summary": "s", "ready": true});
-    // The interface gate says nothing breaks: no one is asked to approve a breaking change.
-    let calm = json!({"xforge/interface-compat": {"breaking": false}});
     let rec = dry_through("xforge/solid", "medium", json!({"stations": m.clone(), "facts": calm}), &["check", "verify"]).await;
     assert_eq!(rec.stations["archive"].tasks.len(), 2, "xspec archive and xarch archive");
     let left_out: Vec<_> = rec.stations["design"].not_required.iter().map(|n| n.label.as_str()).collect();
@@ -218,7 +218,7 @@ async fn a_breaking_interface_change_waits_for_the_owner_at_the_design_and_so_do
     // Each path that judges interface-compat has the owner's approval of a breaking change, read
     // off the gate's fact and nothing a model hands in.
     let p = packs();
-    for f in ["xforge/solid", "xforge/major", "xforge/dual"] {
+    for f in ["xforge/quick", "xforge/solid", "xforge/major", "xforge/dual"] {
         let (def, _) = p.flow(f).unwrap();
         let at: Vec<_> = def
             .stations
@@ -226,7 +226,7 @@ async fn a_breaking_interface_change_waits_for_the_owner_at_the_design_and_so_do
             .filter(|s| s.exit.iter().any(|e| matches!(e, ExitCond::Gate { gate, .. } if gate == "xforge/interface-compat")))
             .map(|s| s.id.as_str())
             .collect();
-        assert_eq!(at, [if f == "xforge/dual" { "propose" } else { "design" }], "{f}");
+        assert_eq!(at, [if matches!(f, "xforge/dual" | "xforge/quick") { "propose" } else { "design" }], "{f}");
         let st = def.station(at[0]).unwrap();
         let approvals: Vec<_> = st.exit.iter().filter_map(|e| match e {
             ExitCond::Confirm { who, label, when: Some(w), separate, binds, .. } => Some((who.as_deref(), label.as_deref(), w.gate.as_deref(), w.fact.as_deref(), separate.clone(), binds.clone())),
@@ -239,7 +239,6 @@ async fn a_breaking_interface_change_waits_for_the_owner_at_the_design_and_so_do
             "{f}"
         );
     }
-    assert!(p.flow("xforge/quick").unwrap().0.stations.iter().all(|s| s.exit.iter().all(|e| e.when().is_none())), "quick judges no interface");
 
     let mut m = ends();
     m["propose"] = json!({"summary": "s"});
@@ -283,7 +282,7 @@ async fn with_review_separate_on_whoever_authored_the_run_does_not_confirm_it() 
     let start = StartIn {
         flow: Some("xforge/quick".into()),
         inputs: json!({"title": "truncate", "risk": "low"}),
-        mocks: serde_json::from_value(json!({"stations": m})).unwrap(),
+        mocks: serde_json::from_value(json!({"stations": m, "facts": {"xforge/interface-compat": {"breaking": false}}})).unwrap(),
         ..Default::default()
     };
     let run = sb.start(start, person()).await.unwrap();

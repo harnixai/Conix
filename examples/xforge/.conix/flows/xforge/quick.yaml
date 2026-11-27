@@ -47,6 +47,14 @@ stations:
       - {kind: gate, gate: spec-delta-shape}
       - {kind: gate, gate: spec-delta}
       - {kind: gate, gate: interface-delta}
+      # quick 也会碰到破坏性的接口改动：一样要交代（决定台账）、一样要主人点头，不因为走了小路就省掉人。
+      - {kind: gate, gate: interface-compat}
+      - kind: confirm
+        who: owner
+        label: 批准破坏性改动
+        when: {gate: interface-compat, fact: breaking}
+        separate: "${settings.review.separate}"
+        binds: ["${output_dir}/interface-delta.yaml"]
       - {kind: gate, gate: packages-planned-quick}
     on_unmet: {rework_to: propose, max: 2}
 

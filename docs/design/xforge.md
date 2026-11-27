@@ -154,7 +154,7 @@ data-migration / infra，缺省空）；各自的 `risk` schema 就是 eligibili
 
 | 站 | quick | solid | major | 执行 | 写入范围 | 出口 |
 |---|---|---|---|---|---|---|
-| propose 提案 | ✓（顺手划包） | ✓ | ✓ | 会话 | 运行目录 | output、proposal-sections、impact、spec-delta-shape、spec-delta、interface-delta；quick 另加 packages-planned |
+| propose 提案 | ✓（顺手划包） | ✓ | ✓ | 会话 | 运行目录 | output、proposal-sections、impact、spec-delta-shape、spec-delta、interface-delta；quick 另加 interface-compat、有破坏性改动时的「批准破坏性改动」（§5.2）与 packages-planned |
 | clarify 澄清 | | | ✓ | 会话 | 运行目录 | output、ledgers-settled（questions 由人答）、confirm owner |
 | design 设计 | | ✓ | ✓ | 会话 | 运行目录 | output、design-sections、constitution、spec-delta、interface-delta、interface-compat、有破坏性改动时 confirm owner「批准破坏性改动」（§5.2）、packages-planned、ledgers-settled |
 | check 独立检查 | | ✓ | ✓ | 子 Agent，只看不改 | 不能写 | output、ledgers-settled、constitution-reply、confirm reviewer |
@@ -221,7 +221,7 @@ apply（每包一个子 Agent，任务级 package-check、package-tests；站 pa
 ### 5.2 破坏性的接口改动要主人批
 
 改了 stable 元素、声明了 `breaking`，光有 decisions 台账里一条 accepted 不够：那一条模型自己就能记、自己就能定结论。
-所以判 interface-compat 的站（solid、major 的 design，dual 的 propose）都有一条只在有破坏性改动时才要的确认：
+所以判 interface-compat 的站（quick 与 dual 的 propose，solid、major 的 design）都有一条只在有破坏性改动时才要的确认：
 
 ```yaml
 - kind: confirm
@@ -239,8 +239,8 @@ apply（每包一个子 Agent，任务级 package-check、package-tests；站 pa
 - **和别的确认一起**：它与 interface-compat 同在一站，判到它时门禁的结果已经在了（门禁还在跑，它就跟着等，不先问人）。
   批的是接口增量：之后的站再改 `interface-delta.yaml`（`xarch modify` 等），那一站过不去，回这一站重批。检查站（solid、major
   的检查通过，dual 的规格侧定了）照旧再批一遍整体；两次批的东西不同，一个是"这次可以破坏这个接口"，一个是"这份设计 / 规格侧可以照着做"。
-  驳回就是这条出口不过，按站的 `on_unmet` 打回这一站重写（design 回 design，dual 的 propose 回 propose）。
-- quick 的提案只判 interface-delta、不判 interface-compat，也就没有这条。
+  驳回就是这条出口不过，按站的 `on_unmet` 打回这一站重写（design 回 design，quick、dual 的 propose 回 propose）。
+- quick 也判：走小路不省人。quick 没有设计站，破坏性改动的交代（decisions 台账一条 accepted）与主人的批都在提案站。
 
 ## 6. 演示项目
 
