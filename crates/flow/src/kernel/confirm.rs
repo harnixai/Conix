@@ -519,6 +519,8 @@ pub(crate) fn votes(rec: &RunRecord) -> BTreeMap<String, Vec<Votes>> {
             .exit
             .iter()
             .enumerate()
+            // One its `when` left out asks no one for a vote; the station's `not_required` says why.
+            .filter(|(i, _)| !st.not_required.iter().any(|n| n.cond == *i && n.round == st.round))
             .filter_map(|(i, e)| {
                 let t = tally(&Rule::of(e, rec.parts.settings.as_ref())?, &st.confirms, st.round, i);
                 Some(Votes { cond: i, approvals: t.approvals, rejections: t.rejections, min: t.min })

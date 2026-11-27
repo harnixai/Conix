@@ -2,7 +2,8 @@ name: interface-compat
 title: 破坏性改动有交代
 description: >-
   增量里 breaking 的改动（修改 stable 的元素时声明的）：启动时的 inputs.impact 含 interface，且 decisions 台账里有一条 refs 指向这个编号、
-  结论 accepted。没有 breaking 的改动，或项目没开接口基线，直接过。
+  结论 accepted。没有 breaking 的改动，或项目没开接口基线，直接过。结果带事实 breaking（有没有破坏性改动），
+  站上"批准破坏性改动"的确认按它定要不要。
 kind: script
 script: interface-compat
 params:

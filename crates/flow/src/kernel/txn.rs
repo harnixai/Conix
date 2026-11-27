@@ -668,6 +668,7 @@ impl<'a> M<'a> {
         r.entered_at = Some(now);
         r.left_at = None;
         r.checks.clear();
+        r.not_required.clear();
         r.forced = None;
         r.reworked = None;
         let round = r.round;
@@ -1032,7 +1033,11 @@ impl<'a> M<'a> {
             (r.status, r.round)
         };
         let mut checks = vec![];
-        let r = self.rec.stations[sid].clone();
+        let mut not_required = vec![];
+        let mut r = self.rec.stations[sid].clone();
+        // A check a `when` held back stands for no judgement of its exit: one required now starts
+        // afresh — its gate asked for, its approval requested — instead of carrying a placeholder.
+        r.checks.retain(|k| !k.held_by_when());
         // A fan-out whose list never resolved has no tasks, and an `output` exit over no tasks
         // would pass: the station stays unmet until a rework enters it again. One whose script
         // is still working out its items has nothing to judge yet.
@@ -1064,6 +1069,40 @@ impl<'a> M<'a> {
         }
         for (i, c) in st.exit.iter().enumerate() {
             use super::def::ExitCond as C;
+            // Judged afresh every time: a rework, or gates run again, may change what it reads.
+            let mut when = None;
+            if let Some(w) = c.when() {
+                let wr = super::when::judge(self.rec, sid, round, &r, w);
+                let held = match wr.required {
+                    Some(true) => None,
+                    Some(false) => {
+                        not_required.push(super::run::NotRequiredRec {
+                            cond: i,
+                            label: c.label(),
+                            round,
+                            when: w.clone(),
+                            value: wr.value.clone().unwrap_or(Value::Null),
+                        });
+                        Some((CheckStatus::Pass, format!("not required: {}", wr.why)))
+                    }
+                    None => Some((CheckStatus::Wait, wr.why.clone())),
+                };
+                if let Some((status, detail)) = held {
+                    checks.push(CheckRec {
+                        cond: Some(i),
+                        kind: c.kind().into(),
+                        label: c.label(),
+                        round,
+                        status,
+                        detail,
+                        at: now,
+                        when: Some(wr),
+                        ..Default::default()
+                    });
+                    continue;
+                }
+                when = Some(wr);
+            }
             let mut at = now;
             // A gate's result as it came in: its findings, evidence and metrics go on with it.
             let mut carried: Option<CheckRec> = None;
@@ -1229,8 +1268,11 @@ impl<'a> M<'a> {
                 findings: carried.findings,
                 evidence: carried.evidence,
                 metrics: carried.metrics,
+                facts: carried.facts,
+                when,
             });
         }
+        self.st(sid).not_required = not_required;
         if let Some((k, ask)) = super::confirm::stale_check(self.rec, sid, round, &r, &checks, now) {
             self.fx.work.extend(ask);
             checks.push(k);
@@ -1495,7 +1537,7 @@ pub(crate) fn confirm_due(rec: &RunRecord, sid: &str) -> Option<u64> {
     let def = rec.def.station(sid)?;
     st.checks
         .iter()
-        .filter(|c| c.round == st.round && c.status == CheckStatus::Wait)
+        .filter(|c| c.round == st.round && c.status == CheckStatus::Wait && !c.held_by_when())
         .filter_map(|c| match def.exit.get(c.cond?)? {
             super::def::ExitCond::Confirm { timeout: Some(t), .. } => {
                 super::def::duration_ms(t).map(|ms| c.at.saturating_add(ms))

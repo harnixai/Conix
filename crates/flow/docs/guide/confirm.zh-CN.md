@@ -77,6 +77,19 @@
 - 先确认 server 和工具名：应用里有哪些 MCP server、它们的工具叫什么、建单要哪些参数、查单返回什么字段，问用户或看
   server 的说明，不要猜。
 
+## 只在某些情形下要人：`when`
+
+```yaml
+- {kind: gate, gate: interface-compat}          # 脚本回 facts: {breaking: true|false}
+- {kind: confirm, who: owner, label: 批准破坏性改动, when: {gate: interface-compat, fact: breaking}}
+```
+
+- `when: {gate, fact}` 读这一站或之前一站某道门禁结果里的事实；`when: {step, path}` 读之前（或这一站）一个**命令步骤**的输出。
+  不写比较要值是 `true`；`equals: x`、`in: [x, y]` 比较。
+- **不能读会话交的输出**：那是模型写的，读它等于让模型决定要不要人。判断要写进门禁脚本（从文件算出事实）或命令。
+- **说不清就要**：门禁没结果、出错、没给这个事实、类型不对，都算要。所以门禁该明确回 `false`，不要不回。
+- 不要时站上记 `not_required`，人看得到这次为什么没问他。
+
 ## 强制放行与受管流程
 
 - 人可以强制放行一站（写理由，记下当时哪些条件没满足），或把运行退回到某一站返工。

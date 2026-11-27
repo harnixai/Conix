@@ -239,7 +239,8 @@ pub(crate) fn dispatched_work_with(rec: &RunRecord, eng: &Engine, now: u64) -> V
         // Children in worktrees of their own still to be forked, or over and to be merged back.
         out.extend(super::fork::pending_work(rec, sid, st));
         if matches!(st.status, StationStatus::Working | StationStatus::Unmet) {
-            for c in &st.checks {
+            // A check a `when` holds back asked for nothing: there is nothing to hand out again.
+            for c in st.checks.iter().filter(|c| !c.held_by_when()) {
                 if let Some(w) = super::confirm::pending(rec, sid, st, c) {
                     out.push(w);
                     continue;
@@ -261,7 +262,7 @@ pub(crate) fn dispatched_work_with(rec: &RunRecord, eng: &Engine, now: u64) -> V
             }
         }
         if st.status == StationStatus::Working {
-            for c in &st.checks {
+            for c in st.checks.iter().filter(|c| !c.held_by_when()) {
                 let Some(i) = c.cond else { continue };
                 let mcp = matches!(
                     sdef.exit.get(i),

@@ -472,6 +472,10 @@ fn station_problems(c: &mut Ctx, s: &Station, cyclic: bool) {
         .iter()
         .any(|t| matches!(t.executor, Executor::Subflow { .. }));
     for e in &s.exit {
+        let kind = |g: &str| c.packs.gate(g).map(|g| g.kind);
+        for m in super::when::problems(def, id, e, &kind) {
+            c.at(id, m);
+        }
         match e {
             ExitCond::Output { .. } => {
                 if s.output.is_none() {
@@ -678,6 +682,11 @@ fn task_exit_problems(c: &mut Ctx, s: &Station) {
             c.at(id, format!("task_exit holds only gates (kind: gate), not {}", e.kind()));
             continue;
         };
+        // A hand-in is judged on its own, before the station's exits run: there is no result of
+        // this round yet for a `when` to read.
+        if e.when().is_some() {
+            c.at(id, format!("task_exit: gate {gate}: a when goes on the station's exit, not on a task's"));
+        }
         match c.packs.part(PartKind::Gate, gate) {
             None => c.at(id, format!("task_exit: gate {gate} is not in the packs")),
             Some((text, _)) => {

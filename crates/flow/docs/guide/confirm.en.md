@@ -88,6 +88,22 @@ made in an outside approval system (Feishu, DingTalk, Jira…) through MCP tools
   making a request takes and what reading one gives back — ask the user or read the server's description, do not
   guess.
 
+## A person only in some cases: `when`
+
+```yaml
+- {kind: gate, gate: interface-compat}          # its script returns facts: {breaking: true|false}
+- {kind: confirm, who: owner, label: approve a breaking change, when: {gate: interface-compat, fact: breaking}}
+```
+
+- `when: {gate, fact}` reads a fact from the result of a gate of this station or of one before it; `when: {step, path}` reads
+  the output of a **command step** before it (or this station). Without a comparison the value must be `true`; `equals: x`,
+  `in: [x, y]` compare.
+- **Not the output a session hands in**: a model wrote it, and reading it lets the model decide whether a person is asked.
+  Put the judgement in a gate script (a fact worked out from the files) or a command.
+- **No definite answer means required**: no result, an error, no such fact, a value of another kind. So a gate says `false`
+  outright rather than saying nothing.
+- Left out, the exit is kept in the station's `not_required`: a person sees why they were not asked this time.
+
 ## Forcing, and governed flows
 
 - A person may force a station past its conditions (with a reason; what was not met is recorded), or send the run
