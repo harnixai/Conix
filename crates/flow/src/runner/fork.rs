@@ -511,6 +511,12 @@ mod tests {
         assert_eq!(deny_read(&e, &c2).await, sorted(vec![wt.clone(), p1.clone()]));
         assert_eq!(fork.children, [("impl".to_string(), one.clone()), ("tests".to_string(), two.clone())].into());
         assert!(deny_read(&e, &rec).await.is_empty(), "the parent is kept from nothing");
+        // Its processes too — a test it wrote, run by a gate, would print the other side into the log.
+        let seen = crate::runner::exec::Recording::default();
+        let audit = crate::runner::exec::Audit::run(e.clone(), &one, Some("work"), None, "gate t");
+        let req = crate::ExecRequest::new(vec!["true".into()], &p1, std::time::Duration::from_secs(5));
+        crate::runner::exec::run_audited(&seen, req, &audit).await.unwrap();
+        assert_eq!(seen.requests()[0].deny_read, sorted(vec![wt.clone(), p2.clone()]));
 
         // Each works apart: the implementation, the tests.
         let (w1, w2) = (PathBuf::from(&c1.worktree.unwrap().path), PathBuf::from(&c2.worktree.unwrap().path));

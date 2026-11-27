@@ -716,6 +716,11 @@ pub struct ExecRequest {
     pub stdin: Option<Vec<u8>>,
     /// How much of each output stream is kept, and which end.
     pub keep: OutputKeep,
+    /// Paths it must not read, on top of what the backend keeps from every process (credentials): in
+    /// a run, what its sessions must not read either (a child of a dual path: its parent's worktree
+    /// and its siblings'), so that a test the model wrote cannot print the other side into a gate's
+    /// log. Filled in where the process is recorded for its run, not by each caller.
+    pub deny_read: Vec<std::path::PathBuf>,
 }
 
 impl ExecRequest {
@@ -731,6 +736,7 @@ impl ExecRequest {
             timeout,
             stdin: None,
             keep: OutputKeep::Head(64 * 1024),
+            deny_read: vec![],
         }
     }
 }
@@ -746,12 +752,16 @@ pub struct Enforcement {
     pub filesystem: bool,
     /// Whether the network was cut off when the request said no network.
     pub network: bool,
+    /// What the backend says it fell short of, one line each, when it enforced part of the profile
+    /// (`filesystem` and `network` are then `false` unless it said the whole of that one held).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unmet: Vec<String>,
 }
 
 impl Enforcement {
     /// Nothing enforced: a plain child process under `backend`'s name.
     pub fn none(backend: impl Into<String>) -> Self {
-        Self { backend: backend.into(), filesystem: false, network: false }
+        Self { backend: backend.into(), filesystem: false, network: false, unmet: vec![] }
     }
 }
 

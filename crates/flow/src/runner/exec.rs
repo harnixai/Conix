@@ -216,6 +216,9 @@ pub fn exec_record(what: &str, req: &ExecRequest, got: &Result<ExecOutcome, Exec
         "profile": req.profile,
         "network": req.network,
     });
+    if !req.deny_read.is_empty() {
+        line["deny_read"] = json!(req.deny_read);
+    }
     match got {
         Ok(o) => {
             line["code"] = json!(o.code);
@@ -238,7 +241,13 @@ pub fn exec_record(what: &str, req: &ExecRequest, got: &Result<ExecOutcome, Exec
 
 /// Run `req` through `exec` and record it where `audit` says. A record that cannot be written is
 /// a warning, never the process's failure: it has run by then.
-pub(crate) async fn run_audited(exec: &dyn Exec, req: ExecRequest, audit: &Audit) -> Result<ExecOutcome, ExecError> {
+pub(crate) async fn run_audited(exec: &dyn Exec, mut req: ExecRequest, audit: &Audit) -> Result<ExecOutcome, ExecError> {
+    if let Some((engine, run)) = &audit.run {
+        // Here, not at each caller: every process of a run passes through this one place.
+        if let Ok(rec) = engine.record(run).await {
+            req.deny_read.extend(super::fork::deny_read(engine, &rec).await);
+        }
+    }
     let got = exec.run(req.clone()).await;
     let line = exec_record(&audit.what, &req, &got);
     match &audit.run {
