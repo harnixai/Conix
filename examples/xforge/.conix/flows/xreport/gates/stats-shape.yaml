@@ -1,0 +1,74 @@
+name: stats-shape
+title: 统计的形状对
+description: stats.json 有范围、合计、作者、按星期与按小时的分布、目录、热点文件、提交清单，每一项的数都是非负整数。
+kind: check
+check: schema
+file: "${output_dir}/stats.json"
+as: json
+schema:
+  type: object
+  required: [format, generated_at, range, privacy, truncated, totals, authors, by_weekday, by_hour, by_day, by_dir, top_files, commits]
+  properties:
+    format: {const: 1}
+    generated_at: {type: string, minLength: 1}
+    range:
+      type: object
+      required: [since, until, rev, head, paths]
+      properties:
+        since: {type: string, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"}
+        until: {type: string, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"}
+        rev: {type: string, minLength: 1}
+        head: {type: string, pattern: "^[0-9a-f]{40,64}$"}
+        paths: {type: array, items: {type: string}}
+    privacy:
+      type: object
+      required: [subjects, emails]
+      properties: {subjects: {type: boolean}, emails: {type: boolean}}
+    truncated: {type: boolean}
+    totals:
+      type: object
+      required: [commits, merges, authors, insertions, deletions, files, binary_changes, active_days]
+      properties:
+        commits: {type: integer, minimum: 0}
+        merges: {type: integer, minimum: 0}
+        authors: {type: integer, minimum: 0}
+        insertions: {type: integer, minimum: 0}
+        deletions: {type: integer, minimum: 0}
+        files: {type: integer, minimum: 0}
+        binary_changes: {type: integer, minimum: 0}
+        active_days: {type: integer, minimum: 0}
+    authors:
+      type: array
+      items:
+        type: object
+        required: [name, commits, merges, insertions, deletions, files, active_days]
+        properties:
+          name: {type: string}
+          commits: {type: integer, minimum: 0}
+          merges: {type: integer, minimum: 0}
+          insertions: {type: integer, minimum: 0}
+          deletions: {type: integer, minimum: 0}
+          files: {type: integer, minimum: 0}
+          active_days: {type: integer, minimum: 0}
+    by_weekday:
+      type: array
+      minItems: 7
+      maxItems: 7
+      items: {type: object, required: [day, commits], properties: {commits: {type: integer, minimum: 0}}}
+    by_hour:
+      type: array
+      minItems: 24
+      maxItems: 24
+      items:
+        type: object
+        required: [hour, commits]
+        properties: {hour: {type: integer, minimum: 0, maximum: 23}, commits: {type: integer, minimum: 0}}
+    by_day: {type: array, items: {type: object, required: [date, commits]}}
+    by_dir: {type: array, items: {type: object, required: [dir, commits, insertions, deletions, files]}}
+    top_files: {type: array, items: {type: object, required: [path, commits, insertions, deletions]}}
+    commits:
+      type: array
+      items:
+        type: object
+        required: [sha, author, at]
+        properties: {sha: {type: string}, author: {type: string}, at: {type: string}}

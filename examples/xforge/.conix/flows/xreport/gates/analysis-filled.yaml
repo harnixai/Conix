@@ -1,0 +1,7 @@
+name: analysis-filled
+title: 分析每一节都写了
+description: analysis.md 的五节每节都有正文（模板里的注释不算），没有 TODO、TBD、待补。
+kind: script
+script: analysis-filled
+params:
+  analysis: "${output_dir}/analysis.md"

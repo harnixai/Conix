@@ -1,0 +1,20 @@
+name: xreport
+title: 提交历史报告
+description: >-
+  这个项目的 git 提交历史在一段时间里的报告：谁提交了什么、改了多少行、时间怎么分布、热点在哪。
+  统计（xstat collect 经系统的 git，不用模型）、分析（模型只读统计写文字）、定稿（表从统计生成，人确认）。
+version: 0.1.0
+pace: auto
+commands:
+  xstat: {read_only: [show, help]}
+# 项目的设置文件（docs/design/xreport.md §3）：启动时读、合并缺省、钉进运行；命令经 flow.settings 读，确认出口经
+# ${settings.review.separate} 读。邮箱缺省不记，提交说明缺省给模型看。
+settings:
+  file: .conix/governance/xreport.yaml
+  defaults:
+    range: {days: 30}
+    privacy: {subjects: true, emails: false}
+    limits: {commits: 20000, listed: 300, files: 20}
+    review: {separate: false}
+# 自检：git 跑得起来、项目是有提交的 git 仓库、设置的类型对。
+doctor: doctor
