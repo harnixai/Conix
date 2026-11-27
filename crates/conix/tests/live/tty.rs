@@ -275,6 +275,53 @@ impl<'a> Tty<'a> {
         self.keys("Enter");
     }
 
+    /// 演人的用例敲一条命令：回车前看输入框里是不是敲进去的样子。敲到一半冒出来的提问框会把字当成它的键
+    /// （`y` 是「是」、数字选第几项），那几个字就没进输入框，回车发出去的是另一条命令。看不对就照这些用例的规矩
+    /// 批准那个询问（Enter），`^U` 清掉输入框重敲。
+    pub fn command(&mut self, text: &str) {
+        let want = squash(text);
+        for _ in 0..3 {
+            if self.asking() {
+                self.record("提问框：Enter 批准".into());
+                self.keys("Enter");
+            }
+            self.type_text(text);
+            if self.composer().map(|c| squash(&c)) == Some(want.clone()) {
+                self.keys("Enter");
+                return;
+            }
+            self.record(format!("输入框里是 {:?}，清掉重敲", self.composer()));
+            if self.asking() {
+                self.record("提问框：Enter 批准".into());
+                self.keys("Enter");
+            }
+            self.keys("^U");
+        }
+        self.fail(&format!("敲了三次，输入框里都不是「{text}」"));
+    }
+
+    /// 输入框里的字（`> ` 起头、折成几行的连起来）；焦点不在输入框、看不到它是 `None`。
+    pub fn composer(&self) -> Option<String> {
+        let rows: Vec<String> = (0..ROWS)
+            .map(|n| {
+                let r = self.row(n);
+                // 左边那个框的里面：去掉左框线，到左右两框相接的地方为止。
+                let r = r.strip_prefix('│').unwrap_or(&r).to_string();
+                r.split("││").next().unwrap_or_default().to_string()
+            })
+            .collect();
+        // 输入框夹在最后两条横线之间（转录里人说过的话也是 `> ` 起头，不能只找它）。
+        let rules: Vec<usize> = (0..rows.len())
+            .filter(|&i| {
+                let r = rows[i].trim();
+                !r.is_empty() && r.chars().all(|c| c == '─')
+            })
+            .collect();
+        let [.., a, b] = rules[..] else { return None };
+        let text: String = rows[a + 1..b].concat();
+        text.trim_start().strip_prefix("> ").map(String::from)
+    }
+
     /// 等终端安静下来（没有新输出）一会儿，至多一秒：刚做的动作画到屏幕上了再往下看。
     pub fn settle(&mut self) {
         let end = Instant::now() + Duration::from_secs(1);
@@ -559,6 +606,11 @@ impl Drop for Tty<'_> {
 }
 
 /// 屏幕加上框和行号，空白行也看得出来。
+/// 去掉所有空白：输入框折行处的空格、行尾补的空格都不算。
+fn squash(s: &str) -> String {
+    s.chars().filter(|c| !c.is_whitespace()).collect()
+}
+
 fn frame(s: &str) -> String {
     let mut lines: Vec<&str> = s.split('\n').collect();
     lines.resize(ROWS as usize, "");
