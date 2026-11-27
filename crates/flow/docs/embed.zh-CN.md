@@ -450,6 +450,12 @@ Conix 在 Harnix 0.4.7 分叉了这个库，先把站的治理（门禁、确认
   在项目里、没有基线，没有 `flow.runs`。回 **`DoctorReport`**（`bundle`、`script`、`findings: Vec<DoctorFinding>`、`log`；
   `count`、`worst`）：每条 `{level: DoctorLevel（info | warn | error）, message, path?, fix?}` 照脚本给的；脚本抛错、回的形状不对，
   是一条点名脚本的 `error`。只有包不在、`bundle.yaml` 读不成时回 `Err`。什么都不修：`fix` 是写给人看的话。
+- **只在某些情形下要的出口**（Conix 的 flows.md §4.2）：`ExitCond` 的四种都加字段 **`when: Option<ExitWhen>`**（照字面构造
+  `ExitCond` 的宿主补上 `when: None`），`ExitWhen` 是 `{gate, fact}` 或 `{step, path}`，加 `equals` / `in`（`ExitCond::when()`、
+  `ExitWhen::answer` → `WhenAnswer`）。**`GateResult::facts`**（标量或标量列表的映射，`facts_problem` 校验，反序列化时不合规就报错）：
+  宿主的 `Gates` 要让出口读到事实就填它；`CheckRec` 加 `facts` 与 `when: Option<WhenRec>`（要不要、为什么、读到的值），
+  `StationRec::not_required: Vec<NotRequiredRec>` 记不要的出口；`RunView::votes` 不列不要的确认。说不清（没结果、出错、没有、类型不对）
+  一律当要。试运行的 **`Mocks::facts`**（门禁 → 事实）。旧记录照读，没有事实的门禁的历史不变。
 - **试运行用会话所在的流程包**：`Sandbox::start_in(input, by, packs)`；`flow_dry_run` 用会话读的那份（项目的流程、件），
   不再只看应用自己的包——项目里的流程以前试运行时找不到。
 - **事后可核对的归档**（Conix）：`record.json` 带 `format` 与 `files: [{path, sha256, size}]`（归档里其余每个文件），

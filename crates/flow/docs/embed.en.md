@@ -616,6 +616,14 @@ is so as not to collide with Harnix's own next one; what changes for a host is l
   error), message, path?, fix?}` as the script gave it; a script that throws or answers in another shape is one `error`
   naming it. `Err` only for a bundle that is not there or whose `bundle.yaml` does not read. Nothing is fixed: `fix` is
   words for a person.
+- **Exits required only in some cases** (Conix `docs/design/flows.md` §4.2): each of the four `ExitCond` kinds gains
+  **`when: Option<ExitWhen>`** (a host that builds an `ExitCond` field by field adds `when: None`); `ExitWhen` is `{gate, fact}`
+  or `{step, path}`, with `equals` / `in` (`ExitCond::when()`, `ExitWhen::answer` → `WhenAnswer`). **`GateResult::facts`**
+  (a map of scalars or lists of scalars, checked by `facts_problem`; one that is not fails to deserialize): a host's `Gates`
+  fills it for an exit to read. `CheckRec` gains `facts` and `when: Option<WhenRec>` (required or not, why, the value read);
+  `StationRec::not_required: Vec<NotRequiredRec>` keeps the exits left out; `RunView::votes` lists none of them. No
+  definite answer (no result, an error, nothing there, another kind of value) means required. `Mocks::facts` gives a dry
+  run's gates their facts. Old records read as before; the history of a gate with no facts is unchanged.
 
 ### `FLOW_API_VERSION = 1`
 

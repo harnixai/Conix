@@ -154,7 +154,8 @@ export default function (input, flow) {
   `flow.schema.validate(value, schema)` (`{ok, errors}`), `flow.log(...)` (into the station's `gate-<gate>.log`).
 - No `import`, no commands, no network; paths are held to the working directory: reading outside it is an `error`,
   even if the script catches it.
-- Return `{verdict, summary?, findings?, metrics?}`; a throw, a timeout or anything else is an `error`. **Do not
+- Return `{verdict, summary?, findings?, metrics?, facts?}`; a throw, a timeout or anything else is an `error`. `facts`
+  are for an exit's `when` to read (`flow_guide {topic: "confirm"}`): each a string, number or boolean, or a list of them. **Do not
   report evidence**: the runtime records the hash of every file the script read.
 - Do not trust what `input.outputs` claims ("all tests passed"): read the files. That is what a gate is for.
 

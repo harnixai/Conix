@@ -220,7 +220,8 @@ export default function (input, flow) {
   "summary": "一句话",
   "findings": [{"rule": "closed", "severity": "error", "path": "risks.jsonl", "line": 3, "message": "R-2 未结"}],
   "evidence": [{"path": "flows/x-2026112401/risks.jsonl", "sha256": "…", "size": 1024}],
-  "metrics": {"open": 0}
+  "metrics": {"open": 0},
+  "facts": {"breaking": false, "modules": ["textkit"]}
 }
 ```
 
@@ -232,6 +233,10 @@ export default function (input, flow) {
 
 - `severity` 是 `error`（缺省）或 `warn`。门禁可以写 `fail_on: warn`：有 warn 也算不过；缺省只看 `verdict`。
 - 证据与结论进运行记录（这一条出口的 `CheckRec`）和事件日志（`gate_result`），事后能复核。
+- **`facts`**：门禁的代码顺手算出的事实，给出口的 `when` 读（§4.2）。每个值是字符串、数、布尔，或它们的列表；`null`、对象不收，
+  形状不对就是 `error`：`when` 要分得清"没有这个事实"和"它说不"，能是 `null` 的事实把两者搅在一起。与 `metrics` 不同，`metrics`
+  给人看，`facts` 会被判站读，所以要说清"这次有没有"（一个 `false`），而不是没有就不写。和结论一起记进 `CheckRec`、事件日志、
+  `record.json`。`check` 门禁（Rust 内置）没有事实；`script` 门禁的脚本、`command` 门禁 `result: json` 的输出、宿主的 `function` 都能给。
 - 兼容：插件函数回的旧形状 `{pass, detail}` 读成 `verdict: pass|fail`、`summary: detail`。
 
 ## 4. 确认
@@ -312,6 +317,40 @@ exit:
 - **绑定**：通过时记下 `binds` 每个文件的摘要，`deliverables` 是本站及之前各站声明的制品。之后每一站出站、运行结束前，引擎自动核对一遍
   （隐含的出口，同 `sealed` 的做法）；被改过就**不过**，findings 写"检查站批过的 design.md 改了"，出路是打回那一站重批。
 - 要多个模型独立检查：站写 `tasks:`，每个任务一个执行者或模型，台账汇总，出口照旧；这与多人确认是两件事。
+
+### 4.2 只在某些情形下要的出口：`when`
+
+有的人只在某些情形下才需要：xforge 里破坏性的接口改动要主人批，不破坏就不用问他。任何出口都可以带 `when`：
+
+```yaml
+- {kind: gate, gate: interface-compat}
+- kind: confirm
+  who: owner
+  label: 批准破坏性改动
+  when: {gate: interface-compat, fact: breaking}     # 门禁结果的 facts.breaking 为 true 才要
+- {kind: confirm, who: security, when: {gate: impact-scan, fact: areas, in: [auth, payment]}}
+- {kind: confirm, who: dba, when: {step: migrate-plan, path: summary.destructive}}   # 命令步骤的输出
+```
+
+| 写法 | 读什么 | 只能指向 |
+|---|---|---|
+| `{gate: <门禁>, fact: <键>}` | 那道门禁这一轮（之前的站：最近一轮）结果的 `facts.<键>`（§3） | 这一站或它之前（`needs` 上游）一站的门禁出口，那条出口自己不带 `when`；`check`、`tool` 门禁不给事实，不收 |
+| `{step: <站>, path: <点分路径>}` | 那一站任务的输出里的这个路径 | 这一站或它之前一站，且那一站是**一个命令步骤**（`executor: {kind: command}`，没有 `foreach`、`tasks`） |
+
+- 不写比较就要值是 `true`；`equals: <标量>`、`in: [<标量>…]` 比较，值是列表时含有一个对得上的就算。读定义时校验：两种来源只能写一种，
+  `gate` 要带 `fact`、`step` 要带 `path`，`equals` 与 `in` 只能写一个；指向不在范围里的门禁或站，起不来。`task_exit` 不收 `when`。
+- **来源只认确定的代码，不认模型交的东西。** 门禁的事实由门禁的代码从文件算出，命令步骤的输出由包的命令在没有模型的情况下算出；
+  会话交的站输出是模型写的。要是 `when` 能读站的输出，模型写一个 `breaking: false` 就把该批的人绕过去了——"要人的时候就一定要人"
+  在这里就破了。文件可能是模型写的，但从文件判出"是不是破坏性改动"的是门禁的代码，判法人能审、改了要过包的评审。
+- **说不清就要（fail closed）。** 只有读到一个明确的"不"，这条出口才不要：门禁还没结果（之前的站的门禁没跑、被跳过）、门禁 `error`、
+  结果里没有这个事实、值的类型不对（要布尔给了字符串，比较的是数给了字符串）、路径上什么都没有，一律当**要**，站上写明为什么
+  （`CheckRec.when`，`explain` 带"required: …"，人看到的就是这句）。出了故障却悄悄少问一个人，比多问一次糟得多。
+  同一站的门禁还在跑时，出口跟着它等，什么也不先做（不建外部审批单、不起计时），结果来了再判。
+- **不要的也留记录。** 不要的出口在站上记一条 `not_required`（第几条、标签、哪一轮、`when`、读到的值），检查记成 `pass`、
+  `detail` 写"not required: gate interface-compat fact breaking is false, not is true"，投票表里不列它。审计看得到"这一站本该有谁批、
+  为什么这次没批"，不是这条出口不见了。
+- **每次判站都重算。** 打回、重跑门禁之后事实变了，要不要跟着变：上一轮不要的确认，这一轮可能要，反过来也一样。
+- 强制放行（§5）的规矩不变：要的出口没过才算 `unmet`，不要的不在里面。
 
 ## 5. 强制放行与受管流程
 
@@ -644,6 +683,7 @@ export default function (input, flow) {
 | 执行 `check` / `command` / `script` | `runner/gate.rs`、`runner/plan.rs`（命令门禁的 `plan`）；`runner/files.rs`（限在工作目录里读、记证据）、`runner/checks.rs`、`runner/script.rs`（rquickjs，与 Agix 同一版本） |
 | 打回时告诉会话为什么 | `kernel/run.rs`（`StationRec::reworked`）、`kernel/protocol.rs` |
 | 确认、轮询审批 | `kernel/def.rs`（`ExitCond::Confirm`）、`kernel/txn.rs`、`runner/approvals.rs`（新） |
+| 出口的 `when`、门禁的 `facts` | `kernel/def.rs`（`ExitWhen`）、`kernel/when.rs`（读值、校验）、`kernel/txn.rs`（`judge`）、`kernel/host.rs`（`GateResult::facts`）、`kernel/run.rs`（`WhenRec`、`NotRequiredRec`）；`tests/when.rs` |
 | 受管流程 | `packs.rs`（`ProjectPacks`、`DirPacks`）、`kernel/run.rs`（`governed`） |
 | 子流程结果、`children`、交付 | `kernel/def.rs`、`kernel/txn.rs`、`runner/tools.rs`（`flow_submit`） |
 | 子运行在自己的 worktree 里（分叉提交、合回、读隔离） | `crates/flow/src/kernel/fork.rs`、`runner/fork.rs`（新）、`runner/worktree.rs`（`make` 带起点与取好的 id）、`runner/host.rs`（`OpenSpec::deny_read`）；Conix 把 `deny_read` 翻成 `Read(...)` deny：`crates/host/src/flows/session_host.rs` |

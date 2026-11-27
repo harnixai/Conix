@@ -145,7 +145,8 @@ export default function (input, flow) {
   `flow.glob(模式)`（路径数组）、`flow.stat(路径)`（`{size, sha256}` 或 `null`）、`flow.schema.validate(值, schema)`
   （`{ok, errors}`）、`flow.log(...)`（写进这一站的 `gate-<门禁>.log`）。
 - 不能 `import`、不能跑命令、不能联网，路径限在工作目录里：读到外面就是 `error`，脚本自己 catch 了也一样。
-- 返回 `{verdict, summary?, findings?, metrics?}`；抛错、超时、返回别的都是 `error`。**证据不用报**：脚本读过的文件
+- 返回 `{verdict, summary?, findings?, metrics?, facts?}`；抛错、超时、返回别的都是 `error`。`facts` 是给出口的 `when` 读的事实
+  （`flow_guide {topic: "confirm"}`），每个值是字符串、数、布尔或它们的列表。**证据不用报**：脚本读过的文件
   由运行时记下 hash。
 - 别信 `input.outputs` 里的说法（"测试全过了"），去读文件核实：门禁就是为这个存在的。
 
