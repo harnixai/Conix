@@ -31,6 +31,13 @@
 - `command`：跑一条命令（测试、lint）。只在受信的项目里跑，`conix.yaml` 的 `flows.command_gates: off` 可以整个关掉
   （见[配置](config.md#conixyaml)）。环境变量按门禁的 `env` 白名单透传，缺省一个不传，模型的密钥永远不传。
 
+门禁的命令、包脚本里的 `flow.exec` 都在**引擎的沙箱**里跑（与会话里的 `Bash` 同一套）：门禁只读，项目里一个文件都写不了，
+只有这次调用自己的临时目录（`$TMPDIR`）可写——测试工具要写缓存的，让它写进 `$TMPDIR`（Python 设
+`PYTHONPYCACHEPREFIX="$TMPDIR/pycache"`，xforge 的 `verify.sh` 就是这么写的）。缺省不联网（包在 `bundle.yaml` 的 `exec`
+里声明才联网），`~/.ssh` 这类凭据读不到。每次起的进程都记进运行历史，带沙箱守住了什么（`enforced`）。macOS 自带沙箱；
+Linux 要装 `bwrap`（bubblewrap），没装时这些命令不跑、门禁报错，确实要在沙箱外跑就在全局 `conix.yaml` 写
+`flows.exec_unconfined: allow`。
+
 门禁回的结果都一样：`verdict`、`summary`、`findings`（哪个文件、哪一行、哪里不对）、`metrics`，读过的文件连同 hash
 记进运行。`fail` 是交付要改：站写了 `on_unmet` 就自动打回，新一轮的会话会拿到 findings。`error` 是门禁没得出结论
 （文件读不了、命令起不来、脚本出错）：不自动打回，你看过、修好之后让模型重跑这一站的门禁（`flow_retry` 不带任务）。
@@ -44,6 +51,8 @@
 | `/release [运行] [站]` | 放行搁置（`hold: true`）的站 |
 | `/force [运行] [站] <理由>` | 不管没满足的条件强制放行（受管流程不能） |
 | `/rework [运行] <站> [理由]` | 把运行打回到这一站重做（它和后面的站重来）；理由给重做的站看。这个模型也能做（`flow_rework`） |
+| `/rework [运行] <站>/<任务>[,<任务>] [理由]` | 只重做这一站的这几个任务（比如双路只重做实现那一路），别的任务的交付留着 |
+| `/worktree [运行] merge \| keep \| discard` | 结束了的 worktree 运行怎么收尾：合进项目当前的分支、只留分支、丢掉（丢掉先问你）。不写就告诉你能做什么 |
 
 运行不写，是流程标签里选中的那次、或左边正对着的那次运行的会话；站不写，是这次运行里唯一在等这件事的站。命令不进会话，
 直接发给实例，记成你（操作系统用户）做的。确认写了角色（`who: reviewer`）的，按项目的 `.conix/roles.yaml` 核对：
@@ -100,7 +109,8 @@ release: [carol]
   要跑 git，所以项目要受信（`/trust`）。约定见 `docs/design/xreport.md`。
 - **双路开发 `xforge/dual`**：规格侧（提案、规格与接口增量）写一次、检查、你批准；之后分成两个子运行，各在自己的 worktree 里，
   一个实现、一个只照规格写黑盒测试，互相看不到；两路合回运行的分支后用黑盒测试跑实现，没过的由会话判错在哪一边，你决定打回哪一路
-  （`/rework fork` 两路都重做，或在对话里让主 Agent 只打回其中一个任务）。不按风险自动选，点名起：`/flow:xforge:dual <主题> --risk high`。
+  （`/rework fork` 两路都重做，`/rework fork/impl` 只重做实现那一路）。两个子运行的会话与门禁跑的命令都读不到另一路的
+  worktree。整个运行结束后 `/worktree merge` 合进项目。不按风险自动选，点名起：`/flow:xforge:dual <主题> --risk high`。
   要在 `.conix/governance/xforge.yaml` 的 verify 菜单里声明一项 `blackbox`（黑盒测试放哪、怎么跑），没有它合起来那一站就报错。
 
 ## 管理流程包
@@ -226,4 +236,6 @@ release: [carol]
 ## worktree
 
 流程写 `workspace: worktree` 的运行不直接改项目，在仓库根的 `.wkts/<运行>/` 里干活（分支
-`conix/flow/<运行>`），主仓库的 `git status` 看不到它。运行结束后合回、保留分支还是丢弃，在对话里说。
+`conix/flow/<运行>`），主仓库的 `git status` 看不到它。运行结束后流程标签里运行下面多一行 `⎇`，写着 worktree 等你定；
+`/worktree merge` 合进项目当前的分支（冲突时项目不动，列出冲突的文件），`/worktree keep` 只留分支，`/worktree discard`
+丢掉（先问你）。

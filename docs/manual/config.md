@@ -85,6 +85,7 @@ jobs:
 
 # flows:
 #   command_gates: trusted  # 命令门禁：trusted 受信的项目里才跑（缺省）| off 一律不跑
+#   exec_unconfined: refuse # 沙箱兜不住（Linux 没装 bwrap）时：refuse 不跑（缺省）| allow 在沙箱外跑
 
 # notify: …                 # 缺省不发，见 [通知](notify.md)
 
@@ -98,6 +99,7 @@ jobs:
 | `instance` | `personal_project` | `<文档目录>/Conix` | 在家目录、它的上级或 `~/.conix` 里运行 `conix` 时进的项目（[实例](instances.md#个人项目)），第一次用就信任；`~` 开头按家目录展开。TUI 与实例启动时读 |
 | `jobs` | `defaults.*`、`limits.*`、`daily_tokens`、`max_concurrent` | 如上例 | 作业护栏；数字与 `2M`、`500k`、`30m` 都收 |
 | `flows` | `command_gates` | `trusted` | 流程的命令门禁（`kind: command`）在这台机器上执行命令：`trusted` 只在受信的项目里跑，`off` 一律不跑、也存不进去。见[流程](flows.md#门禁确认与交付) |
+| `flows` | `exec_unconfined` | `refuse` | 门禁的命令与包的 `flow.exec` 都在引擎的沙箱里跑；这台机器的沙箱兜不住（Linux 没装 `bwrap`）时，`refuse` 不跑、门禁报错，`allow` 在沙箱外照样跑，记录里写明没隔离。项目的配置改不了它 |
 | `notify` | `when`（`detached` 缺省 / `always`）、`min_level`（`info` / `warn` 缺省 / `error`）、`sinks[]`（`name`、`command`、`stdin`、`min_level`） | 不配就不发 | 只认这个全局文件 |
 | `engine` | `model` | 不写，用 Agix 的缺省 | 引擎自带 `anthropic` 的模型（相当于 `agixd --model`）；是进程参数而不是 Agix 的设置键，所以放这里 |
 
