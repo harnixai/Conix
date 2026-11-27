@@ -87,7 +87,8 @@ pub fn artifacts_dir_ok(name: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
 }
 
-/// 命令门禁的子进程永远拿不到的环境变量，门禁的 `env` 写了也不给：模型 provider 的密钥、Conix 与 Agix 自己的。
+/// 项目与包起的进程（命令门禁、`plan` 的 run、`flow.exec`）永远拿不到的环境变量，`env` 写了也不给：
+/// 模型 provider 的密钥、Conix 与 Agix 自己的。以 `*` 开头的是后缀。
 pub const GATE_ENV_DENY: &[&str] = &[
     "*_API_KEY",
     "*_AUTH_TOKEN",
@@ -199,6 +200,8 @@ pub async fn start(hub: &Hub, cfg: FlowsConfig) -> anyhow::Result<Arc<Flows>> {
         hook_headers: "X-Conix".into(),
         command_gates: cfg.command_gates,
         env_deny: GATE_ENV_DENY.iter().map(|s| s.to_string()).collect(),
+        // 项目与包要起的每个进程都经实例的执行服务（flows.md §7.14）。
+        exec: Some(crate::exec::service()),
         ..RunnerConfig::default()
     };
     let mounted = hub.mounted_plugins().await;

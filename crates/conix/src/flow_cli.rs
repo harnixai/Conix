@@ -235,11 +235,13 @@ fn err(e: String) -> anyhow::Error {
 }
 
 /// 跑一条子命令；`here` 给出没写 `-C` 时的项目（和直接运行 `conix` 一样），`home` 是全局目录，
-/// `artifacts_dir` 是全局配置里的制品目录名（项目自己的 `.conix/conix.yaml` 写了以项目的为准）。
+/// `artifacts_dir` 是全局配置里的制品目录名（项目自己的 `.conix/conix.yaml` 写了以项目的为准），
+/// `commands` 是全局配置的 `flows.command_gates` 没关（项目与包定义的执行的总开关）。
 pub async fn run(
     args: FlowArgs,
     home: &Path,
     artifacts_dir: Option<String>,
+    commands: bool,
     here: impl FnOnce() -> Result<PathBuf>,
 ) -> Result<()> {
     let project = project_of(args.project_dir, here)?;
@@ -375,7 +377,9 @@ pub async fn run(
             }
             Ok(())
         }
-        FlowCmd::Doctor { global, fix } => doctor(&ctx, home, &artifacts, global, fix).await,
+        FlowCmd::Doctor { global, fix } => {
+            doctor(&ctx, home, &artifacts, commands, global, fix).await
+        }
         FlowCmd::Verify { dir, all } => {
             let runs = client::layout::ProjectState::new(&project).flow_runs();
             let dirs = match dir {
@@ -708,7 +712,13 @@ fn level_mark(l: Level) -> &'static str {
     }
 }
 
-async fn check(ctx: &Ctx, home: &Path, artifacts: &str, global: bool) -> doctor::Report {
+async fn check(
+    ctx: &Ctx,
+    home: &Path,
+    artifacts: &str,
+    commands: bool,
+    global: bool,
+) -> doctor::Report {
     if global {
         doctor::global(ctx)
     } else {
@@ -716,13 +726,21 @@ async fn check(ctx: &Ctx, home: &Path, artifacts: &str, global: bool) -> doctor:
             artifacts_dir: artifacts.to_string(),
             plugin_flow_dirs: plugin_flow_dirs(home),
             trusted: trusted(home, &ctx.project),
+            commands,
         };
         doctor::project(ctx, &opts).await
     }
 }
 
-async fn doctor(ctx: &Ctx, home: &Path, artifacts: &str, global: bool, fix: bool) -> Result<()> {
-    let report = check(ctx, home, artifacts, global).await;
+async fn doctor(
+    ctx: &Ctx,
+    home: &Path,
+    artifacts: &str,
+    commands: bool,
+    global: bool,
+    fix: bool,
+) -> Result<()> {
+    let report = check(ctx, home, artifacts, commands, global).await;
     println!(
         "{}",
         if global {
@@ -781,7 +799,7 @@ async fn doctor(ctx: &Ctx, home: &Path, artifacts: &str, global: bool, fix: bool
     }
     // 修过了就按修完的样子再查一遍定退出码：修好的错误不该让脚本以为还坏着。
     let errors = if fix && !report.fixes.is_empty() {
-        check(ctx, home, artifacts, global).await.errors()
+        check(ctx, home, artifacts, commands, global).await.errors()
     } else {
         report.errors()
     };

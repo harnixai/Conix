@@ -274,6 +274,8 @@ pub struct ProjectOpts {
     pub plugin_flow_dirs: Vec<(String, PathBuf)>,
     /// 项目受不受信；`None` 是看不出来。
     pub trusted: Option<bool>,
+    /// `conix.yaml` 的 `flows.command_gates` 没关：包的自检脚本才能经执行服务起进程（flows.md §7.14）。
+    pub commands: bool,
 }
 
 /// 项目：每个包的校验、lock、改过、有新版、只在项目、遮住插件、保留名、进行中运行的包、信任、`.gitignore`、
@@ -497,7 +499,28 @@ async fn bundle_doctor(ctx: &Ctx, opts: &ProjectOpts, name: &str) -> Vec<Finding
     let packs =
         harnix_flow::DirPacks::new([ctx.flows_dir()]).with_catalog(package::default_catalog());
     let layout = super::project_layout(&ctx.project, Some(&opts.artifacts_dir));
-    let report = match harnix_flow::doctor(&packs, Some(&layout), name, &ctx.project).await {
+    // 自检只看：`flow.exec` 拿到 `read`，记进日志；开关关着、项目没受信（或看不出来）就不起进程，脚本被告知为什么。
+    let refused = if !opts.commands {
+        Some(i18n::t!("flowlib.dr_exec_off"))
+    } else if opts.trusted != Some(true) {
+        Some(i18n::t!("flowlib.dr_exec_untrusted"))
+    } else {
+        None
+    };
+    let exec = harnix_flow::DoctorExec {
+        exec: crate::exec::service(),
+        refused,
+        env_deny: super::GATE_ENV_DENY.iter().map(|s| s.to_string()).collect(),
+    };
+    let report = match harnix_flow::doctor_with(
+        &packs,
+        Some(&layout),
+        name,
+        &ctx.project,
+        Some(&exec),
+    )
+    .await
+    {
         Ok(r) => r,
         Err(e) => {
             return vec![Finding {

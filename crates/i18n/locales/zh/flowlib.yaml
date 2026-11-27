@@ -89,6 +89,8 @@ flowlib:
   dr_runs_gone: "进行中的运行用着它，项目里却没有：{runs}"
   dr_untrusted: "项目没受信：{n} 道命令门禁不会跑"
   dr_hint_trust: "在实例里 /trust"
+  dr_exec_off: "命令没开（conix.yaml 的 flows.command_gates: off）：包的自检不起进程"
+  dr_exec_untrusted: "项目没受信（或看不出来）：包的自检不起进程"
   dr_not_ignored: "git 没忽略 {path}：运行的过程文件会被提交"
   dr_archives_ok: "{n} 份归档都核对通过"
   dr_archives_bad: "{total} 份归档里 {n} 份核对不过：{list}"

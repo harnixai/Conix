@@ -117,7 +117,11 @@ async fn main() -> Result<()> {
     }
     if let Some(Cmd::Flow(args)) = cli.command {
         let artifacts = cfg.flows.artifacts_dir.clone();
-        return flow_cli::run(args, &config::home(), artifacts, || project_here(&cfg)).await;
+        let commands = cfg.flows.command_gates != config::CommandGates::Off;
+        return flow_cli::run(args, &config::home(), artifacts, commands, || {
+            project_here(&cfg)
+        })
+        .await;
     }
     let (settings, more) = cfg.settings();
     problems.extend(more);

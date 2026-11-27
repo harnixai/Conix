@@ -3,6 +3,7 @@
 //! 这个 crate 不依赖 Agix：嵌入的引擎由 `engine` crate 提供。
 
 pub mod engine;
+pub mod exec;
 pub mod flows;
 pub mod hub;
 pub mod instance;

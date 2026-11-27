@@ -3,14 +3,15 @@
 //! 文件来自仓库，不能让一个仓库在别人的机器上执行命令、把数据往外发。
 
 use std::path::PathBuf;
-use std::process::Stdio;
 use std::time::Duration;
 
+use harnix_flow::{ExecProfile, ExecRequest, OutputKeep};
 use port::{Alert, NoticeLevel, SinkResult};
 use serde::Deserialize;
-use tokio::io::AsyncWriteExt;
 
 const SINK_TIMEOUT: Duration = Duration::from_secs(10);
+/// 出口失败时留多少 stderr（结尾）给人看。
+const SINK_STDERR_KEPT: usize = 8 * 1024;
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 #[serde(default)]
@@ -189,29 +190,29 @@ impl Notifier {
     }
 }
 
+/// 经实例的执行服务起一个出口：`host` 档位（用户自己配的命令，不隔离），带用户的整个环境（凭据在那里），
+/// 记进宿主日志。
 async fn run(args: &[String], stdin: Option<&str>) -> Result<(), String> {
-    let (prog, rest) = args.split_first().ok_or("the command is empty")?;
-    let mut cmd = tokio::process::Command::new(prog);
-    cmd.args(rest)
-        .stdin(if stdin.is_some() {
-            Stdio::piped()
-        } else {
-            Stdio::null()
-        })
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true);
-    let mut child = cmd.spawn().map_err(|e| format!("{prog}: {e}"))?;
-    if let (Some(text), Some(mut pipe)) = (stdin, child.stdin.take()) {
-        let _ = pipe.write_all(text.as_bytes()).await;
-    }
-    match tokio::time::timeout(SINK_TIMEOUT, child.wait_with_output()).await {
-        Err(_) => Err(format!("{prog}: no answer in 10s")),
-        Ok(Err(e)) => Err(format!("{prog}: {e}")),
-        Ok(Ok(o)) if o.status.success() => Ok(()),
-        Ok(Ok(o)) => Err(format!(
+    let prog = args.first().ok_or("the command is empty")?;
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::env::temp_dir());
+    let mut req = ExecRequest::new(args.to_vec(), cwd, SINK_TIMEOUT);
+    req.profile = ExecProfile::Host;
+    req.network = true;
+    req.inherit_env = true;
+    req.stdin = stdin.map(|t| t.as_bytes().to_vec());
+    req.keep = OutputKeep::Tail(SINK_STDERR_KEPT);
+    let exec = crate::exec::service();
+    match crate::exec::run_logged(exec.as_ref(), "notify sink", req).await {
+        Err(e) => Err(format!("{prog}: {e}")),
+        Ok(o) if o.timed_out => Err(format!("{prog}: no answer in 10s")),
+        Ok(o) if o.code == Some(0) => Ok(()),
+        Ok(o) => Err(format!(
             "{prog}: {} {}",
-            o.status,
+            match (o.code, o.signal) {
+                (Some(c), _) => format!("exit status: {c}"),
+                (None, Some(s)) => format!("signal: {s}"),
+                (None, None) => "no exit status".to_string(),
+            },
             String::from_utf8_lossy(&o.stderr).trim()
         )),
     }

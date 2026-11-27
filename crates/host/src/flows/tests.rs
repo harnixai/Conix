@@ -953,3 +953,67 @@ async fn the_global_library_is_not_run_until_a_bundle_is_installed() {
     assert!(lib.is_empty(), "{lib:?}");
     flows.stop().await;
 }
+
+/// 实例的执行服务接到了派工器上：包的命令在运行里经它起进程，记进运行历史，`enforced` 照实说普通后端什么都没守。
+#[tokio::test]
+async fn a_bundles_process_goes_through_the_instances_exec_and_is_recorded() {
+    let dir = tempfile::tempdir().unwrap();
+    let project = example_project(dir.path());
+    let b = project.join(".conix/flows/rx");
+    for (rel, text) in [
+        ("bundle.yaml", "name: rx\ncommands: [report]\n"),
+        (
+            "work.yaml",
+            "name: work\nstations:\n  - {id: a, exit: [{kind: confirm}]}\n",
+        ),
+        (
+            "commands/report.js",
+            "export default function (input, flow) { return flow.exec({argv: ['printf', '%s', 'a;b']}); }\n",
+        ),
+    ] {
+        let p = b.join(rel);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, text).unwrap();
+    }
+    let r = rig_in(project.to_str().unwrap()).await;
+    let flows = super::start(
+        &r.hub,
+        super::FlowsConfig {
+            runs_dir: dir.path().join("runs"),
+            worktrees_dir: dir.path().join(".wkts"),
+            workspaces_dir: dir.path().join("ws"),
+            policies_file: None,
+            command_gates: true,
+            artifacts_dir: None,
+            library_home: None,
+        },
+    )
+    .await
+    .unwrap();
+    assert!(Arc::ptr_eq(flows.runner.exec(), &crate::exec::service()));
+    let run = flows
+        .start_run("rx/work", "s", json!({}), None)
+        .await
+        .unwrap();
+    let mut call = harnix_flow::runner::CommandCall::new(
+        "rx",
+        "report",
+        vec!["go".into()],
+        harnix_flow::runner::CommandBy::person("me"),
+    );
+    call.run = Some(run.id.0.clone());
+    let reply = flows.runner.run_command(call).await.unwrap();
+    assert!(reply.text.contains("\"stdout\": \"a;b\""), "{}", reply.text);
+    let history = flows.engine.history(&run.id.0).await.unwrap();
+    let line = history
+        .iter()
+        .find(|h| h.op == "exec")
+        .expect("an exec line");
+    assert_eq!(line.detail["for"], "flow.exec in rx:report");
+    assert_eq!(line.detail["profile"]["kind"], "workspace");
+    assert_eq!(
+        line.detail["enforced"],
+        json!({"backend": "plain", "filesystem": false, "network": false})
+    );
+    flows.stop().await;
+}
