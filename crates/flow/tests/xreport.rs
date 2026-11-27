@@ -269,7 +269,7 @@ fn the_bundle_and_every_part_it_names_hold_together() {
     let (def, _) = p.flow("xreport").expect("flow.yaml is offered as the bundle's name");
     assert_eq!(validate(&def, &p), Vec::<Problem>::new());
     assert_eq!(def.stations.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(), ["collect", "analyze", "publish"]);
-    assert_eq!(def.inputs.keys().collect::<Vec<_>>(), ["paths", "rev", "since", "until"]);
+    assert_eq!(def.inputs.keys().collect::<Vec<_>>(), ["days", "paths", "rev", "since", "until"]);
     assert!(def.inputs.values().all(|i| i.default.is_some()), "every input may be left out");
     assert_eq!(def.archive.as_ref().unwrap().keep, ["REPORT.md", "analysis.md", "stats.json"]);
     for (st, command) in [("collect", "collect"), ("publish", "render")] {
@@ -294,7 +294,7 @@ fn the_bundle_and_every_part_it_names_hold_together() {
     for bad in [json!({"since": "-x"}), json!({"rev": "--all"}), json!({"paths": ["-x"]}), json!({"paths": [":!src"]}), json!({"paths": ["/etc"]})] {
         assert!(def.apply_inputs(&bad).is_err(), "{bad}");
     }
-    assert_eq!(def.apply_inputs(&json!({})).unwrap(), json!({"since": "", "until": "", "rev": "HEAD", "paths": []}));
+    assert_eq!(def.apply_inputs(&json!({})).unwrap(), json!({"since": "", "days": 0, "until": "", "rev": "HEAD", "paths": []}));
 }
 
 /// Exact counts: by author (the `.mailmap` joining Alice's two identities), lines without the
@@ -353,6 +353,9 @@ async fn the_settings_say_whether_addresses_and_subjects_are_kept_and_paths_narr
     // No since: until and the 30 days before it (range.days).
     let (_, s) = d.collected(json!({"until": "2026-11-30", "paths": ["src"]})).await;
     assert_eq!(s["range"]["since"], "2026-11-01");
+    // The input days, as the weekly job gives, wins over range.days.
+    let (_, w) = d.collected(json!({"until": "2026-11-30", "days": 7})).await;
+    assert_eq!(w["range"]["since"], "2026-11-24");
     assert_eq!(s["privacy"], json!({"subjects": false, "emails": true}));
     assert_eq!(author(&s, "Alice")["email"], "alice@example.com", "the address .mailmap gives");
     assert!(s["commits"].as_array().unwrap().iter().all(|c| c.get("subject").is_none()), "{}", s["commits"]);

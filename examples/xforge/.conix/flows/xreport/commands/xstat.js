@@ -3,13 +3,13 @@
 //
 //   xstat collect [--since YYYY-MM-DD] [--until YYYY-MM-DD] [--rev <提交>] [--path <路径>]…
 //                                   统计，写这次运行的 stats.json；不给的取运行的输入，再不给取设置：
-//                                   until 缺省今天，since 缺省 until 往前 range.days 天，rev 缺省 HEAD
+//                                   until 缺省今天，since 缺省 until 往前 days（输入）或 range.days（设置）天，rev 缺省 HEAD
 //   xstat render                    由 stats.json 与 analysis.md 生成 REPORT.md（确定的：同样的两份永远同样的结果）
 //   xstat show [<stats.json>]       一份统计的摘要；缺省是这次运行的，运行之外是最近一次归档的
 //
 // 范围按提交时间筛（同 git log --since/--until）；星期、小时按作者自己的时区。合并提交另数，不算行数。
 // 名字照 git（.mailmap 合过）；邮箱只在设置 privacy.emails 为 true 时记；提交说明在 privacy.subjects 为 false 时不记。
-import { checkDate, checkPath, checkRev, daysBefore, need, parseArgs, settingsOf, today } from "../lib/args.js";
+import { checkCount, checkDate, checkPath, checkRev, daysBefore, need, parseArgs, settingsOf, today } from "../lib/args.js";
 import { collect } from "../lib/stats.js";
 import { render } from "../lib/render.js";
 
@@ -28,7 +28,8 @@ export default function (input, flow) {
     need(!pos.length, `xstat collect 不收位置参数：${pos.join(" ")}`);
     const given = input.inputs || {};
     const until = checkDate(opt.until || given.until || today(), "until");
-    const since = checkDate(opt.since || given.since || daysBefore(until, s["range.days"]), "since");
+    const days = given.days ? checkCount(given.days, "days", 3660) : s["range.days"];
+    const since = checkDate(opt.since || given.since || daysBefore(until, days), "since");
     need(since <= until, `since ${since} 在 until ${until} 之后`);
     const rev = checkRev(opt.rev || given.rev || "HEAD");
     const paths = (opt.path.length ? opt.path : given.paths || []).map(checkPath);

@@ -958,7 +958,7 @@ async fn the_global_library_is_not_run_until_a_bundle_is_installed() {
     let port::Reply::Library(lib) = flows.command(port::Command::ListLibrary).await.unwrap() else {
         panic!("library")
     };
-    assert!(lib.is_empty(), "{lib:?}");
+    assert_eq!(lib, ["xreport"], "装了的不再列，没装的还在");
     assert!(samples(flows.command(port::Command::ListSamples).await.unwrap()).installed);
     flows.stop().await;
 }

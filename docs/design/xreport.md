@@ -14,7 +14,7 @@ xreport 是 Conix 内置的第二个流程包（源头 `examples/xforge/.conix/f
 | `analyze` 分析 | 会话，skill `analyze`；只能写运行目录 | `analysis.md`：概览、贡献者、时间分布、热点、观察 | 输出；`analysis-sections`（`check: text`，五节都在）；`analysis-filled`（每节有正文，没有占位的 TODO/TBD/待补）；不过就退回本站，至多两次 |
 | `publish` 定稿 | 命令步骤 `xstat render`，不用模型 | `REPORT.md` | 输出；确认「报告定稿」（`owner`，`separate` 读设置，绑住 `REPORT.md`）；驳回退回分析站 |
 
-- 输入：`since`、`until`（`YYYY-MM-DD`，都可以不写：截止日缺省是本机的今天，起始日缺省是截止日往前 `range.days` 天）、`rev`（缺省
+- 输入：`since`、`until`（`YYYY-MM-DD`，都可以不写：截止日缺省是本机的今天，起始日缺省是截止日往前 `days` 天，`days` 不写或为 0 时取设置 `range.days`；作业写 `days`，因为作业里写不出"7 天前"的日期）、`rev`（缺省
   `HEAD`）、`paths`（缺省整个仓库）。输入的 schema 先挡一遍形状，`xstat collect` 进 argv 之前再逐项核对（§4）。
 - 归档留 `REPORT.md`、`analysis.md`、`stats.json` 与 `record.json`，在包的数据目录 `<制品目录>/xreport/archive/<日期序号>-xreport/`。
 - 分析的文件叫 `analysis.md` 而不是 `report.md`：大小写不分的文件系统（macOS 缺省）上 `report.md` 与 `REPORT.md` 是同一个文件，
@@ -84,3 +84,8 @@ xstat show [<stats.json>]                                     摘要（只读）
 - `scripts/doctor.js`：git 经 `flow.exec` 起得来（没受信、开关关着是 `error`；宿主没给执行服务只是 `warn`，判不了）；项目是 git
   仓库且有提交；设置的每一项类型对；有 `.mailmap` 报 `info`。只读、不修。
 - 演示项目 `examples/xforge` 里就有这个包；`crates/flow/tests/xreport.rs` 在临时仓库上把这些都跑一遍。
+
+## 建议的作业
+
+`bundle.yaml` 带一条 `xreport-weekly`：每周一 9 点起一次运行，`inputs: {days: 7}`，停在"报告定稿"等主人。`conix flow install xreport`
+时问加不加，加进去是停用的。

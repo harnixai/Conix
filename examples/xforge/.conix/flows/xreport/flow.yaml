@@ -6,6 +6,10 @@ inputs:
     schema: {type: string, pattern: "^([0-9]{4}-[0-9]{2}-[0-9]{2})?$"}
     default: ""
     description: 起始日期 YYYY-MM-DD；不写是截止日往前 30 天（设置 range.days）
+  days:
+    schema: {type: integer, minimum: 0, maximum: 3660}
+    default: 0
+    description: 没给 since 时往前看几天（含截止日）；0 是照设置 range.days。作业写它，因为作业里写不出"7 天前"的日期
   until:
     schema: {type: string, pattern: "^([0-9]{4}-[0-9]{2}-[0-9]{2})?$"}
     default: ""

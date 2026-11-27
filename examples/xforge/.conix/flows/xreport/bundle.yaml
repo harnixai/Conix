@@ -18,3 +18,10 @@ settings:
     review: {separate: false}
 # 自检：git 跑得起来、项目是有提交的 git 仓库、设置的类型对。
 doctor: doctor
+# 建议的作业（装的时候问，加进去是停用的）：每周一早上出一份最近 7 天的报告，停在"报告定稿"等主人。
+jobs:
+  - id: xreport-weekly
+    name: 每周提交报告
+    cron: "0 9 * * 1"
+    kind: {flow: {flow: xreport, subject: 上周的提交, inputs: {days: 7}}}
+    guard: {timeout_ms: 3600000}
