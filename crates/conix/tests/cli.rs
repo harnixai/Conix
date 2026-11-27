@@ -835,3 +835,100 @@ fn a_bundles_suggested_jobs_are_offered_at_install_and_added_disabled_only_when_
     );
     assert_eq!(read(&jobs_json).as_array().unwrap().len(), 2);
 }
+
+/// 内置的包装进一个新项目后，`conix flow doctor` 跑包自己的自检（flows.md §7.13，xforge.md §7，xreport.md §5）：
+/// 缺的治理文件只是 warn（退出码 0），坏的是 error（退出码非 0）；xreport 的 git 经执行服务起，项目没受信、
+/// 这台机器关了命令（全局 conix.yaml 的 `flows.command_gates: off`）都说清为什么、该做什么。
+#[test]
+fn doctor_runs_each_installed_bundles_own_check_on_a_fresh_project() {
+    let e = Env::new();
+    let project = e.project.path().canonicalize().unwrap();
+    let git = |args: &[&str]| {
+        let o = Command::new("git")
+            .args([
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@x",
+                "-c",
+                "commit.gpgsign=false",
+            ])
+            .args(args)
+            .current_dir(&project)
+            .output()
+            .unwrap();
+        assert!(o.status.success(), "git {args:?}: {}", text(&o));
+    };
+    std::fs::write(project.join("README.md"), "# p\n").unwrap();
+    git(&["init", "-q"]);
+    git(&["add", "-A"]);
+    git(&["commit", "-qm", "init"]);
+
+    // xforge：没有治理文件、原则、verify.sh——都是 warn，别的路径照跑。
+    e.ok(&["install", "xforge", "--yes"]);
+    let out = e.ok(&["doctor"]);
+    for want in [
+        "◐ xforge: xforge/dual 需要 verify.blackbox",
+        "◐ xforge: 没有原则文件 .conix/governance/constitution.yaml",
+        "◐ xforge: 没有 .conix/governance/verify.sh",
+        "· xforge: 治理文件里没有 verify 菜单",
+        "the project is not trusted",
+    ] {
+        assert!(out.contains(want), "{want}: {out}");
+    }
+    assert!(!out.contains("✗"), "{out}");
+    // 照演示项目备齐治理文件：不再有 warn，只剩"基线还是空的"（第一次运行会建）。
+    let example =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/xforge/.conix/governance");
+    copy(&example, &project.join(".conix/governance"));
+    let out = e.ok(&["doctor"]);
+    assert!(
+        !out.contains("◐ xforge")
+            && !out.contains("✗")
+            && out.contains("· xforge: 规格基线还是空的"),
+        "{out}"
+    );
+    // 原则是空的：门禁 constitution 必然 error，自检也是 error，退出码非 0。
+    std::fs::write(
+        project.join(".conix/governance/constitution.yaml"),
+        "principles: []\n",
+    )
+    .unwrap();
+    let out = e.fails(&["doctor"]);
+    assert!(
+        out.contains("✗ xforge:") && out.contains("没有原则"),
+        "{out}"
+    );
+    copy(&example, &project.join(".conix/governance"));
+
+    // xreport：git 经执行服务起。项目没受信是 error，说 /trust。
+    e.ok(&["install", "xreport", "--yes"]);
+    let out = e.fails(&["doctor"]);
+    assert!(
+        out.contains("✗ xreport:") && out.contains("没受信") && out.contains("/trust"),
+        "{out}"
+    );
+    // 受信了：git 起得来，项目有提交，只剩"没有设置文件，用缺省"。
+    std::fs::write(
+        e.home.path().join("settings.json"),
+        serde_json::json!({"app": {"trusted_projects": [project]}}).to_string(),
+    )
+    .unwrap();
+    let out = e.ok(&["doctor"]);
+    assert!(!out.contains("✗") && !out.contains("not trusted"), "{out}");
+    assert!(
+        out.contains("· xreport: 没有 .conix/governance/xreport.yaml"),
+        "{out}"
+    );
+    // 这台机器关了命令：起不了 git，说是哪个开关。
+    std::fs::write(
+        e.home.path().join("conix.yaml"),
+        "flows:\n  command_gates: off\n",
+    )
+    .unwrap();
+    let out = e.fails(&["doctor"]);
+    assert!(
+        out.contains("✗ xreport:") && out.contains("flows.command_gates"),
+        "{out}"
+    );
+}
