@@ -319,7 +319,7 @@ async fn collect_counts_the_history_exactly_on_each_authors_own_clock() {
     assert_eq!((a["first"].as_str(), a["last"].as_str()), (Some("2026-11-02T09:15:00+08:00"), Some("2026-11-10T11:00:00+08:00")));
     let b = author(&s, "Bob");
     assert_eq!((&b["commits"], &b["merges"], &b["insertions"], &b["deletions"], &b["files"], &b["active_days"]), (&json!(2), &json!(1), &json!(8), &json!(1), &json!(3), &json!(2)), "{b}");
-    assert_eq!(b["last"], "2026-11-11T09:00:00Z", "the merge is Bob's latest");
+    assert_eq!(b["last"], "2026-11-11T09:00:00+00:00", "the merge is Bob's latest, UTC as +00:00 whatever git writes");
     assert!(a.get("email").is_none() && !s.to_string().contains("example.com"), "no address unless the settings say");
 
     // Bob's Wednesday 22:30 is Thursday 03:30 in UTC: his own clock.

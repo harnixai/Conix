@@ -54,7 +54,9 @@ export function format(emails) {
 function header(tok, emails) {
   const f = tok.slice(1).split("\x1f");
   const n = emails ? 4 : 3;
-  const c = { sha: f[0], author: f[1], at: f[n - 1], subject: f.slice(n).join("\x1f"), files: [] };
+  // 零时区：git 2.39 写 +00:00，新的写 Z。统一成 +00:00，同一份历史在哪台机器上算都一样。
+  const at = f[n - 1].replace(/Z$/, "+00:00");
+  const c = { sha: f[0], author: f[1], at, subject: f.slice(n).join("\x1f"), files: [] };
   if (emails) c.email = f[2];
   // 先后按时刻比，不按字符串：%aI 带各自的时区，字符串的先后不是时间的先后。
   c.t = Date.parse(c.at) || 0;
