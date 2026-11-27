@@ -5,11 +5,20 @@
 #   scripts/live.sh                    全部 live 用例
 #   scripts/live.sh live_jobs          只跑一个文件（live_instance / live_attach / live_sessions / live_turns / live_jobs / live_tools / live_flows / live_models / live_tui …）
 #   scripts/live.sh live_jobs catch_up 再按用例名过滤
+#   scripts/live.sh tty                只跑真终端那一组（live_tty*.rs：伪终端里起真的 conix，键盘进、屏幕出），可再跟用例名过滤
 #
 # 同时起的实例数用 LIVE_THREADS 控制（缺省 4），太多会撞上模型服务的限流。
 set -euo pipefail
 cd "$(dirname "$0")/.."
 threads="${LIVE_THREADS:-4}"
+if [[ ${1:-} == tty ]]; then
+    shift
+    files=()
+    for f in crates/conix/tests/live_tty*.rs; do
+        files+=(--test "$(basename "$f" .rs)")
+    done
+    exec cargo test -p conix --no-fail-fast "${files[@]}" -- --ignored --test-threads="$threads" "$@"
+fi
 if [[ $# -ge 1 ]]; then
     file=$1; shift
     exec cargo test -p conix --test "$file" -- --ignored --test-threads="$threads" "$@"

@@ -55,6 +55,9 @@ sha2        = "0.10"
 # 与 Agix 用的同一个版本：流程包（zip）的导出与导入。
 zip         = { version = "2", default-features = false, features = ["deflate"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+# 只给 LIVE 的真终端一层（crates/conix/tests/live/tty.rs）：伪终端里起真的 `conix`，按 VT 序列还原屏幕。
+portable-pty = "0.9"
+vt100       = "0.16"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

@@ -8,6 +8,7 @@
 
 #![allow(dead_code)]
 
+pub mod tty;
 pub mod tui;
 
 use std::collections::BTreeMap;
@@ -241,6 +242,12 @@ impl Live {
 
     pub fn layout(&self) -> Layout {
         Layout::new(self.home.path())
+    }
+
+    /// 交给实例进程的环境：凭据、`CONIX_MODEL`、`Opts::env`。真终端那一层把它交给 `conix`，由它拉起的
+    /// 实例继承。
+    pub fn instance_env(&self) -> &[(String, String)] {
+        &self.extra_env
     }
 
     pub fn project_path(&self) -> String {

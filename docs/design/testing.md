@@ -10,7 +10,7 @@
 | L2 投影快照 | `model::view` → `tui::render` 画出来的画面 | 渲染到 ratatui 的 `TestBackend`，导出为文本快照，与存档比较 | 不需要 |
 | L3 场景 | 一段完整的交互：mock 推事件 + 一串按键 → 在若干检查点比对快照或断言状态 | 无终端的事件循环 + `ScriptedBackend` + tokio 暂停时钟 | 不需要 |
 | L4 守卫 | 键位表没有冲突、每个动作都有帮助文字；每个 `FrameState` 字段至少被一张快照覆盖；crate 依赖方向正确 | 普通测试 | 不需要 |
-| L5 真终端 | 键盘协议、颜色、宽字符、resize、粘贴、tmux 和 ssh 下的表现 | 人工照 `docs/manual-smoke-checklist.md` 过一遍（阶段 2 编写） | 需要 |
+| L5 真终端 | 键盘协议、颜色、宽字符、resize、粘贴、tmux 和 ssh 下的表现 | 人工照 `docs/manual-smoke-checklist.md` 过一遍（阶段 2 编写）；接真实实例的验收另有 LIVE 的真终端一层（§8.1），伪终端里起真的 `conix` | 需要 |
 
 L1–L4 全部离线，不需要 API key，在 CI 里跑。
 
@@ -177,7 +177,8 @@ mock 那一套不动，真实后端按层另加用例，全部离线、不调模
 §7 的各层都是离线的，各自替掉了相邻的一层。LIVE 把整条路接起来：真实的 `conix host` 进程、嵌在里面
 的 Agix、真实的模型，从 TUI 走的那条路接入——`SocketInstances` 拉起与接入，`SocketBackend` 收发
 `port` 的命令与事件。断言大多落在端口上（回复、事件）和实例目录里的文件上；`live_tui.rs` 再往上一层，
-用真的 `app::Core`（键位、model、视图）接真实实例，按键、看界面状态与屏幕。
+用真的 `app::Core`（键位、model、视图）接真实实例，按键、看界面状态与屏幕；`live_tty*.rs` 是最上面一层，
+伪终端里起真的 `conix` 二进制，只有键盘和屏幕（§8.1）。
 
 **只测 Conix 自己做的事。** Agix 的特性（工具怎么跑、权限怎么判、goal 怎么推进、压缩……）由 Agix
 自己的 LIVE 测，这里不重复。这里测的是 Conix 加在它外面的那一层：实例的锁、发现文件与 `meta.json`、
@@ -206,6 +207,7 @@ mock 那一套不动，真实后端按层另加用例，全部离线、不调模
 | `live_xreport.rs` | 内置的 xreport：`conix flow install xreport --yes --jobs yes` 装进项目（包的目录、lock 的条目、`xreport-weekly` 进 `.conix/jobs.json` 且本机停用、实例读得出）；造好的历史（两个作者、`.mailmap` 并掉一个旧名字）上跑一次：`stats.json` 是 git 数的，`REPORT.md` 的头与表对得上它、名字是并过的、没有邮箱；统计起的每个 git 都记成运行历史的 `exec`（argv、档位 `workspace`、不上网、`enforced` 照后端实记、不记输出）；主人定稿后归档留三个文件。全局 `conix.yaml` 关了命令（`flows.command_gates: off`）时统计站失败、说是哪个开关（不调模型） |
 | `live_models.rs` | 一次运行用两个模型（DeepSeek 与 Anthropic）：一站生成、一站检视，各在自己的会话里、各走自己的 provider（正反各一次）；检视打回、人照结论退回生成站，两轮都还在各自的模型上（返工不带理由，第几轮该怎么写放在技能里）；主会话在 DeepSeek 上、子 Agent 站点名 Claude 的模型，子 Agent 的任务报它实际用的模型与 provider。看会话上记的模型、两家的用量记录（`<data_root>/quota/<id>.json`，只有带 `quota` 的 provider 才记）、运行时目录里的报告。`.env` 没有 `CLAUDE_API_KEY` / `CLAUDE_MODEL` 就跳过 |
 | `live_plugins.rs` | 插件：包装进去、启用、插件的流程能跑；xforge 从 open 到 archive |
+| `live_tty.rs` | 真终端（§8.1）：起实例、`/trust`、^N、后台运行与接回、直接退出停掉实例；一句话的回复与 `/rename`；权限询问 ^R 找回、Enter 批准；xreport 从键盘启动、确认、归档 |
 
 `live_xforge.rs` 的 dual、`live_xreport.rs`、`live_flows.rs` 的命令行重读实例是在 Agix 的沙箱执行后端（harnixai/Agix#112）之前写的：
 现在执行服务只有普通子进程，`enforced` 都是 `{backend: plain, filesystem: false, network: false}`，用例只断言它照实记了，不断言守住了；
@@ -213,7 +215,7 @@ mock 那一套不动，真实后端按层另加用例，全部离线、不调模
 xreport 没受信、关了命令说清楚开关）在 `crates/conix/tests/cli.rs`，随 `scripts/check.sh` 跑。
 
 **怎么跑**：`scripts/live.sh`（全部）、`scripts/live.sh live_jobs`（一个文件）、`scripts/live.sh live_jobs
-catch_up`（再按名字过滤）。凭据取仓库根的 `.env`（worktree 里往上找；`CONIX_LIVE_ENV` 可指定），要有
+catch_up`（再按名字过滤）、`scripts/live.sh tty`（只跑真终端那一组 `live_tty*.rs`，后面同样可以跟名字过滤）。凭据取仓库根的 `.env`（worktree 里往上找；`CONIX_LIVE_ENV` 可指定），要有
 `ANTHROPIC_AUTH_TOKEN`（或 `ANTHROPIC_API_KEY`）与 `ANTHROPIC_MODEL`，读不到就失败并说明。凭据只交给
 实例进程的环境（`SocketInstances::with_env`），不进测试进程、不打印。同时起的实例数用 `LIVE_THREADS`
 控制（缺省 4）；跑全部时流程的一致性套件不进并发，最后单独串行跑（它自己就要跑十几轮模型，挤在并发里会撞上单轮
@@ -237,6 +239,7 @@ catch_up`（再按名字过滤）。凭据取仓库根的 `.env`（worktree 里�
 - `tui::Tui`（`live/tui.rs`）：真的界面接真实实例。`Tui::create` / `Tui::attach` 经界面新建或接入；
   `keys("^G ^N")`、`type_str`、`say`（打字加回车）；`until(说明, 超时, |t| …)` 用墙上时间等，一边收实例的
   消息一边按 model 给的时刻 Tick，等不到就附上当时的屏幕；`text`、`last_line`、`transcript`、`idle`。
+- `tty::Tty`（`live/tty.rs`）：伪终端里的真 `conix`，§8.1。
 - `Client`：一个接入，相当于一个 TUI。`ok(cmd)`（失败就让用例失败并说是哪条命令）、`call(cmd)`；
   `wait_event(说明, 超时, |e| …)` 从游标往后等，等不到时附上最近 30 条事件；`new_session`、`watch`、
   `turn(会话, 话) -> TurnOutcome`（文字、工具、结果、提问、用量、结局）、`wait_prompt`、`wait_upsert`。
@@ -246,6 +249,52 @@ catch_up`（再按名字过滤）。凭据取仓库根的 `.env`（worktree 里�
 **加用例**：功能归哪个文件就加在哪个文件，或新开一个 `live_<功能>.rs`（`mod live;` 引入 harness，
 `scripts/live.sh` 自动带上）。等事件，不比时长；跑不稳先找原因，不放宽断言。为可测性给实例加的
 开关只走环境变量，名字以 `CONIX_TEST_` 开头（现有 `CONIX_TEST_HEARTBEAT_TIMEOUT_MS`），不进 `conix.yaml`。
+
+### 8.1 真终端
+
+前面几层都看得见 Conix 的里面：端口驱动的用例收发 `port` 的命令与事件，`live_tui.rs` 读 model 的状态。真终端这一层
+什么都看不见，只有一台 160×45 的终端：`portable-pty` 开伪终端，在示例项目里起 `target` 下真的 `conix`（`conix new
+--name lv`、`conix attach lv`，`CONIX_HOME` 是这个用例的家目录、`CONIX_LANG=zh`、`TERM=xterm-256color`），按键编成
+xterm 发的字节写进去，`vt100` 照 `conix` 写出的 VT 序列还原屏幕。实例由这个 `conix` 照用户的路子拉起，凭据与模型
+在它的环境里、由实例继承，和用户在自己的 shell 里跑一样。
+
+**三层各管什么。** 端口驱动的 LIVE 测机制，断言细（哪个事件、哪个字段、哪份文件的哪一项）；`live_tui.rs` 管界面的
+细节（焦点、标签、浮层、model 里的状态）；真终端是验收：人照着屏幕敲键盘，断言粗，落在屏幕上看得见的字和项目最后的
+样子（交付物、归档）上。一件事在下面一层测细了，这里只走一遍人走的路。
+
+**规矩**（写在 `live/tty.rs` 的模块文档里）：
+
+- 动作只走键盘：说话、斜杠命令（`/flow:<包> <主题> [--k v]`、`/confirm`、`/reject`、`/rework`、`/worktree`、
+  `/trust`）、键（^R 找到等人的地方、提问框里 Enter 批准、^X 退出）。不发端口命令。
+- 观察主要看屏幕。屏幕上没有稳定的字可等时给界面加一个小标记，只改界面、不改协议，字进 i18n（现有的：运行在等人
+  确认时流程标签里写「等你确认」，`flows.run.waiting_confirm`）。
+- 要做决定时可以读项目里的文件，人也会去看仓库（定稿前读一遍 `REPORT.md`）。人在 Conix 之外做的事（装流程包、改
+  治理文件、提交）就是普通的命令与文件读写。
+
+**harness**（`live/tty.rs`）：
+
+- `Tty::new(&lv)` / `Tty::attach(&lv)` / `Tty::spawn(&lv, args)`；`keys("^G ^G Enter")`（写法同键位配置，
+  `keys::Key::parse`）、`type_text`、`line`（打字加回车）；`screen`、`row`、`last_line`、`contains`、`between`。
+- 等：`wait(说明, 上限, |屏幕| …)`、`wait_text`、`wait_any`；`drive(说明, 上限, |tty, 屏幕| Step)` 是要中途动手的长
+  等待（批准冒出来的权限询问、答问题），上限可以是一个钟头，每分钟往 stderr 打一行在等什么、底栏是什么。
+- 读屏：`chat_state`（左边会话的 `● 运行中` / `◐ 等你` / `○ 空闲`）、`asking`（提问框拿着键盘）、`attention`
+  （底栏 `^R 下一处待处理(n)`）；`say(话, 上限)` 说一句话等这一轮跑完（权限询问一律批准），`wait_idle`、`close_away`
+  （关掉接入时弹的「离开期间」）。
+- 收尾：`quit`（^X 直接退出，停掉实例）、`detach`（^X 后台运行）；`listed_state(&lv)` 是人在另一个终端里看
+  `conix list --all`。等不到、`conix` 自己退了、用例 panic，都打出屏幕（带行号）、做过的动作（带时刻）、`host.log` 的
+  末尾与项目里每次运行的状态；没走到 `quit` 时 `Drop` 杀掉 `conix`，`Live` 的 `Drop` 停实例。
+- `on_claude(opts)`：主模型是 Claude 的 `Live`（DeepSeek 排在后面给要换一家的站），`.env` 没有 Claude 的 key 就是
+  `None`、用例跳过。
+
+| 用例（`live_tty.rs`） | 人做了什么 | 看什么 |
+|---|---|---|
+| `the_terminal_starts_an_instance_detaches_from_it_and_stops_it_on_quit` | `conix new --name lv`；`/trust`；^N 三下；^X 后台运行；`conix attach lv`；^X 直接退出 | 顶栏是这个实例、启动是草稿；「已信任这个项目」；流程标签「还没有流程」；`conix list` 里先是 Running、退出后 Stopped |
+| `a_line_typed_in_the_draft_gets_its_reply_and_rename_renames_the_session` | 草稿上说一句只回 pong 的话；`/rename 乒乓` | 左边从运行中到空闲、转录里是 `⏺ pong`、会话列表有 #1；标题变成「会话 › 乒乓」 |
+| `a_permission_prompt_is_found_with_ctrl_r_and_approved_with_enter` | 叫模型跑一条要批准的 Bash；^G 走开、^R、^G ^G 回到左边、Enter | 提问框拿着键盘、左边是「等你」；走开后交出键盘、^R 提示「待处理 1/1」；批准后跑完，命令的输出在转录里 |
+| `xreport_is_started_confirmed_and_archived_from_the_keyboard` | 造好这一周的历史，`conix flow install xreport`；关掉「离开期间」；`/trust`；`/flow:xreport 上周的提交 --since <6 天前>`；待处理变成 1 时 ^R；读 `REPORT.md`；^G ^G、`/confirm 报告定稿` | 「已启动「上周的提交」（运行）」；流程标签里运行「等你确认」；报告里是并过的名字、没有邮箱、五节都在；「已确认 … 的站 publish」；运行进「已结束」、`conix/xreport/archive/` 里四个文件，`REPORT.md` 就是看过的那一份 |
+
+xreport 的 `days` 是整数，而斜杠命令的 `--k v` 都按字符串交给实例，`--days 7` 过不了输入的 schema（`input days: "7"
+does not satisfy its schema`）；用例写成同一个范围的 `--since`。
 
 ### 需求与用例的对照
 
