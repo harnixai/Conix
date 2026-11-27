@@ -1,21 +1,27 @@
-name: dual-impl
-title: 双路开发：实现
+name: line-build
+title: 开发线：设计与实现
 description: >-
-  xforge/dual 的实现那一路，只做它的子运行：在自己的 worktree 里照分叉时的规格侧设计、独立检查、按工作包实施。
-  不改规格侧；看不到测试那一路。
+  xforge/solid、xforge/major 的开发线那一路，只做它们的子运行：在自己的 worktree 里照分叉时的规格侧设计、按工作包实施。
+  检视点开着时（父运行给的 review），检视线检视设计（design）与代码（code）：记发现、打回、开发线修、检视线确认。
+  不改规格侧；看不到测试线。
 # 不单独起：spec_side 没有缺省，单独起时输入就不合；硬给一个，第一站的 spec-unchanged 也报"没有父运行"。
 # 包没有"只做子运行"的写法（bundle.yaml 的 flows 列的都能点名起），这是最省事又挡得住的一处。
+main: {model: "${settings.lines.build.model}", provider: "${settings.lines.build.provider}"}
 inputs:
   title:
     schema: {type: string, minLength: 1}
     description: 变更的短标题（父运行的）
   spec_side:
     schema: {type: object, minProperties: 1, additionalProperties: {type: string}}
-    description: 父运行分叉前封存的规格侧摘要（xspec seal：文件 → sha256）。只由 xforge/dual 的 fork 站给，别处不要起这条流程
+    description: 父运行分叉前封存的规格侧摘要（xspec seal：文件 → sha256）。只由 xforge/solid、xforge/major 的 fork 站给，别处不要起这条流程
+  review:
+    schema: {type: object, additionalProperties: {type: boolean}}
+    default: {}
+    description: 父运行那条路径的检视点（治理文件的 review.solid 或 review.major）：这一路看 design、code
 policies: [by-commands]
 result:
   from:
-    side: impl
+    side: build
     summary: "${stations.design.output.summary}"
     packages: "${stations.design.output.packages}"
     done: "${stations.apply.output}"
@@ -23,7 +29,7 @@ result:
     type: object
     required: [side, summary, packages, done]
     properties:
-      side: {const: impl}
+      side: {const: build}
       summary: {type: string}
       packages:
         type: array
@@ -63,14 +69,16 @@ stations:
       - {kind: gate, gate: design-sections}
       - {kind: gate, gate: constitution}
       - {kind: gate, gate: packages-planned}
+      # 检视线的发现：修好的 resolved，不同意的 disputed（交回检视线定）；还开着的挡住这一站。
       - {kind: gate, gate: ledgers-settled}
     on_unmet: {rework_to: design, max: 2}
 
-  # 无人值守：检查留下没结的发现就打回设计，最多两次；之后等人。
-  - id: check
-    title: 独立检查
-    executor: {kind: agent}
-    skill: dual-check
+  # 检视点 design：检视线（与开发线不同的模型，只看不改）检视设计。发现没结清就自动打回设计，至多两次，之后等人。
+  - id: review-design
+    title: 检视设计
+    when: [{path: inputs.review.design, eq: true, label: 检视点 design 开着}]
+    executor: {kind: agent, model: "${settings.lines.review.model}"}
+    skill: review-design
     policies: [review-only]
     output:
       type: object
@@ -78,10 +86,9 @@ stations:
       properties: {summary: {type: string}, ready: {type: boolean}}
     exit:
       - {kind: output}
-      - {kind: gate, gate: spec-unchanged}
       - {kind: gate, gate: ledgers-settled}
-      # 原则没答全是检查自己的活，不该把设计打回去。
-      - {kind: gate, gate: constitution-reply, rework_to: check}
+      # 原则没答全是检视自己的活，不该把设计打回去。
+      - {kind: gate, gate: constitution-reply, rework_to: review-design}
     on_unmet: {rework_to: design, max: 2}
     rework_to: [design]
 
@@ -89,7 +96,7 @@ stations:
     title: 实施
     foreach: "${stations.design.output.packages}"
     max_parallel: 1
-    executor: {kind: agent}
+    executor: {kind: agent, model: "${settings.lines.build.model}"}
     skill: impl-apply
     retry: {max: 2}
     writes: ["${item.paths}"]
@@ -108,3 +115,20 @@ stations:
       - {kind: gate, gate: unit-tests}
     on_unmet: {rework_to: apply, max: 2}
     rework_to: [design]
+
+  # 检视点 code：对着设计与规格检视代码。缺省关，人在治理文件里手工开。打回实施：每个包重做，各自先看台账里的发现。
+  - id: review-code
+    title: 检视代码
+    when: [{path: inputs.review.code, eq: true, label: 检视点 code 开着}]
+    executor: {kind: agent, model: "${settings.lines.review.model}"}
+    skill: review-code
+    policies: [review-only]
+    output:
+      type: object
+      required: [summary, ready]
+      properties: {summary: {type: string}, ready: {type: boolean}}
+    exit:
+      - {kind: output}
+      - {kind: gate, gate: ledgers-settled}
+    on_unmet: {rework_to: apply, max: 2}
+    rework_to: [apply, design]

@@ -73,7 +73,7 @@ impl World {
         let o = self
             .rn
             .start_run(
-                CreateIn { flow: "xforge/solid".into(), subject: title.into(), inputs: json!({"title": title, "risk": "medium"}), project_root: Some(self.root.to_string_lossy().into()), ..Default::default() },
+                CreateIn { flow: "xforge/quick".into(), subject: title.into(), inputs: json!({"title": title, "risk": "low"}), project_root: Some(self.root.to_string_lossy().into()), ..Default::default() },
                 Actor::device("d"),
             )
             .await

@@ -9,6 +9,7 @@ import { governance, verifyMenu } from "../lib/governance.js";
 import { readBaseline } from "../lib/arch.js";
 import { readSpecs } from "../lib/specs.js";
 import { BLACKBOX, blackboxProblem, menuProblems, writableProblems } from "../lib/verify.js";
+import { LINES, REVIEWED, STAGES, reviewLineProblem } from "../lib/lines.js";
 
 // 与 bundle.yaml 的 settings.file、门禁 constitution 与 unit-tests 写的路径是同一份。
 const SETTINGS = ".conix/governance/xforge.yaml";
@@ -16,15 +17,17 @@ const CONSTITUTION = ".conix/governance/constitution.yaml";
 const VERIFY_SH = ".conix/governance/verify.sh";
 
 // 治理文件里每个开关该是什么类型。review.separate 不是布尔值时启动就拒（确认出口的 separate）；
-// governance 的两个按"spec 不写 false 就开、interface 写 true 才开"解释，写成 "no" 不报错却意思反了，所以一样算错。
-const SWITCHES = { governance: ["spec", "interface"], review: ["separate"] };
-const TOP = ["governance", "review", "checks", "verify"];
+// governance 的两个按"spec 不写 false 就开、interface 写 true 才开"解释，写成 "no" 不报错却意思反了，所以一样算错；
+// 检视点写成 "yes" 时站的 when 判它不等于 true，那一处就悄悄不检视了。
+const SWITCHES = { governance: ["spec", "interface"], review: ["separate"], "review.solid": STAGES, "review.major": STAGES };
+const TOP = ["governance", "review", "lines", "checks", "verify"];
 
 export default function (input, flow) {
   const out = [];
   const add = (level, message, path, fix) => out.push({ level, message, ...(path ? { path } : {}), ...(fix ? { fix } : {}) });
   const settingsOk = checkSettings(flow, add);
   if (settingsOk) {
+    checkLines(flow, add);
     checkChecks(flow, add);
     checkMenu(flow, add);
     checkBaselines(flow, input.data_dir, add);
@@ -45,7 +48,7 @@ function checkSettings(flow, add) {
   try {
     s = flow.settings;
   } catch (e) {
-    add("error", `治理文件读不成，xforge 的每条流程都会拒绝启动：${e.message}`, SETTINGS, "改成 YAML 映射：governance、review、checks、verify（docs/design/xforge.md §1）");
+    add("error", `治理文件读不成，xforge 的每条流程都会拒绝启动：${e.message}`, SETTINGS, "改成 YAML 映射：governance、review、lines、checks、verify（docs/design/xforge.md §1）");
     return false;
   }
   let ok = true;
@@ -53,15 +56,16 @@ function checkSettings(flow, add) {
     if (!TOP.includes(k)) add("warn", `治理文件里的 ${k} xforge 不认识（有 ${TOP.join("、")}），写错了名字？`, SETTINGS, `删掉或改成 ${TOP.join("、")} 之一`);
   }
   for (const [group, keys] of Object.entries(SWITCHES)) {
-    const g = s[group];
+    const g = group.split(".").reduce((v, k) => (v && typeof v === "object" ? v[k] : undefined), s);
     if (g === undefined || g === null) continue;
     if (typeof g !== "object" || Array.isArray(g)) {
       add("error", `${group} 要写成映射（${keys.map((k) => `${k}: true|false`).join("，")}），现在是 ${JSON.stringify(g)}`, SETTINGS, `${group}: {${keys.map((k) => `${k}: false`).join(", ")}}`);
       ok = false;
       continue;
     }
+    const nested = group === "review" ? REVIEWED : [];
     for (const k of Object.keys(g)) {
-      if (!keys.includes(k)) add("warn", `${group}.${k} xforge 不认识（有 ${keys.join("、")}），写错了名字？`, SETTINGS, `删掉或改成 ${keys.join("、")} 之一`);
+      if (!keys.includes(k) && !nested.includes(k)) add("warn", `${group}.${k} xforge 不认识（有 ${keys.concat(nested).join("、")}），写错了名字？`, SETTINGS, `删掉或改成 ${keys.concat(nested).join("、")} 之一`);
     }
     for (const k of keys) {
       if (g[k] !== undefined && typeof g[k] !== "boolean") {
@@ -71,6 +75,35 @@ function checkSettings(flow, add) {
     }
   }
   return ok;
+}
+
+// lines：每条线一个模型（字符串）；开着检视点的路径，检视线要与开发线不同（门禁 lines 同一份判法）。
+function checkLines(flow, add) {
+  const s = flow.settings || {};
+  const l = s.lines;
+  if (l !== undefined && l !== null) {
+    if (typeof l !== "object" || Array.isArray(l)) {
+      add("error", "lines 要写成映射：{build: {model}, tests: {model}, review: {model}}", SETTINGS);
+      return;
+    }
+    for (const [k, v] of Object.entries(l)) {
+      if (!LINES.includes(k)) {
+        add("warn", `lines.${k} xforge 不认识（有 ${LINES.join("、")}），写错了名字？`, SETTINGS, `删掉或改成 ${LINES.join("、")} 之一`);
+        continue;
+      }
+      if (!v || typeof v !== "object" || Array.isArray(v)) {
+        add("error", `lines.${k} 要写成 {model: <模型>, provider: <可选>}`, SETTINGS);
+        continue;
+      }
+      for (const f of ["model", "provider"]) {
+        if (v[f] !== undefined && (typeof v[f] !== "string" || !v[f].trim())) add("error", `lines.${k}.${f} 要是一个名字`, SETTINGS);
+      }
+    }
+  }
+  for (const path of REVIEWED) {
+    const p = reviewLineProblem(s, path);
+    if (p) add("error", `${p}：xforge/${path} 第一站（核对三条线）就会停下`, SETTINGS, `lines.review.model 写一个与开发线不同的模型，或关掉 review.${path} 的检视点`);
+  }
 }
 
 // checks：项目的验证（门禁 unit-tests）能写的目录与联网，与菜单的一项同一份核对。被不被 git 忽略由流程库起进程前查。
@@ -97,10 +130,10 @@ function checkMenu(flow, add) {
   }
   const bb = blackboxProblem(menu);
   if (bb === "missing") {
-    add("warn", `xforge/dual 需要 verify.${BLACKBOX}：合起来那一站的门禁 blackbox 用它跑测试那一路写的黑盒测试，没有就是 error；别的路径不用它`, SETTINGS,
+    add("warn", `xforge/solid、xforge/major 需要 verify.${BLACKBOX}：合起来那一站的门禁 blackbox 用它跑测试线写的黑盒测试，没有就是 error；quick 不用它`, SETTINGS,
       `在 verify 下加一项 ${BLACKBOX}: {argv: [python3, -m, unittest, discover, -s, tests_blackbox, -q]}（黑盒测试放哪、怎么跑，不带参数）`);
   } else if (bb === "params") {
-    add("error", `verify.${BLACKBOX} 不能带参数：xforge/dual 合起来时跑的是整套黑盒测试，没有谁来填参数，门禁 blackbox 会 error`, SETTINGS, `去掉 verify.${BLACKBOX} 的 params 与 argv 里的 {…}`);
+    add("error", `verify.${BLACKBOX} 不能带参数：两路合起来时跑的是整套黑盒测试，没有谁来填参数，门禁 blackbox 会 error`, SETTINGS, `去掉 verify.${BLACKBOX} 的 params 与 argv 里的 {…}`);
   }
 }
 
@@ -143,7 +176,7 @@ function checkConstitution(flow, add) {
     return;
   }
   if (doc == null) {
-    add("warn", `没有原则文件 ${CONSTITUTION}：设计站与检查站没有可对照的（门禁只提醒、不挡）`, CONSTITUTION, "写一份 principles: [{id: P1, title, text}]，一条一个项目原则");
+    add("warn", `没有原则文件 ${CONSTITUTION}：设计站与检视站没有可对照的（门禁只提醒、不挡）`, CONSTITUTION, "写一份 principles: [{id: P1, title, text}]，一条一个项目原则");
     return;
   }
   const ps = doc && doc.principles;

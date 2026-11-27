@@ -1,6 +1,8 @@
 name: quick
 title: 快速变更
-description: 低风险的小改动：提案（顺手划好工作包）、按工作包实施、验证、归档。
+description: 低风险的小改动，只有开发线：提案（顺手划好工作包）、按工作包实施、验证、归档。
+# 开发线的模型：治理文件的 lines.build（没写就是实例的缺省模型）。quick 的各站都在主会话里。
+main: {model: "${settings.lines.build.model}", provider: "${settings.lines.build.provider}"}
 inputs:
   title:
     schema: {type: string, minLength: 1}

@@ -1,4 +1,4 @@
-// 双路开发（xforge/dual，docs/design/xforge.md §5.1）的规格侧：父运行在分叉前封存（xspec seal），两个子运行核对
+// 两路开发（xforge/solid、xforge/major，docs/design/xforge.md §5）的规格侧：父运行在分叉前封存（xspec seal），两个子运行核对
 // 自己手里那一份没改（门禁 spec-unchanged）。两边用同一份判法：哪些文件算规格侧、摘要怎么算。
 
 // 不算规格侧的：两路各自交付的目录 children/（分叉之后才有，打回后的新一轮里有上一轮的），流程库的过程目录 _run/，

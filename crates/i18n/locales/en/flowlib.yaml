@@ -113,6 +113,7 @@ flowlib:
   dr_no_fixes: "Nothing to fix automatically"
   dr_can_fix: "{n} can be fixed automatically: {cmd}"
   dr_fixed: "Fixed: {what}"
+  dr_after_fix: "After the fixes:"
   dr_fix_failed: "Not fixed: {why}"
   dr_errors: "{n} errors"
   fixed_staging: "removed {path}"

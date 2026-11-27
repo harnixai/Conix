@@ -1,4 +1,5 @@
 // ledgers-settled：运行目录 ledgers/ 里的每份台账都合 §2.3 的规矩（lib/ledger.js，xledger 写之前查的是同一份）。
+// 按在哪一站判（input.station）分两头：检视站只判自己记的发现，作者那一站可以把检视站的发现标 disputed 交回去。
 import { ledgerProblems } from "../lib/ledger.js";
 
 export default function (input, flow) {
@@ -16,7 +17,7 @@ export default function (input, flow) {
       continue;
     }
     entries += ((doc && doc.entries) || []).length;
-    for (const p of ledgerProblems(kind, doc)) {
+    for (const p of ledgerProblems(kind, doc, input.station)) {
       findings.push({ rule: "ledger", severity: "error", path, message: `${p.id ? p.id + "：" : ""}${p.message}` });
     }
   }

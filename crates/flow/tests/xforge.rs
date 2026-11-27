@@ -47,6 +47,8 @@ fn copy_of_example() -> tempfile::TempDir {
 }
 
 const PATHS: [&str; 3] = ["xforge/quick", "xforge/solid", "xforge/major"];
+/// The three paths and the two lines solid and major fork into.
+const LINES: [&str; 5] = ["xforge/quick", "xforge/solid", "xforge/major", "xforge/line-build", "xforge/line-tests"];
 
 fn stations(p: &DirPacks, flow: &str) -> Vec<String> {
     p.flow(flow).unwrap().0.stations.iter().map(|s| s.id.clone()).collect()
@@ -56,7 +58,8 @@ fn stations(p: &DirPacks, flow: &str) -> Vec<String> {
 fn the_three_paths_and_every_part_they_name_hold_together() {
     let p = packs();
     let meta: BundleMeta = serde_yaml::from_str(&p.bundle_file("xforge", "bundle.yaml").unwrap()).unwrap();
-    assert_eq!(meta.flows, ["quick", "solid", "major", "dual", "dual-impl", "dual-tests"]);
+    assert_eq!(meta.version, "0.4.0");
+    assert_eq!(meta.flows, ["quick", "solid", "major", "line-build", "line-tests"]);
     assert_eq!(meta.start.route, ["quick", "solid", "major"]);
     assert_eq!(meta.start.triage.as_deref(), Some("triage"));
     assert_eq!(meta.pace, Some(Pace::Auto));
@@ -71,9 +74,22 @@ fn the_three_paths_and_every_part_they_name_hold_together() {
     assert!(p.skill("xforge/archive").is_none(), "archiving is the commands' work, no model's");
 
     assert_eq!(stations(&p, "xforge/quick"), ["propose", "apply", "verify", "archive"]);
-    assert_eq!(stations(&p, "xforge/solid"), ["propose", "design", "check", "apply", "verify", "archive"]);
-    assert_eq!(stations(&p, "xforge/major"), ["propose", "clarify", "design", "check", "apply", "verify", "archive"]);
+    assert_eq!(stations(&p, "xforge/solid"), ["lines", "propose", "review-spec", "seal", "fork", "join", "verify", "review-verify", "accept", "archive"]);
+    assert_eq!(stations(&p, "xforge/major"), ["lines", "propose", "clarify", "review-spec", "seal", "fork", "join", "verify", "review-verify", "accept", "archive"]);
+    assert_eq!(stations(&p, "xforge/line-build"), ["design", "review-design", "apply", "review-code"]);
+    assert_eq!(stations(&p, "xforge/line-tests"), ["design", "review-tests-design", "apply", "review-tests"]);
     let mut gates = BTreeSet::new();
+    for f in LINES {
+        let (def, _) = p.flow(f).unwrap_or_else(|| panic!("no flow {f}"));
+        assert_eq!(validate(&def, &p), Vec::<Problem>::new(), "{f}");
+        for s in &def.stations {
+            for e in s.exit.iter().chain(&s.task_exit) {
+                if let ExitCond::Gate { gate, .. } = e {
+                    gates.insert(gate.trim_start_matches("xforge/").to_string());
+                }
+            }
+        }
+    }
     for f in PATHS {
         let (def, _) = p.flow(f).unwrap_or_else(|| panic!("no flow {f}"));
         assert_eq!(validate(&def, &p), Vec::<Problem>::new(), "{f}");
@@ -89,25 +105,97 @@ fn the_three_paths_and_every_part_they_name_hold_together() {
                 }
             }
         }
-        let apply = def.station("apply").unwrap();
+        let archive = def.station("archive").unwrap();
+        let steps: Vec<_> = archive.tasks.as_ref().unwrap().iter().map(|t| &t.executor).collect();
+        assert!(steps.iter().all(|e| matches!(e, Executor::Command { .. })), "{f}: {steps:?}");
+    }
+    for f in ["xforge/quick", "xforge/line-build", "xforge/line-tests"] {
+        let apply = p.flow(f).unwrap().0.station("apply").cloned().unwrap();
         assert_eq!(apply.writes, ["${item.paths}"], "{f}: a package writes its own paths");
         let task_exit: Vec<_> = apply.task_exit.iter().map(|e| match e {
             ExitCond::Gate { gate, .. } => gate.as_str(),
             _ => "",
         }).collect();
         assert_eq!(task_exit, ["xforge/package-check", "xforge/package-tests"], "{f}: each package's bookkeeping, then its own verification");
-        let archive = def.station("archive").unwrap();
-        let steps: Vec<_> = archive.tasks.as_ref().unwrap().iter().map(|t| &t.executor).collect();
-        assert!(steps.iter().all(|e| matches!(e, Executor::Command { .. })), "{f}: {steps:?}");
     }
     for g in &gates {
         let name = format!("xforge/{g}");
         let (text, _) = p.part(PartKind::Gate, &name).unwrap_or_else(|| panic!("no gate {g}"));
         assert_eq!(part_problems(PartKind::Gate, &name, &text, &p), Vec::<String>::new(), "{g}");
     }
-    for g in ["impact", "design-sections", "interface-delta", "interface-compat", "constitution-reply", "interfaces-archived"] {
+    for g in ["impact", "design-sections", "interface-delta", "interface-compat", "constitution-reply", "interfaces-archived", "lines", "blackbox", "spec-unchanged"] {
         assert!(gates.contains(g), "{g} is named by some path");
     }
+}
+
+/// Each line runs on the model the governance file names for it, and each review point is one
+/// station of the review line, switched by the settings and sending its findings back to the line
+/// that wrote what it reviews.
+#[test]
+fn each_line_names_its_model_and_each_review_point_is_one_switched_station() {
+    let p = packs();
+    let main_of = |f: &str| p.flow(f).unwrap().0.main.clone().unwrap();
+    for (f, line) in [("xforge/quick", "build"), ("xforge/solid", "build"), ("xforge/major", "build"), ("xforge/line-build", "build"), ("xforge/line-tests", "tests")] {
+        let m = main_of(f);
+        assert_eq!(m.model.as_deref(), Some(format!("${{settings.lines.{line}.model}}").as_str()), "{f}");
+        assert_eq!(m.provider.as_deref(), Some(format!("${{settings.lines.{line}.provider}}").as_str()), "{f}");
+    }
+    // Where each review point is, on which switch, and whom it sends back to.
+    let mut points = vec![];
+    for f in LINES {
+        let (def, _) = p.flow(f).unwrap();
+        for s in def.stations.iter().filter(|s| s.id.starts_with("review-")) {
+            let Some(Executor::Agent { model, .. }) = &s.executor else { panic!("{f} {}: {:?}", s.id, s.executor) };
+            assert_eq!(model.as_deref(), Some("${settings.lines.review.model}"), "{f} {}", s.id);
+            assert_eq!(s.policies, ["xforge/review-only"], "{f} {}: the review line reads, it does not write", s.id);
+            assert!(s.exit.iter().any(|e| matches!(e, ExitCond::Gate { gate, .. } if gate == "xforge/ledgers-settled")), "{f} {}", s.id);
+            assert!(!s.exit.iter().any(|e| matches!(e, ExitCond::Confirm { .. })), "{f} {}: a review is no person's approval", s.id);
+            let [w] = &s.when[..] else { panic!("{f} {}: {:?}", s.id, s.when) };
+            assert_eq!(w.eq, Some(json!(true)));
+            let u = s.on_unmet.as_ref().unwrap();
+            assert_eq!(u.max, 2, "{f} {}: two rounds back and forth, then a person", s.id);
+            points.push((f.trim_start_matches("xforge/"), s.id.clone(), w.path.clone(), u.rework_to.clone()));
+        }
+    }
+    fn want<'a>(f: &'a str, id: &str, path: &str, to: &str) -> (&'a str, String, String, String) {
+        (f, id.to_string(), path.to_string(), to.to_string())
+    }
+    assert_eq!(
+        points,
+        [
+            want("solid", "review-spec", "settings.review.solid.spec", "propose"),
+            want("solid", "review-verify", "settings.review.solid.verify", "verify"),
+            want("major", "review-spec", "settings.review.major.spec", "propose"),
+            want("major", "review-verify", "settings.review.major.verify", "verify"),
+            want("line-build", "review-design", "inputs.review.design", "design"),
+            want("line-build", "review-code", "inputs.review.code", "apply"),
+            want("line-tests", "review-tests-design", "inputs.review.tests-design", "design"),
+            want("line-tests", "review-tests", "inputs.review.tests", "apply"),
+        ]
+    );
+    // The two lines are told their path's review points; the build line's packages on its model too.
+    for (f, path) in [("xforge/solid", "solid"), ("xforge/major", "major")] {
+        let (def, _) = p.flow(f).unwrap();
+        for t in def.station("fork").unwrap().tasks.as_ref().unwrap() {
+            let Executor::Subflow { inputs, .. } = &t.executor else { panic!() };
+            assert_eq!(inputs["review"], json!(format!("${{settings.review.{path}}}")), "{f} {}", t.id);
+        }
+        // The checkpoint first: no model is paid for before the lines are right.
+        let first = &def.stations[0];
+        assert!(first.executor.is_none() && first.tasks.is_none(), "{f}");
+        assert!(matches!(&first.exit[..], [ExitCond::Gate { gate, .. }] if gate == "xforge/lines"), "{f}");
+    }
+    for (f, line) in [("xforge/line-build", "build"), ("xforge/line-tests", "tests")] {
+        let Some(Executor::Agent { model, .. }) = p.flow(f).unwrap().0.station("apply").unwrap().executor.clone() else { panic!() };
+        assert_eq!(model, Some(format!("${{settings.lines.{line}.model}}")), "{f}");
+    }
+    // The defaults: major reviews the design stages, solid nothing, every line on the instance's model.
+    let meta: BundleMeta = serde_yaml::from_str(&p.bundle_file("xforge", "bundle.yaml").unwrap()).unwrap();
+    let d = meta.settings.unwrap().defaults();
+    let on = |path: &str| -> Vec<String> { d["review"][path].as_object().unwrap().iter().filter(|(_, v)| **v == json!(true)).map(|(k, _)| k.clone()).collect() };
+    assert_eq!(on("major"), ["design", "spec", "tests-design"]);
+    assert!(on("solid").is_empty());
+    assert_eq!(d["lines"], json!({}));
 }
 
 #[test]
@@ -196,29 +284,18 @@ async fn each_path_dry_runs_through_the_people_it_waits_for_to_its_end() {
     let rec = dry_through("xforge/quick", "low", json!({"stations": m, "facts": calm}), &["verify"]).await;
     // A dry run reads no project: the bundle's defaults, under which whoever started it confirmed.
     let settings = rec.parts.settings.as_ref().unwrap();
-    assert_eq!((&settings["governance"], &settings["review"]), (&json!({"spec": true, "interface": false}), &json!({"separate": false})));
+    assert_eq!((&settings["governance"], &settings["review"]["separate"]), (&json!({"spec": true, "interface": false}), &json!(false)));
     let apply = &rec.stations["apply"];
     assert_eq!(apply.tasks.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(), ["core", "tests"], "a task per package");
 
-    let mut m = ends();
-    m["propose"] = json!({"summary": "s"});
-    m["design"] = json!({"summary": "s", "packages": packages()});
-    m["check"] = json!({"summary": "s", "ready": true});
-    let rec = dry_through("xforge/solid", "medium", json!({"stations": m.clone(), "facts": calm}), &["check", "verify"]).await;
-    assert_eq!(rec.stations["archive"].tasks.len(), 2, "xspec archive and xarch archive");
-    let left_out: Vec<_> = rec.stations["design"].not_required.iter().map(|n| n.label.as_str()).collect();
-    assert_eq!(left_out, ["批准破坏性改动"]);
-
-    m["clarify"] = json!({"summary": "s", "questions": 1});
-    dry_through("xforge/major", "high", json!({"stations": m, "facts": calm}), &["clarify", "check", "verify"]).await;
 }
 
 #[tokio::test]
-async fn a_breaking_interface_change_waits_for_the_owner_at_the_design_and_so_does_a_gate_that_says_nothing() {
+async fn a_breaking_interface_change_waits_for_the_owner_at_the_proposal_and_so_does_a_gate_that_says_nothing() {
     // Each path that judges interface-compat has the owner's approval of a breaking change, read
     // off the gate's fact and nothing a model hands in.
     let p = packs();
-    for f in ["xforge/quick", "xforge/solid", "xforge/major", "xforge/dual"] {
+    for f in PATHS {
         let (def, _) = p.flow(f).unwrap();
         let at: Vec<_> = def
             .stations
@@ -226,7 +303,7 @@ async fn a_breaking_interface_change_waits_for_the_owner_at_the_design_and_so_do
             .filter(|s| s.exit.iter().any(|e| matches!(e, ExitCond::Gate { gate, .. } if gate == "xforge/interface-compat")))
             .map(|s| s.id.as_str())
             .collect();
-        assert_eq!(at, [if matches!(f, "xforge/dual" | "xforge/quick") { "propose" } else { "design" }], "{f}");
+        assert_eq!(at, ["propose"], "{f}: no path has a design station of its own before the spec side is fixed");
         let st = def.station(at[0]).unwrap();
         let approvals: Vec<_> = st.exit.iter().filter_map(|e| match e {
             ExitCond::Confirm { who, label, when: Some(w), separate, binds, .. } => Some((who.as_deref(), label.as_deref(), w.gate.as_deref(), w.fact.as_deref(), separate.clone(), binds.clone())),
@@ -241,18 +318,15 @@ async fn a_breaking_interface_change_waits_for_the_owner_at_the_design_and_so_do
     }
 
     let mut m = ends();
-    m["propose"] = json!({"summary": "s"});
-    m["design"] = json!({"summary": "s", "packages": packages()});
-    m["check"] = json!({"summary": "s", "ready": true});
+    m["propose"] = json!({"summary": "s", "packages": packages()});
     let breaking = json!({"xforge/interface-compat": {"breaking": true}});
-    let rec = dry_through("xforge/solid", "medium", json!({"stations": m.clone(), "facts": breaking}), &["design", "check", "verify"]).await;
-    let design = &rec.stations["design"];
-    assert!(design.not_required.is_empty());
-    let c = design.checks.iter().find(|c| c.label == "批准破坏性改动").unwrap();
+    let rec = dry_through("xforge/quick", "low", json!({"stations": m.clone(), "facts": breaking}), &["propose", "verify"]).await;
+    let propose = &rec.stations["propose"];
+    assert!(propose.not_required.is_empty());
+    let c = propose.checks.iter().find(|c| c.label == "批准破坏性改动").unwrap();
     assert_eq!((c.status, c.when.as_ref().unwrap().required), (CheckStatus::Pass, Some(true)));
     // A gate that gives no fact (here: a mocked one) is no answer: the owner is asked all the same.
-    m["clarify"] = json!({"summary": "s", "questions": 1});
-    dry_through("xforge/major", "high", json!({"stations": m}), &["clarify", "design", "check", "verify"]).await;
+    dry_through("xforge/quick", "low", json!({"stations": m}), &["propose", "verify"]).await;
 }
 
 #[tokio::test]
@@ -274,8 +348,8 @@ async fn with_review_separate_on_whoever_authored_the_run_does_not_confirm_it() 
     sh(d.path(), &format!("cp -R {}/. .", example().join(".conix/flows").display()));
     let meta = d.path().join("xforge/bundle.yaml");
     let text = std::fs::read_to_string(&meta).unwrap();
-    assert!(text.contains("review: {separate: false}"), "{text}");
-    std::fs::write(&meta, text.replace("review: {separate: false}", "review: {separate: true}")).unwrap();
+    assert!(text.contains("\n      separate: false\n"), "{text}");
+    std::fs::write(&meta, text.replace("\n      separate: false\n", "\n      separate: true\n")).unwrap();
     let sb = sandbox_over(packs_in(d.path()));
     let mut m = ends();
     m["propose"] = json!({"summary": "s", "packages": packages()});

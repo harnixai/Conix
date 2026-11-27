@@ -65,7 +65,7 @@ export function writableProblems(w) {
     : []));
 }
 
-// 双路开发合起来时跑的那一项（xforge/dual 的门禁 blackbox）：菜单里名叫 blackbox，不带参数。
+// 两路合起来时跑的那一项（xforge/solid、xforge/major 的门禁 blackbox）：菜单里名叫 blackbox，不带参数。
 export const BLACKBOX = "blackbox";
 
 // 黑盒那一项能不能拿来跑：null 是能；"missing" 是菜单里没有，"params" 是它带了参数（合起来时没有谁来填）。

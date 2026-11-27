@@ -27,6 +27,7 @@ fn sh(dir: &Path, cmd: &str) -> String {
 /// probe gates differ from the real ones only in what `${item}` and the handed packages are.
 const PROBES: &[(&str, &str)] = &[
     ("ledgers-settled", "ledgers-settled"),
+    ("review-settled", "ledgers-settled"),
     ("constitution-reply", "constitution-reply"),
     ("unclaimed", "unclaimed"),
     ("packages-done", "packages-done"),
@@ -34,6 +35,11 @@ const PROBES: &[(&str, &str)] = &[
     ("check", "probe-check"),
     ("tests", "probe-tests"),
 ];
+
+/// The probe's one station: a review station's for `review-*` probes (the ledger gate judges by where it is), else `work`.
+fn probe_station(probe: &str) -> &'static str {
+    if probe.starts_with("review-") { "review-design" } else { "work" }
+}
 
 /// The bundle as it is, plus probe flows and the two probe gates, in a directory of bundles.
 fn bundles() -> tempfile::TempDir {
@@ -43,8 +49,9 @@ fn bundles() -> tempfile::TempDir {
     std::fs::create_dir_all(b.join("skills/work")).unwrap();
     std::fs::write(b.join("skills/work/SKILL.md"), "---\nname: work\n---\nwork.\n").unwrap();
     for (flow, gate) in PROBES {
+        let station = probe_station(flow);
         let text = format!(
-            "name: p-{flow}\nstations:\n  - id: work\n    executor: {{kind: session}}\n    skill: work\n    output: {{type: object}}\n    exit: [{{kind: output}}, {{kind: gate, gate: {gate}}}]\n"
+            "name: p-{flow}\nstations:\n  - id: {station}\n    executor: {{kind: session}}\n    skill: work\n    output: {{type: object}}\n    exit: [{{kind: output}}, {{kind: gate, gate: {gate}}}]\n"
         );
         std::fs::write(b.join(format!("p-{flow}.yaml")), text).unwrap();
     }
@@ -84,6 +91,7 @@ async fn eventually<T>(what: &str, mut f: impl AsyncFnMut() -> Option<T>) -> T {
 struct Rig {
     rn: Arc<Runner>,
     engine: Arc<Engine>,
+    station: &'static str,
     sid: String,
     run: String,
     root: PathBuf,
@@ -142,7 +150,7 @@ impl Rig {
         eventually("the task was sent", async || host.sent_to(&sid).into_iter().next()).await;
         let rec = engine.record(&run).await.unwrap();
         let out = PathBuf::from(rec.output_dir.unwrap());
-        Rig { rn, engine, sid, run, root, out, _keep: (packs_dir, data, project) }
+        Rig { rn, engine, station: probe_station(probe), sid, run, root, out, _keep: (packs_dir, data, project) }
     }
 
     /// A command as `by` calls it, `station` being the one whose session or step it is.
@@ -183,7 +191,7 @@ impl Rig {
         assert!(!r.is_error, "{}", r.text);
         eventually("the gate judged", async || {
             let rec = self.engine.record(&self.run).await.unwrap();
-            let c = rec.stations["work"].checks.iter().find(|c| c.kind == "gate")?.clone();
+            let c = rec.stations[self.station].checks.iter().find(|c| c.kind == "gate")?.clone();
             (c.status != CheckStatus::Wait).then_some(c)
         })
         .await
@@ -210,28 +218,28 @@ fn refused(r: Said, words: &[&str]) {
 // ── xledger ──────────────────────────────────────────────────────────────────
 
 #[tokio::test]
-async fn findings_need_a_ref_and_only_the_check_station_or_a_person_may_reject_defer_or_reopen() {
+async fn findings_need_a_ref_and_only_a_review_station_or_a_person_may_reject_defer_or_reopen() {
     let r = Rig::new("ledgers-settled").await;
     refused(r.model("design", "xledger", &["add", "findings", "没测空串"]).await, &["至少一个 --ref"]);
-    let t = r.ok(r.model("check", "xledger", &["add", "findings", "没测空串", "--ref", "design.md#做法,TK-R2"]).await).await;
+    let t = r.ok(r.model("review-design", "xledger", &["add", "findings", "没测空串", "--ref", "design.md#做法,TK-R2"]).await).await;
     assert!(t.contains("F1"), "{t}");
     let f = r.ledger("findings");
     assert_eq!(f["entries"][0]["refs"], json!(["design.md#做法", "TK-R2"]));
-    assert_eq!(f["entries"][0]["by"], json!({"kind": "station", "id": "check"}), "a model in a station is recorded as the station");
+    assert_eq!(f["entries"][0]["by"], json!({"kind": "station", "id": "review-design"}), "a model in a station is recorded as the station");
 
     // The author (the design station, a model in its session) answers resolved or disputed, nothing else.
     for no in ["rejected", "deferred", "open", "accepted"] {
-        let want: &[&str] = if no == "accepted" { &["findings 的结论是"] } else { &["作者只能给 resolved", "检查站"] };
+        let want: &[&str] = if no == "accepted" { &["findings 的结论是"] } else { &["作者只能给 resolved", "检视站（review-*）"] };
         refused(r.model("design", "xledger", &["set", "findings", "F1", no]).await, want);
     }
     // A model with no station (the main conversation) is no better than an author; a station's own step counts as the station.
     refused(r.cmd("xledger", CommandBy::model("m"), None, &["set", "findings", "F1", "rejected"]).await, &["模型 m"]);
     r.ok(r.model("design", "xledger", &["set", "findings", "F1", "disputed", "测了"]).await).await;
     r.ok(r.model("design", "xledger", &["set", "findings", "F1", "resolved", "补了一条"]).await).await;
-    // The check station and a person may give any.
-    r.ok(r.model("check", "xledger", &["set", "findings", "F1", "open"]).await).await;
-    r.ok(r.cmd("xledger", station("check"), None, &["set", "findings", "F1", "rejected", "不成立"]).await).await;
-    r.ok(r.model("check", "xledger", &["set", "findings", "F1", "deferred"]).await).await;
+    // A review station and a person may give any.
+    r.ok(r.model("review-design", "xledger", &["set", "findings", "F1", "open"]).await).await;
+    r.ok(r.cmd("xledger", station("review-design"), None, &["set", "findings", "F1", "rejected", "不成立"]).await).await;
+    r.ok(r.model("review-design", "xledger", &["set", "findings", "F1", "deferred"]).await).await;
     r.ok(r.me("xledger", &["set", "findings", "F1", "rejected", "我定的"]).await).await;
     let e = &r.ledger("findings")["entries"][0];
     assert_eq!(e["conclusion"], "rejected");
@@ -273,16 +281,16 @@ async fn decisions_and_risks_are_anyones_to_conclude_and_only_a_person_answers_a
 }
 
 #[tokio::test]
-async fn reply_answers_the_projects_principles_from_the_check_station_or_a_person() {
+async fn reply_answers_the_projects_principles_from_a_review_station_or_a_person() {
     let r = Rig::new("constitution-reply").await;
-    refused(r.model("design", "xledger", &["reply", "P1", "complies", "守了"]).await, &["只有检查站", "design 站"]);
-    refused(r.cmd("xledger", CommandBy::model("m"), None, &["reply", "P1", "complies"]).await, &["只有检查站"]);
-    refused(r.model("check", "xledger", &["reply", "P9", "complies", "x"]).await, &["没有原则 P9", "P1"]);
-    refused(r.model("check", "xledger", &["reply", "P1", "maybe", "x"]).await, &["结论是 complies"]);
-    refused(r.model("check", "xledger", &["reply", "P1", "violates"]).await, &["violates 要说明"]);
-    r.ok(r.model("check", "xledger", &["reply", "P1", "complies", "只用了标准库"]).await).await;
+    refused(r.model("design", "xledger", &["reply", "P1", "complies", "守了"]).await, &["只有检视站", "design 站"]);
+    refused(r.cmd("xledger", CommandBy::model("m"), None, &["reply", "P1", "complies"]).await, &["只有检视站"]);
+    refused(r.model("review-design", "xledger", &["reply", "P9", "complies", "x"]).await, &["没有原则 P9", "P1"]);
+    refused(r.model("review-design", "xledger", &["reply", "P1", "maybe", "x"]).await, &["结论是 complies"]);
+    refused(r.model("review-design", "xledger", &["reply", "P1", "violates"]).await, &["violates 要说明"]);
+    r.ok(r.model("review-design", "xledger", &["reply", "P1", "complies", "只用了标准库"]).await).await;
     r.ok(r.me("xledger", &["reply", "P2", "violates", "TK-R3 没有测试"]).await).await;
-    r.ok(r.model("check", "xledger", &["reply", "P1", "n-a", "没有新依赖"]).await).await;
+    r.ok(r.model("review-design", "xledger", &["reply", "P1", "n-a", "没有新依赖"]).await).await;
     let l = r.ledger("constitution");
     assert_eq!(l["entries"].as_array().unwrap().len(), 2);
     assert_eq!(l["entries"][0]["conclusion"], "n-a");
@@ -304,7 +312,7 @@ async fn ledgers_settled_passes_a_settled_set_and_fails_each_open_end() {
     let r = Rig::new("ledgers-settled").await;
     r.ok(r.model("design", "xledger", &["add", "decisions", "用省略号"]).await).await;
     r.ok(r.model("design", "xledger", &["set", "decisions", "D1", "accepted"]).await).await;
-    r.ok(r.model("check", "xledger", &["add", "findings", "没测空串", "--ref", "TK-R2"]).await).await;
+    r.ok(r.model("review-design", "xledger", &["add", "findings", "没测空串", "--ref", "TK-R2"]).await).await;
     r.ok(r.model("design", "xledger", &["set", "findings", "F1", "resolved"]).await).await;
     r.ok(r.model("clarify", "xledger", &["add", "questions", "负数？"]).await).await;
     r.ok(r.me("xledger", &["set", "questions", "Q1", "answered", "抛错"]).await).await;
@@ -316,7 +324,7 @@ async fn ledgers_settled_passes_a_settled_set_and_fails_each_open_end() {
         ("decisions", "entries:\n  - {id: D1, text: x, conclusion: open}\n", &["D1", "还是 open"]),
         ("findings", "entries:\n  - {id: F1, text: x, conclusion: disputed, refs: [a], by: {kind: station, id: design}}\n", &["F1", "disputed", "算没结"]),
         ("findings", "entries:\n  - {id: F1, text: x, conclusion: resolved, refs: [], by: {kind: station, id: design}}\n", &["F1", "没有 ref"]),
-        ("findings", "entries:\n  - {id: F1, text: x, conclusion: rejected, refs: [a], by: {kind: station, id: design}}\n", &["F1", "rejected", "只有检查站或人"]),
+        ("findings", "entries:\n  - {id: F1, text: x, conclusion: rejected, refs: [a], by: {kind: station, id: design}}\n", &["F1", "rejected", "只有检视站或人"]),
         ("questions", "entries:\n  - {id: Q1, text: x, conclusion: answered, by: {kind: station, id: clarify}}\n", &["Q1", "只有人能答"]),
     ];
     for (kind, text, words) in cases {
@@ -328,17 +336,50 @@ async fn ledgers_settled_passes_a_settled_set_and_fails_each_open_end() {
             assert!(said(&c).contains(w), "{w:?} not in {}", said(&c));
         }
     }
-    // The check station's rejection and a person's deferral stand.
+    // A review station's rejection and a person's deferral stand.
     let r = Rig::new("ledgers-settled").await;
     r.write(
         &format!("{}/ledgers/findings.yaml", r.out.strip_prefix(&r.root).unwrap().display()),
-        "entries:\n  - {id: F1, text: x, conclusion: rejected, refs: [a], by: {kind: station, id: check}}\n  - {id: F2, text: y, conclusion: deferred, refs: [b], by: {kind: person, id: me}}\n",
+        "entries:\n  - {id: F1, text: x, conclusion: rejected, refs: [a], by: {kind: station, id: review-design}}\n  - {id: F2, text: y, conclusion: deferred, refs: [b], by: {kind: person, id: me}}\n",
     );
     assert_eq!(r.judge(json!({})).await.status, CheckStatus::Pass);
 }
 
+/// The two ends of the review line's rounds: the author hands a disputed finding back to the review
+/// station that filed it; the review station judges only what it filed.
 #[tokio::test]
-async fn constitution_reply_wants_every_principle_answered_by_the_check_station_and_a_note_on_violates() {
+async fn a_disputed_finding_goes_back_to_the_review_station_that_filed_it_and_it_judges_only_its_own() {
+    let opened = |by: &str, now: &str, last: &str| {
+        format!("  - {{id: F1, text: x, conclusion: {now}, refs: [a], by: {{kind: station, id: {last}}}, history: [{{conclusion: open, by: {{kind: station, id: {by}}}, at: t}}]}}\n")
+    };
+    let write = |r: &Rig, entries: &str| r.write(&format!("{}/ledgers/findings.yaml", r.out.strip_prefix(&r.root).unwrap().display()), &format!("entries:\n{entries}"));
+    // At the author's station: the review line's finding disputed is an answer, waiting for it.
+    let r = Rig::new("ledgers-settled").await;
+    write(&r, &opened("review-design", "disputed", "work"));
+    let c = r.judge(json!({})).await;
+    assert_eq!(c.status, CheckStatus::Pass, "{}", said(&c));
+    // Left open, it is not answered; disputed, a finding the author's own station filed is still open.
+    let r = Rig::new("ledgers-settled").await;
+    write(&r, &(opened("review-design", "open", "review-design") + &opened("join", "disputed", "work").replace("F1", "F2")));
+    let c = r.judge(json!({})).await;
+    assert_eq!(c.status, CheckStatus::Fail);
+    assert!(said(&c).contains("F1：还是 open") && said(&c).contains("F2：作者不同意"), "{}", said(&c));
+
+    // At the review station: what it filed and the author disputed is its to settle...
+    let r = Rig::new("review-settled").await;
+    write(&r, &opened("review-design", "disputed", "work"));
+    let c = r.judge(json!({})).await;
+    assert_eq!(c.status, CheckStatus::Fail, "{}", said(&c));
+    assert!(said(&c).contains("F1：作者不同意"), "{}", said(&c));
+    // ...and what another station filed, open or not, is not.
+    let r = Rig::new("review-settled").await;
+    write(&r, &(opened("review-spec", "open", "review-spec") + &opened("review-design", "resolved", "review-design").replace("F1", "F2")));
+    let c = r.judge(json!({})).await;
+    assert_eq!(c.status, CheckStatus::Pass, "{}", said(&c));
+}
+
+#[tokio::test]
+async fn constitution_reply_wants_every_principle_answered_by_a_review_station_and_a_note_on_violates() {
     let r = Rig::new("constitution-reply").await;
     complies(&r, &["P1", "P2", "P3", "P4"]).await;
     let c = r.judge(json!({})).await;
@@ -356,7 +397,7 @@ async fn constitution_reply_wants_every_principle_answered_by_the_check_station_
     // A violates with no note, an answer by another station, an entry for no principle: all by hand.
     let r = Rig::new("constitution-reply").await;
     let dir = r.out.strip_prefix(&r.root).unwrap().display().to_string();
-    let by = "{kind: station, id: check}";
+    let by = "{kind: station, id: review-design}";
     r.write(
         &format!("{dir}/ledgers/constitution.yaml"),
         &format!("entries:\n  - {{id: P1, text: a, conclusion: violates, by: {by}}}\n  - {{id: P2, text: b, conclusion: complies, by: {{kind: station, id: design}}}}\n  - {{id: P3, text: c, conclusion: complies, by: {by}}}\n  - {{id: P4, text: d, conclusion: complies, by: {by}}}\n  - {{id: P7, text: e, conclusion: complies, by: {by}}}\n"),
@@ -367,10 +408,10 @@ async fn constitution_reply_wants_every_principle_answered_by_the_check_station_
         assert!(said(&c).contains(w), "{w:?} not in {}", said(&c));
     }
 
-    // A violates with its note passes the gate (the finding is the check station's to raise).
+    // A violates with its note passes the gate (the finding is the review station's to raise).
     let r = Rig::new("constitution-reply").await;
     complies(&r, &["P1", "P3", "P4"]).await;
-    r.ok(r.model("check", "xledger", &["reply", "P2", "violates", "TK-R3 没有测试"]).await).await;
+    r.ok(r.model("review-design", "xledger", &["reply", "P2", "violates", "TK-R3 没有测试"]).await).await;
     let c = r.judge(json!({})).await;
     assert_eq!(c.status, CheckStatus::Pass, "{}", said(&c));
     assert!(c.detail.contains("违反：P2"), "{}", c.detail);
@@ -385,7 +426,7 @@ async fn constitution_reply_wants_every_principle_answered_by_the_check_station_
 
 async fn complies(r: &Rig, ids: &[&str]) {
     for id in ids {
-        r.ok(r.model("check", "xledger", &["reply", id, "complies", "守了"]).await).await;
+        r.ok(r.model("review-design", "xledger", &["reply", id, "complies", "守了"]).await).await;
     }
 }
 

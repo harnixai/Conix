@@ -102,19 +102,24 @@ release: [carol]
 - **核对归档**：`conix flow verify <归档目录>` 看一份归档在写下之后有没有被改过：文件对着 `record.json` 的清单，
   门禁证据与确认绑定的摘要重算，`record.json` 再对着这台机器上的运行账本。有问题就列出来，退出码非 0。
   `conix flow verify --all` 扫项目里所有的 `conix/*/archive/*/`。
-- **内置的 `xforge`**（`conix flow install xforge` 装进项目）：规格驱动的开发流程，`xforge/solid`（提案、设计、独立检查、按工作包实施、验证、归档）与 `xforge/quick`
-  （提案、实施、验证、归档）。规格在 `conix/xforge/specs/`，站里的会话用 `xspec`、`xledger`、`xpkg` 三个命令记规格增量、
-  台账、工作包，归档时增量并进规格。项目要准备的：`.conix/governance/verify.sh`（实施站的出口跑它：单测、lint），
-  可选的 `.conix/governance/constitution.yaml`（设计逐条对照的原则）。完整的例子是仓库里的 `examples/xforge`。
+- **内置的 `xforge`**（`conix flow install xforge` 装进项目）：规格驱动的开发流程，按风险三条路径，每条路径几条线：
+  `xforge/quick`（只有开发线：提案、实施、验证、归档）、`xforge/solid`（开发线与测试线：规格侧定了分两路，各在自己的 worktree 里，
+  一路实现、一路只照规格写黑盒测试，互相看不到，合起来用测试跑实现）、`xforge/major`（先澄清，再加一条与开发线不同模型的检视线）。
+  规格在 `conix/xforge/specs/`，站里的会话用 `xspec`、`xarch`、`xledger`、`xpkg` 记规格与接口增量、台账、工作包，归档时增量并进基线。
+  项目要准备的：`.conix/governance/verify.sh`（实施站的出口跑它：单测、lint），可选的 `.conix/governance/constitution.yaml`
+  （设计逐条对照的原则），`.conix/governance/xforge.yaml` 里：
+  - `lines`：三条线的模型，`build`（开发线）、`tests`（测试线）、`review`（检视线，要与开发线不同；测试线与检视线可以是同一个），
+    没写的用实例的缺省模型；
+  - `review.major`、`review.solid`：哪几个检视点由检视线检视。major 缺省开设计阶段的 `spec`、`design`、`tests-design`；
+    全链条（`code`、`tests`、`verify`）要你手工开。检视线记下问题就自动打回开发线修，再检视一轮确认；两轮还没结清停下等你；
+  - verify 菜单的 `blackbox` 一项（黑盒测试放哪、怎么跑）：solid、major 合起来那一站跑它。
+
+  合起来没过时会话判错在哪一边，你决定打回哪一路（`/rework fork` 两路都重做，`/rework fork/build` 只重做开发线）。solid、major
+  结束后 `/worktree merge` 合进项目。`conix flow doctor` 查这些备齐了没有。完整的例子是仓库里的 `examples/xforge`。
 - **内置的 `xreport`**（`conix flow install xreport` 装进项目）：这个项目的提交历史报告，`/flow:xreport <主题> [--since 2026-11-01] [--until …]`
   （都不给就是近 30 天）。统计由 `xstat` 经系统的 git 算，模型照统计写分析，表由统计生成，你确认「报告定稿」；归档在 `conix/xreport/archive/`。
   名字照 git（`.mailmap` 合过）；邮箱缺省不记，提交说明缺省给模型看，`.conix/governance/xreport.yaml` 的 `privacy` 可以改。
   要跑 git，所以项目要受信（`/trust`）。约定见 `docs/design/xreport.md`。
-- **双路开发 `xforge/dual`**：规格侧（提案、规格与接口增量）写一次、检查、你批准；之后分成两个子运行，各在自己的 worktree 里，
-  一个实现、一个只照规格写黑盒测试，互相看不到；两路合回运行的分支后用黑盒测试跑实现，没过的由会话判错在哪一边，你决定打回哪一路
-  （`/rework fork` 两路都重做，`/rework fork/impl` 只重做实现那一路）。两个子运行的会话与门禁跑的命令都读不到另一路的
-  worktree。整个运行结束后 `/worktree merge` 合进项目。不按风险自动选，点名起：`/flow:xforge:dual <主题> --risk high`。
-  要在 `.conix/governance/xforge.yaml` 的 verify 菜单里声明一项 `blackbox`（黑盒测试放哪、怎么跑），没有它合起来那一站就报错。
 
 ## 管理流程包
 

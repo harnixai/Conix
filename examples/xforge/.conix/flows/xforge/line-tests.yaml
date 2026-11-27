@@ -1,17 +1,23 @@
-name: dual-tests
-title: 双路开发：黑盒测试
+name: line-tests
+title: 测试线：黑盒测试
 description: >-
-  xforge/dual 的测试那一路，只做它的子运行：在自己的 worktree 里只照分叉时的规格侧（需求的 WHEN / THEN、接口增量与基线）
-  设计一个黑盒测试项目、独立检查、按工作包写测试，只经公开接口驱动被测的东西。不改规格侧；看不到实现那一路。
+  xforge/solid、xforge/major 的测试线那一路，只做它们的子运行：在自己的 worktree 里只照分叉时的规格侧（需求的 WHEN / THEN、
+  接口增量与基线）设计一个黑盒测试项目、按工作包写测试，只经公开接口驱动被测的东西。检视点开着时（父运行给的 review），
+  检视线检视测试的设计（tests-design）与写出的测试（tests）。不改规格侧；看不到开发线。
 # 不单独起：spec_side 没有缺省，单独起时输入就不合；硬给一个，第一站的 spec-unchanged 也报"没有父运行"。
 # 包没有"只做子运行"的写法（bundle.yaml 的 flows 列的都能点名起），这是最省事又挡得住的一处。
+main: {model: "${settings.lines.tests.model}", provider: "${settings.lines.tests.provider}"}
 inputs:
   title:
     schema: {type: string, minLength: 1}
     description: 变更的短标题（父运行的）
   spec_side:
     schema: {type: object, minProperties: 1, additionalProperties: {type: string}}
-    description: 父运行分叉前封存的规格侧摘要（xspec seal：文件 → sha256）。只由 xforge/dual 的 fork 站给，别处不要起这条流程
+    description: 父运行分叉前封存的规格侧摘要（xspec seal：文件 → sha256）。只由 xforge/solid、xforge/major 的 fork 站给，别处不要起这条流程
+  review:
+    schema: {type: object, additionalProperties: {type: boolean}}
+    default: {}
+    description: 父运行那条路径的检视点（治理文件的 review.solid 或 review.major）：这一路看 tests-design、tests
 policies: [by-commands]
 result:
   from:
@@ -63,14 +69,16 @@ stations:
       - {kind: gate, gate: design-sections}
       - {kind: gate, gate: constitution}
       - {kind: gate, gate: packages-planned}
+      # 检视线的发现：修好的 resolved，不同意的 disputed（交回检视线定）；还开着的挡住这一站。
       - {kind: gate, gate: ledgers-settled}
     on_unmet: {rework_to: design, max: 2}
 
-  # 无人值守：检查留下没结的发现就打回设计，最多两次；之后等人。
-  - id: check
-    title: 独立检查
-    executor: {kind: agent}
-    skill: dual-check
+  # 检视点 tests-design：检视线（与开发线不同的模型，只看不改）检视测试的设计：测什么、怎么只经公开接口测。发现没结清就自动打回设计，至多两次，之后等人。
+  - id: review-tests-design
+    title: 检视测试设计
+    when: [{path: inputs.review.tests-design, eq: true, label: 检视点 tests-design 开着}]
+    executor: {kind: agent, model: "${settings.lines.review.model}"}
+    skill: review-tests-design
     policies: [review-only]
     output:
       type: object
@@ -78,10 +86,9 @@ stations:
       properties: {summary: {type: string}, ready: {type: boolean}}
     exit:
       - {kind: output}
-      - {kind: gate, gate: spec-unchanged}
       - {kind: gate, gate: ledgers-settled}
-      # 原则没答全是检查自己的活，不该把设计打回去。
-      - {kind: gate, gate: constitution-reply, rework_to: check}
+      # 原则没答全是检视自己的活，不该把设计打回去。
+      - {kind: gate, gate: constitution-reply, rework_to: review-tests-design}
     on_unmet: {rework_to: design, max: 2}
     rework_to: [design]
 
@@ -89,7 +96,7 @@ stations:
     title: 实施
     foreach: "${stations.design.output.packages}"
     max_parallel: 1
-    executor: {kind: agent}
+    executor: {kind: agent, model: "${settings.lines.tests.model}"}
     skill: tests-apply
     retry: {max: 2}
     writes: ["${item.paths}"]
@@ -108,3 +115,20 @@ stations:
       - {kind: gate, gate: unit-tests}
     on_unmet: {rework_to: apply, max: 2}
     rework_to: [design]
+
+  # 检视点 tests：对着规格与测试的设计检视写出的测试。缺省关，人在治理文件里手工开。打回实施：每个包重做，各自先看台账里的发现。
+  - id: review-tests
+    title: 检视测试
+    when: [{path: inputs.review.tests, eq: true, label: 检视点 tests 开着}]
+    executor: {kind: agent, model: "${settings.lines.review.model}"}
+    skill: review-tests
+    policies: [review-only]
+    output:
+      type: object
+      required: [summary, ready]
+      properties: {summary: {type: string}, ready: {type: boolean}}
+    exit:
+      - {kind: output}
+      - {kind: gate, gate: ledgers-settled}
+    on_unmet: {rework_to: apply, max: 2}
+    rework_to: [apply, design]

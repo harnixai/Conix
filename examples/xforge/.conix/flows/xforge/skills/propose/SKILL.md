@@ -26,13 +26,14 @@ description: 把想法收敛成有边界的目标：写提案，把对规格与�
 - 改 `xarch modify <编号> [--signature S] [--description D]`，改 stable 的必须 `--breaking`；不再用的先 `xarch deprecate <编号>`，
   `remove` 只删已经 deprecated 的；升成 stable `xarch promote <编号>`；记错了 `xarch revert <编号>`。记完 `xarch check`。
 - 改了 stable 的元素，启动时的 impact 必须有 interface；没有就照上面换路时带上，或停下告诉用户。
-- 双路开发（xforge/dual）没有设计站：改了 stable 的元素，这一站就记接受了的决定（门禁 interface-compat 查）：
+- 每条路径都没有父运行的设计站：改了 stable 的元素，这一站就记接受了的决定（门禁 interface-compat 查）：
   `xledger add decisions "<为什么非破坏不可、调用方怎么办>" --ref <元素编号>`，再 `xledger set decisions <D#> accepted "<说明>"`。
-  需求要写到两个互不相见的人照字面能做出对得上的东西：边界、出错时的表现都写进 WHEN / THEN。
+- solid、major 在规格侧定了之后分两路：开发线照它实现，测试线只照它写黑盒测试，两路互相看不到。需求要写到两个互不相见的人
+  照字面能做出对得上的东西：边界、出错时的表现都写进 WHEN / THEN；测试要经的每个公开函数、参数都登记进接口增量。
 
 **快速变更没有设计站**：这一站顺手划工作包，`xpkg plan <编号> "<标题>" --paths a,b --criteria "判据一;判据二" [--after p1] [--verify <名字>[:参数=值]]`，验证名字从 `xpkg verify-menu` 里选（没有合适的就不写）。
 路径盖住它会改的每个文件，测试也算；判据是能验证的完成条件。交出的 `packages` 就是划的这些：`{id, title, paths, after}`，与 plan 一致。
 
-被打回时先读打回的理由，再 `xledger list findings` 看 open 的发现：照它改提案与增量（两边保持一致），每条改完
-`xledger set findings <编号> resolved "<怎么改的>"`；不同意的 `xledger set findings <编号> disputed "<理由>"`，由检查站或人定。
-发现都有了结论这一站才过。
+**检视线打回时**（`xledger list findings` 里有检视站 `review-*` 记的、open 的发现）：先读打回的理由，逐条答复：
+改好了 `xledger set findings <编号> resolved "<怎么改的>"`；不同意就 `xledger set findings <编号> disputed "<理由>"`，交回检视线定。
+每条都要有答复这一站才过；`rejected`、`deferred` 是检视线或人的，你不给。改的时候提案与增量两边保持一致。

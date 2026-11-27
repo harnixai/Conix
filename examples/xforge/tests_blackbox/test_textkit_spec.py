@@ -1,5 +1,5 @@
 """textkit 的黑盒测试：只照 xforge/specs/textkit.md 的 WHEN / THEN、只经公开接口（xforge/interfaces/textkit.yaml），
-不读 src/textkit 的实现。xforge/dual 的测试那一路往这个目录里加；verify 菜单的 blackbox 一项跑它。"""
+不读 src/textkit 的实现。xforge/solid、xforge/major 的测试线往这个目录里加；verify 菜单的 blackbox 一项跑它。"""
 
 import sys
 import unittest

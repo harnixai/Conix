@@ -18,7 +18,7 @@
 //   xspec remove <编号>                       增量里删一条
 //   xspec revert <编号>                       把一个编号从增量里拿掉
 //   xspec archive                             把增量并进规格（归档站用；有冲突或对不上基线就不并）
-//   xspec seal                                封存规格侧：这次运行目录里每个文件的摘要（双路开发 dual 的 seal 站用，
+//   xspec seal                                封存规格侧：这次运行目录里每个文件的摘要（solid、major 分两路之前的 seal 站用，
 //                                             交给两个子运行，门禁 spec-unchanged 拿它核对子运行没改规格侧）
 //
 // 项目的 .conix/governance/xforge.yaml 里 governance.spec 为 false 时没有规格基线：只有读的子命令能用。

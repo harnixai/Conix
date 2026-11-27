@@ -1,14 +1,14 @@
 ---
 name: join
-description: 双路开发两路合起来之后：用黑盒测试跑实现，每个没过的判断错在实现还是测试，记进台账，建议打回哪一路。
+description: 两路合起来之后：用黑盒测试跑实现，每个没过的判断错在实现还是测试，记进台账，建议打回哪一路。
 ---
 
-两路都合进了这次运行的分支：实现那一路的代码，测试那一路的黑盒测试。它们是照同一份规格（`proposal.md`、`xspec delta`、
-`xarch delta`）各自写的，互相没看过。两路各自交付的东西在 `${output_dir}/children/fork/impl/`、`${output_dir}/children/fork/tests/`
+两路都合进了这次运行的分支：开发线的代码，测试线的黑盒测试。它们是照同一份规格（`proposal.md`、`xspec delta`、
+`xarch delta`）各自写的，互相没看过。两路各自交付的东西在 `${output_dir}/children/fork/build/`（开发线）、`${output_dir}/children/fork/tests/`（测试线）
 （设计 `design.md`、工作包 `work-packages.yaml`、台账 `ledgers/`）。
 
 **跑黑盒测试**：`xpkg verify-menu` 里名叫 `blackbox` 的那一项就是这一站的门禁跑的，照它的命令自己跑一遍。菜单里没有这一项，
-停下告诉用户：要在 `.conix/governance/xforge.yaml` 的 `verify` 里加（双路开发没有它就没有可判的）。
+停下告诉用户：要在 `.conix/governance/xforge.yaml` 的 `verify` 里加（没有它两路就没有可判的）。
 
 **每个没过的用例一条发现**，先按规格判错在哪一边，再记：
 - 照规格的 WHEN / THEN，实现的行为不对：错在实现。
@@ -19,7 +19,7 @@ description: 双路开发两路合起来之后：用黑盒测试跑实现，每�
 一个根因的几个用例记一条。都过了就不记，summary 写跑了多少、都过了；交出 `failures` 是没过的用例数。
 
 **建议打回**（这一站不自动打回，人决定）：
-- 错在一路：`flow_propose {kind: rework, to: fork, reason: "只重做 impl|tests：F1、F2……"}`，交出的 `rework: {tasks: [impl] 或 [tests], reason}`。
+- 错在一路：`flow_propose {kind: rework, to: fork, reason: "只重做 build|tests：F1、F2……"}`，交出的 `rework: {tasks: [build] 或 [tests], reason}`。
   人可以只打回那一个任务（对话里让主 Agent `flow_rework {to: fork, tasks: [...]}`），另一路的结果留着；`/rework fork` 是两路都重做。
 - 错在规格侧：`flow_propose {kind: rework, to: propose, reason}`，两路都要照新规格重来。
 

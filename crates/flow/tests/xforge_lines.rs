@@ -1,13 +1,14 @@
-//! The xforge bundle's dual path (`xforge/dual` and its two children, in Conix's
-//! docs/design/xforge.md §5.1): the three flows and every part they name hold together, the risk
-//! route stays the three paths; the gates of its own — the black-box run at the join, the spec side
-//! a child must not change — judge what they should; and a whole run, driven over a copy of the
-//! example by the real runner with its sessions played from here (the files a model would write,
-//! the commands it would call, the people's confirmations), goes from the proposal through two
-//! children forked from one commit, a black-box failure sent back to the implementation alone, to
-//! the archive. No model.
+//! The xforge bundle's lines (in Conix's docs/design/xforge.md §5): solid and major fork into two
+//! children, the build line and the tests line, and major adds a review line on another model.
+//! The flows hold together; the gates of their own — the black-box run at the join, the spec side a
+//! child must not change — judge what they should; and whole runs, driven over a copy of the example
+//! by the real runner with its sessions played from here (the files a model would write, the
+//! commands it would call, the people's confirmations), go to the archive: solid through two
+//! children forked from one commit and a black-box failure sent back to the build line alone; major
+//! through the review line's rounds — findings filed, the run sent back, fixed or disputed, the
+//! review line settling them — on the models each line is given. No model.
 
-use std::collections::{BTreeSet, HashSet};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -42,11 +43,7 @@ fn copy_of_example() -> tempfile::TempDir {
     d
 }
 
-const FLOWS: [&str; 3] = ["xforge/dual", "xforge/dual-impl", "xforge/dual-tests"];
-
-fn stations(p: &DirPacks, flow: &str) -> Vec<String> {
-    p.flow(flow).unwrap().0.stations.iter().map(|s| s.id.clone()).collect()
-}
+const CHILDREN: [&str; 2] = ["xforge/line-build", "xforge/line-tests"];
 
 fn gates_of(s: &Station) -> Vec<String> {
     s.exit.iter().chain(&s.task_exit).filter_map(|e| match e {
@@ -56,85 +53,68 @@ fn gates_of(s: &Station) -> Vec<String> {
 }
 
 #[test]
-fn the_dual_path_and_its_children_hold_together_and_stay_out_of_the_risk_route() {
+fn solid_and_major_fork_into_the_two_lines_and_hold_together() {
     let p = packs();
     let meta: BundleMeta = serde_yaml::from_str(&p.bundle_file("xforge", "bundle.yaml").unwrap()).unwrap();
-    assert_eq!(meta.version, "0.3.1");
-    assert_eq!(meta.flows, ["quick", "solid", "major", "dual", "dual-impl", "dual-tests"]);
-    assert_eq!(meta.start.route, ["quick", "solid", "major"], "risk picks among the three; dual is started by name");
     assert!(meta.commands.get("xspec").unwrap().read_only.contains(&"seal".to_string()));
-
-    assert_eq!(stations(&p, "xforge/dual"), ["propose", "clarify", "check", "seal", "fork", "join", "verify", "archive"]);
-    for child in ["xforge/dual-impl", "xforge/dual-tests"] {
-        assert_eq!(stations(&p, child), ["design", "check", "apply"], "{child}");
-    }
-    let mut gates = BTreeSet::new();
-    for f in FLOWS {
-        let (def, _) = p.flow(f).unwrap_or_else(|| panic!("no flow {f}"));
-        assert_eq!(validate(&def, &p), Vec::<Problem>::new(), "{f}");
-        for s in &def.stations {
-            gates.extend(gates_of(s));
-        }
-    }
-    for g in &gates {
-        let name = format!("xforge/{g}");
-        let (text, _) = p.part(PartKind::Gate, &name).unwrap_or_else(|| panic!("no gate {g}"));
-        assert_eq!(part_problems(PartKind::Gate, &name, &text, &p), Vec::<String>::new(), "{g}");
-    }
-    for skill in ["spec-check", "join", "impl-design", "impl-apply", "tests-design", "tests-apply", "dual-check"] {
+    for skill in ["join", "impl-design", "impl-apply", "tests-design", "tests-apply", "review-spec", "review-design", "review-tests-design", "review-code", "review-tests", "review-verify"] {
         assert!(p.skill(&format!("xforge/{skill}")).is_some(), "{skill}");
     }
-
-    let (dual, _) = p.flow("xforge/dual").unwrap();
-    assert_eq!(dual.workspace, Some(Workspace::Worktree), "a fork commits on the run's own branch only");
-    let fork = dual.station("fork").unwrap();
-    let children: Vec<_> = fork.tasks.as_ref().unwrap().iter().map(|t| match &t.executor {
-        Executor::Subflow { flow, workspace, inputs } => {
-            assert_eq!(workspace, &Some(Workspace::Worktree));
-            assert_eq!(inputs["spec_side"], json!("${stations.seal.output.files}"));
-            (t.id.as_str(), flow.as_str())
-        }
-        e => panic!("{e:?}"),
-    }).collect();
-    assert_eq!(children, [("impl", "xforge/dual-impl"), ("tests", "xforge/dual-tests")]);
-    assert!(matches!(&fork.exit[..], [ExitCond::Children { .. }]));
-    assert!(matches!(&dual.station("seal").unwrap().executor, Some(Executor::Command { command, args }) if command == "xspec" && args == &["seal"]));
-    assert_eq!(gates_of(dual.station("join").unwrap()), ["blackbox", "ledgers-settled"]);
-    // Every person's confirmation reads the governance switch, as the three paths' do.
-    let confirms: Vec<_> = dual.stations.iter().flat_map(|s| s.exit.iter().map(move |e| (s.id.as_str(), e))).filter_map(|(id, e)| match e {
-        ExitCond::Confirm { separate, .. } => Some((id, separate.clone())),
-        _ => None,
-    }).collect();
-    // The proposal's is the owner's approval of a breaking change, only when there is one.
-    assert_eq!(confirms.iter().map(|(id, _)| *id).collect::<Vec<_>>(), ["propose", "clarify", "check", "join", "verify"]);
-    assert!(dual.station("propose").unwrap().exit.iter().any(|e| e.when().is_some_and(|w| w.fact.as_deref() == Some("breaking"))));
-    // 规格侧检查打回提案时带着的发现由提案结掉：澄清的会话结不了它，不在提案查就卡在澄清。
-    assert!(gates_of(dual.station("propose").unwrap()).iter().any(|g| g == "ledgers-settled"));
-    for (id, separate) in confirms {
-        assert_eq!(separate, Some(OrSetting::Setting("${settings.review.separate}".into())), "{id}");
+    for old in ["check", "design", "spec-check", "dual-check"] {
+        assert!(p.skill(&format!("xforge/{old}")).is_none(), "{old} is gone with the old paths");
     }
-    assert_eq!(dual.station("join").unwrap().rework_to, ["fork", "propose"]);
-    // Every station of a child checks the spec side it holds; what it writes is its own.
-    for child in ["xforge/dual-impl", "xforge/dual-tests"] {
+    for f in ["xforge/solid", "xforge/major"] {
+        let (def, _) = p.flow(f).unwrap();
+        assert_eq!(def.workspace, Some(Workspace::Worktree), "{f}: a fork commits on the run's own branch only");
+        let fork = def.station("fork").unwrap();
+        let children: Vec<_> = fork.tasks.as_ref().unwrap().iter().map(|t| match &t.executor {
+            Executor::Subflow { flow, workspace, inputs } => {
+                assert_eq!(workspace, &Some(Workspace::Worktree));
+                assert_eq!(inputs["spec_side"], json!("${stations.seal.output.files}"));
+                (t.id.as_str(), flow.as_str())
+            }
+            e => panic!("{e:?}"),
+        }).collect();
+        assert_eq!(children, [("build", "xforge/line-build"), ("tests", "xforge/line-tests")], "{f}");
+        assert!(matches!(&fork.exit[..], [ExitCond::Children { .. }]));
+        assert!(matches!(&def.station("seal").unwrap().executor, Some(Executor::Command { command, args }) if command == "xspec" && args == &["seal"]));
+        assert_eq!(gates_of(def.station("join").unwrap()), ["blackbox", "ledgers-settled"]);
+        // A person's confirmations, each reading the governance switch; the review line confirms nothing.
+        let confirms: Vec<_> = def.stations.iter().flat_map(|s| s.exit.iter().map(move |e| (s.id.as_str(), e))).filter_map(|(id, e)| match e {
+            ExitCond::Confirm { separate, label, .. } => Some((id, label.clone().unwrap(), separate.clone())),
+            _ => None,
+        }).collect();
+        let want: &[(&str, &str)] = if f == "xforge/major" {
+            &[("propose", "批准破坏性改动"), ("clarify", "范围定了"), ("seal", "规格侧定了"), ("join", "两路对上了"), ("accept", "验收")]
+        } else {
+            &[("propose", "批准破坏性改动"), ("seal", "规格侧定了"), ("join", "两路对上了"), ("accept", "验收")]
+        };
+        assert_eq!(confirms.iter().map(|(id, l, _)| (*id, l.as_str())).collect::<Vec<_>>(), want, "{f}");
+        for (id, _, separate) in confirms {
+            assert_eq!(separate, Some(OrSetting::Setting("${settings.review.separate}".into())), "{f} {id}");
+        }
+        // The proposal's is the owner's approval of a breaking change, only when there is one.
+        assert!(def.station("propose").unwrap().exit.iter().any(|e| e.when().is_some_and(|w| w.fact.as_deref() == Some("breaking"))));
+        // The review line's findings sent back to the proposal are settled there.
+        assert!(gates_of(def.station("propose").unwrap()).iter().any(|g| g == "ledgers-settled"));
+        assert_eq!(def.station("join").unwrap().rework_to, ["fork", "propose"]);
+    }
+    // Every author station of a child checks the spec side it holds; what it writes is its own.
+    for child in CHILDREN {
         let (def, _) = p.flow(child).unwrap();
-        for s in &def.stations {
+        for s in def.stations.iter().filter(|s| !s.id.starts_with("review-")) {
             assert!(gates_of(s).contains(&"spec-unchanged".to_string()), "{child} {}", s.id);
         }
         assert_eq!(def.station("design").unwrap().writes, ["${output_dir}/**"]);
         assert_eq!(def.station("apply").unwrap().writes, ["${item.paths}"]);
         assert!(def.result.as_ref().is_some_and(|r| r.schema.is_some()), "{child}: what it hands its parent is checked");
-        // Started on its own, it is refused at once: the spec side comes only from dual's fork.
+        // Started on its own, it is refused at once: the spec side comes only from a fork.
         let e = def.apply_inputs(&json!({"title": "t"})).unwrap_err().to_string();
         assert!(e.contains("spec_side"), "{child}: {e}");
     }
 
-    let to = |inputs: Value| match route(&p, "xforge", &inputs).unwrap() {
-        Route::Flow { flow, .. } => flow,
-        r => panic!("{r:?}"),
-    };
-    assert_eq!(to(json!({"title": "t", "risk": "high", "impact": ["interface"]})), "xforge/major");
     let Route::Triage { candidates, .. } = route(&p, "xforge", &json!({"title": "t"})).unwrap() else { panic!() };
-    assert_eq!(candidates.iter().map(|c| c.flow.as_str()).collect::<Vec<_>>(), ["xforge/quick", "xforge/solid", "xforge/major"]);
+    assert_eq!(candidates.iter().map(|c| c.flow.as_str()).collect::<Vec<_>>(), ["xforge/quick", "xforge/solid", "xforge/major"], "the lines are no path to pick");
 }
 
 #[derive(Default)]
@@ -203,7 +183,7 @@ async fn the_black_box_run_takes_the_menus_blackbox_entry_and_errors_without_it(
     let r = t.tried("blackbox").await;
     assert_eq!(r["verdict"], "error", "{r}");
     assert!(r["summary"].as_str().unwrap().contains("不能带参数"), "{r}");
-    // Not on the menu at all: dual has nothing to judge the implementation with.
+    // Not on the menu at all: the two lines have nothing to judge the implementation with.
     t.governance(|s| s.split("\n  blackbox:").next().unwrap().to_string() + "\n");
     let r = t.tried("blackbox").await;
     assert_eq!(r["verdict"], "error", "{r}");
@@ -211,11 +191,11 @@ async fn the_black_box_run_takes_the_menus_blackbox_entry_and_errors_without_it(
 }
 
 #[tokio::test]
-async fn the_spec_side_gate_outside_a_child_says_this_flow_is_only_a_child_of_dual() {
+async fn the_spec_side_gate_outside_a_child_says_this_flow_is_only_a_child_of_solid_or_major() {
     let t = trials();
     let r = t.tried("spec-unchanged").await;
     assert_eq!(r["verdict"], "error", "{r}");
-    assert!(r["summary"].as_str().unwrap().contains("只做 xforge/dual 的子运行"), "{r}");
+    assert!(r["summary"].as_str().unwrap().contains("只做 xforge/solid、xforge/major 的子运行"), "{r}");
 }
 
 // ── a whole run ────────────────────────────────────────────────────────────────────────────────
@@ -343,6 +323,11 @@ fn implementation(right: bool) -> String {
         + &format!("\n\ndef truncate(text: str, n: int) -> str:\n    \"\"\"把文本截到 n 个字符。\"\"\"\n    return text if len(text) <= n else {cut}\n")
 }
 
+/// A child of major: its path reviews the designs (the example's defaults), solid's reviews nothing.
+fn reviewed(child: &RunRecord) -> bool {
+    child.inputs["review"]["design"] == json!(true)
+}
+
 impl Drive {
     fn note(&self, s: impl Into<String>) {
         self.log.lock().unwrap().push(s.into());
@@ -381,8 +366,10 @@ impl Drive {
         let out = PathBuf::from(rec.output_dir.clone().unwrap());
         let parent_out = rec.worktree.as_ref().and_then(|w| w.fork.as_ref()).and_then(|f| f.parent_output_dir.clone()).map(PathBuf::from);
         self.note(format!("{} {} {}", rec.flow, b.station, b.task));
+        let round = rec.stations[&b.station].round;
+        let path = matches!(rec.flow.as_str(), "xforge/solid" | "xforge/major");
         match (rec.flow.as_str(), b.station.as_str()) {
-            ("xforge/dual", "propose") if self.breaking.load(std::sync::atomic::Ordering::SeqCst) => {
+            (_, "propose") if path && self.breaking.load(std::sync::atomic::Ordering::SeqCst) => {
                 let text = PROPOSAL.replace("## 影响面\n无", "## 影响面\n- 接口：slugify 多了分隔符参数，签名变了，调用方要跟着改");
                 std::fs::write(out.join("proposal.md"), text).unwrap();
                 self.cmd(id, "xspec", &["add", "textkit", "截断", "- WHEN 文本超过 n 个字符\n- THEN 返回前 n 个字符\n- WHEN 文本不超过 n 个字符\n- THEN 原样返回"]).await;
@@ -391,60 +378,82 @@ impl Drive {
                 self.cmd(id, "xledger", &["set", "decisions", "D1", "accepted", "调用方都在这个仓库里"]).await;
                 self.submit(id, json!({"summary": "slugify 可换分隔符"})).await;
             }
-            ("xforge/dual", "propose") => {
+            (_, "propose") if path && round == 1 => {
                 std::fs::write(out.join("proposal.md"), PROPOSAL).unwrap();
                 self.cmd(id, "xspec", &["add", "textkit", "截断", "- WHEN 文本超过 n 个字符\n- THEN 返回前 n 个字符\n- WHEN 文本不超过 n 个字符\n- THEN 原样返回"]).await;
                 self.cmd(id, "xarch", &["add", "textkit", "fn", "truncate", "truncate(text: str, n: int) -> str", "把文本截到 n 个字符"]).await;
                 self.submit(id, json!({"summary": "加 truncate"})).await;
             }
-            ("xforge/dual", "clarify") => self.submit(id, json!({"summary": "没有会改变范围的问题", "questions": 0})).await,
-            ("xforge/dual", "check") => {
-                self.principles(id).await;
-                // A finding left for later, as a real check does: the ledger exists when the spec side
-                // is sealed, and join adds to it after the fork.
-                self.cmd(id, "xledger", &["add", "findings", "接口登记没说要不要进 __all__", "--ref", "fn:textkit.truncate"]).await;
-                self.cmd(id, "xledger", &["set", "findings", "F1", "deferred", "不阻塞两路，验证时看"]).await;
-                self.submit(id, json!({"summary": "规格侧说得清", "ready": true})).await;
+            // Sent back by the review line: the build line fixes what it found and says so.
+            (_, "propose") if path => {
+                // The requirement this change added is withdrawn and written again, with the boundary.
+                self.cmd(id, "xspec", &["revert", "TK-R3"]).await;
+                self.cmd(id, "xspec", &["add", "textkit", "截断", "- WHEN 文本超过 n 个字符\n- THEN 返回前 n 个字符\n- WHEN 文本不超过 n 个字符\n- THEN 原样返回\n- WHEN n 为负数\n- THEN 抛 ValueError"]).await;
+                self.cmd(id, "xledger", &["set", "findings", "F1", "resolved", "TK-R3 补了 n 为负数时抛 ValueError"]).await;
+                self.submit(id, json!({"summary": "补了负数的边界"})).await;
             }
-            ("xforge/dual", "join") => {
-                let round = rec.stations["join"].round;
+            ("xforge/major", "clarify") => self.submit(id, json!({"summary": "没有会改变范围的问题", "questions": 0})).await,
+            // The review line on the spec side: a boundary left unsaid the first time, checked the second.
+            ("xforge/major", "review-spec") => {
+                self.principles(id).await;
                 if round == 1 {
+                    self.cmd(id, "xledger", &["add", "findings", "TK-R3 没说 n 为负数时怎样：实现与测试会各猜一个", "--ref", "TK-R3"]).await;
+                    self.submit(id, json!({"summary": "一处边界没说", "ready": false})).await;
+                } else {
+                    self.cmd(id, "xledger", &["set", "findings", "F1", "resolved", "核实：TK-R3 写了 n 为负数时抛 ValueError"]).await;
+                    self.submit(id, json!({"summary": "规格侧说得清", "ready": true})).await;
+                }
+            }
+            (_, "join") if path => {
+                if round == 1 && rec.flow == "xforge/solid" {
                     let ran = sh(&ws, "python3 -B -m unittest discover -s tests_blackbox -q 2>&1 || true");
                     assert!(ran.contains("FAILED (failures=1)") && ran.contains("'ab' != 'abc'"), "the first implementation is one short: {ran}");
                     self.cmd(id, "xledger", &["add", "findings", "test_longer_text_is_cut_to_n：期望 abc，实际 ab。建议：实现错，因为 TK-R3 说返回前 n 个字符", "--ref", "TK-R3,tests_blackbox/test_truncate.py"]).await;
-                    self.call(id, TOOL_PROPOSE, json!({"kind": "rework", "to": "fork", "reason": "只重做 impl：F2"})).await;
-                    self.submit(id, json!({"summary": "1 个用例没过，错在实现", "failures": 1, "rework": {"tasks": ["impl"], "reason": "F2"}})).await;
+                    self.call(id, TOOL_PROPOSE, json!({"kind": "rework", "to": "fork", "reason": "只重做 build：F1"})).await;
+                    self.submit(id, json!({"summary": "1 个用例没过，错在实现", "failures": 1, "rework": {"tasks": ["build"], "reason": "F1"}})).await;
                 } else {
-                    self.cmd(id, "xledger", &["set", "findings", "F2", "resolved", "重做的实现截到 n 个，黑盒测试都过了"]).await;
+                    let findings = std::fs::read_to_string(out.join("ledgers/findings.yaml")).unwrap_or_default();
+                    if rec.flow == "xforge/solid" && findings.contains("test_longer_text_is_cut_to_n") {
+                        self.cmd(id, "xledger", &["set", "findings", "F1", "resolved", "重做的实现截到 n 个，黑盒测试都过了"]).await;
+                    }
                     self.submit(id, json!({"summary": "黑盒测试都过了", "failures": 0})).await;
                 }
             }
-            ("xforge/dual", "verify") => {
+            (_, "verify") if path => {
                 let rows = "- TK-R3 通过：tests_blackbox/test_truncate.py#test_longer_text_is_cut_to_n，黑盒测试跑过\n\
                             - fn:textkit.truncate 通过：签名与登记的一致，tests_blackbox/test_truncate.py 经它调用";
                 std::fs::write(out.join("verification.md"), format!("# 验证\n\n## 覆盖\n{rows}\n\n## 连贯性\n提案、规格、两路的设计与测试一致。\n\n## 还剩的风险\n无。\n")).unwrap();
                 self.submit(id, json!({"summary": "都验证了"})).await;
             }
-            (child @ ("xforge/dual-impl" | "xforge/dual-tests"), "design") => {
+            (child @ ("xforge/line-build" | "xforge/line-tests"), "design") => {
                 let parent_out = parent_out.expect("a child in a worktree of its own");
+                let build_side = child == "xforge/line-build";
+                let (pkg, paths, verify): (&str, &str, &[&str]) =
+                    if build_side { ("core", "src/textkit/**,tests/test_truncate.py", &["--verify", "compile"]) } else { ("bb", "tests_blackbox/test_truncate.py", &[]) };
+                let packages = json!([{"id": pkg, "title": "加 truncate", "paths": paths.split(',').collect::<Vec<_>>()}]);
+                // Sent back by the review line: the build line disputes what it found, with its reason.
+                if build_side && rec.stations.get("review-design").is_some_and(|r| r.round >= 1 && r.status != StationStatus::Skipped) {
+                    self.cmd(id, "xledger", &["set", "findings", "F1", "disputed", "TK-R3 没说 n 为 0 时怎样，单测不替规格定；n 为 0 落在「超过 n 个字符」里，已经测到"]).await;
+                    self.note("the build line disputed the review's finding");
+                    self.submit(id, json!({"summary": format!("{child} 的设计"), "packages": packages})).await;
+                    return;
+                }
                 // The spec side as of the fork, its own copy.
                 let delta = std::fs::read_to_string(parent_out.join("spec-delta.yaml")).unwrap();
                 assert!(delta.contains("TK-R3"), "{delta}");
                 self.note(format!("{child} sees the spec side at {}", parent_out.display()));
-                let impl_side = child == "xforge/dual-impl";
-                std::fs::write(out.join("design.md"), design(if impl_side { "实现" } else { "黑盒测试" })).unwrap();
-                let (pkg, paths, verify): (&str, &str, &[&str]) =
-                    if impl_side { ("core", "src/textkit/**,tests/test_truncate.py", &["--verify", "compile"]) } else { ("bb", "tests_blackbox/test_truncate.py", &[]) };
+                std::fs::write(out.join("design.md"), design(if build_side { "实现" } else { "黑盒测试" })).unwrap();
                 let mut args = vec!["plan", pkg, "加 truncate", "--paths", paths, "--criteria", "照 TK-R3 做"];
                 args.extend_from_slice(verify);
-                self.cmd(id, "xpkg", &args).await;
+                if round == 1 {
+                    self.cmd(id, "xpkg", &args).await;
+                }
                 // The tests' first design edits the spec side it holds: the gate sends it back.
                 let spec = parent_out.join("spec-delta.yaml");
-                let round = rec.stations["design"].round;
-                if !impl_side && round == 1 {
+                if !build_side && round == 1 && !reviewed(&rec) {
                     std::fs::write(&spec, format!("{delta}# 测试这一路顺手改了规格\n")).unwrap();
                     self.note("tests edited the spec side");
-                } else if !impl_side && round == 2 {
+                } else if !build_side && round == 2 {
                     std::fs::write(&spec, delta.replace("# 测试这一路顺手改了规格\n", "")).unwrap();
                     let unmet = &rec.stations["design"].reworked.as_ref().unwrap().unmet;
                     let found = unmet.iter().find(|c| c.label.contains("spec-unchanged")).unwrap_or_else(|| panic!("{unmet:?}"));
@@ -452,17 +461,28 @@ impl Drive {
                     assert!(found.explain().contains("spec-delta.yaml 改了"), "{}", found.explain());
                     self.note("spec-unchanged failed the tests' edit");
                 }
-                self.submit(id, json!({"summary": format!("{child} 的设计"), "packages": [{"id": pkg, "title": "加 truncate", "paths": paths.split(',').collect::<Vec<_>>()}]})).await;
+                self.submit(id, json!({"summary": format!("{child} 的设计"), "packages": packages})).await;
             }
-            (_, "check") => {
+            // The review line on the build line's design: one finding, disputed, then taken back.
+            ("xforge/line-build", "review-design") => {
                 self.principles(id).await;
-                self.submit(id, json!({"summary": "照规格侧做的", "ready": true})).await;
+                if round == 1 {
+                    self.cmd(id, "xledger", &["add", "findings", "core 包没有 n 为 0 时的单测", "--ref", "design.md#工作包,TK-R3"]).await;
+                    self.submit(id, json!({"summary": "一处没测到", "ready": false})).await;
+                } else {
+                    self.cmd(id, "xledger", &["set", "findings", "F1", "rejected", "认可：n 为 0 已在超长的用例里，规格没另说"]).await;
+                    self.submit(id, json!({"summary": "设计照规格侧做的", "ready": true})).await;
+                }
             }
-            ("xforge/dual-impl", "apply") => {
-                // The implementation is redone only after the black box sent it back.
-                let again = ws.join("tests_blackbox/test_truncate.py").is_file();
+            ("xforge/line-tests", "review-tests-design") => {
+                self.principles(id).await;
+                self.submit(id, json!({"summary": "测试只经公开接口", "ready": true})).await;
+            }
+            ("xforge/line-build", "apply") => {
+                // The implementation is redone only after the black box sent it back; major's is right at once.
+                let again = ws.join("tests_blackbox/test_truncate.py").is_file() || reviewed(&rec);
                 std::fs::write(ws.join("src/textkit/__init__.py"), implementation(again)).unwrap();
-                let files = if again {
+                let files = if ws.join("tests/test_truncate.py").is_file() {
                     self.note("the redone implementation sees the tests merged in the round before");
                     "src/textkit/__init__.py"
                 } else {
@@ -472,7 +492,7 @@ impl Drive {
                 self.cmd(id, "xpkg", &["done", "core", "加了 truncate", "--files", files, "--evidence", "C1=单测过了"]).await;
                 self.submit(id, json!({"package": "core", "status": "done", "summary": "加了 truncate"})).await;
             }
-            ("xforge/dual-tests", "apply") => {
+            ("xforge/line-tests", "apply") => {
                 assert!(!ws.join("tests/test_truncate.py").exists(), "the tests' worktree has none of the implementation's");
                 std::fs::write(ws.join("tests_blackbox/test_truncate.py"), BLACKBOX).unwrap();
                 self.cmd(id, "xpkg", &["done", "bb", "写了 TK-R3 的用例", "--files", "tests_blackbox/test_truncate.py", "--evidence", "C1=两个用例，经 truncate 调用"]).await;
@@ -543,7 +563,7 @@ fn git(dir: &Path, args: &str) -> String {
 }
 
 #[tokio::test]
-async fn a_dual_run_forks_two_children_from_one_commit_joins_them_and_archives() {
+async fn a_solid_run_forks_the_two_lines_from_one_commit_joins_them_and_archives() {
     if std::process::Command::new("python3").arg("--version").output().is_err() {
         return;
     }
@@ -551,9 +571,9 @@ async fn a_dual_run_forks_two_children_from_one_commit_joins_them_and_archives()
     let root = d.root.as_path();
     let main_head = git(root, "rev-parse main");
     let input = CreateIn {
-        flow: "xforge/dual".into(),
+        flow: "xforge/solid".into(),
         subject: "给 textkit 加 truncate".into(),
-        inputs: json!({"title": "truncate", "risk": "high"}),
+        inputs: json!({"title": "truncate", "risk": "medium"}),
         project_root: Some(root.to_string_lossy().into_owned()),
         ..Default::default()
     };
@@ -561,7 +581,7 @@ async fn a_dual_run_forks_two_children_from_one_commit_joins_them_and_archives()
     let run = o.value["run"].as_str().unwrap().to_string();
     d.rn.apply(o).await;
 
-    // The spec side written, checked and approved; sealed; two children forked and through.
+    // The spec side written and approved; sealed; two children forked and through. solid reviews nothing.
     d.until(&run, "the first join", |r| r.stations.get("join").is_some_and(|s| s.status.is_open() && s.tasks.iter().all(|t| t.status == TaskStatus::Submitted))).await;
     let rec = d.record(&run).await;
     let wt = PathBuf::from(&rec.worktree.as_ref().unwrap().path);
@@ -570,6 +590,9 @@ async fn a_dual_run_forks_two_children_from_one_commit_joins_them_and_archives()
     let left_out: Vec<_> = rec.stations["propose"].not_required.iter().map(|n| (n.label.as_str(), n.value.clone())).collect();
     assert_eq!(left_out, [("批准破坏性改动", json!(false))]);
     assert!(rec.stations["propose"].confirms.is_empty());
+    assert_eq!(rec.stations["lines"].status, StationStatus::Passed);
+    assert_eq!(rec.stations["review-spec"].status, StationStatus::Skipped, "review.solid.spec is off");
+    assert_eq!(rec.stations["seal"].confirms.len(), 1, "规格侧定了: a person's");
     let sealed = rec.stations["seal"].tasks[0].output.clone().unwrap();
     for f in ["proposal.md", "spec-delta.yaml", "interface-delta.yaml"] {
         assert!(sealed["files"][f].as_str().is_some_and(|s| s.len() == 64), "{f}: {sealed}");
@@ -582,7 +605,7 @@ async fn a_dual_run_forks_two_children_from_one_commit_joins_them_and_archives()
     let first = rec.stations["fork"].fork.clone().unwrap();
     let tasks = &rec.stations["fork"].tasks;
     let (one, two) = (tasks[0].child.clone().unwrap(), tasks[1].child.clone().unwrap());
-    for (task, child) in [("impl", &one), ("tests", &two)] {
+    for (task, child) in [("build", &one), ("tests", &two)] {
         let c = d.record(child).await;
         assert_eq!(c.base_commit.as_deref(), Some(first.commit.as_str()), "{task}: both from the one fork commit");
         assert_eq!(c.inputs["spec_side"], sealed["files"], "{task}");
@@ -593,7 +616,10 @@ async fn a_dual_run_forks_two_children_from_one_commit_joins_them_and_archives()
         assert_eq!(c.output_dir.as_deref().map(|o| o.ends_with(&format!("children/fork/{task}"))), Some(true));
         // Each one's design in a directory of its own, back in the parent's.
         let designed = std::fs::read_to_string(out.join("children/fork").join(task).join("design.md")).unwrap();
-        assert!(designed.contains(if task == "impl" { "：实现" } else { "：黑盒测试" }), "{designed}");
+        assert!(designed.contains(if task == "build" { "：实现" } else { "：黑盒测试" }), "{designed}");
+        for (id, st) in &c.stations {
+            assert_eq!(st.status == StationStatus::Skipped, id.starts_with("review-"), "{task} {id}: solid's lines have no review");
+        }
         // Its result, as its flow says.
         let result = tasks.iter().find(|t| t.id == task).unwrap().output.clone().unwrap();
         assert_eq!(result["side"], task);
@@ -633,7 +659,7 @@ async fn a_dual_run_forks_two_children_from_one_commit_joins_them_and_archives()
     let rec = d.record(&run).await;
     assert_eq!(rec.stations["join"].status, StationStatus::Unmet, "{:?}", rec.stations["join"]);
     assert!(d.engine.get(&run).await.unwrap().proposals.iter().any(|p| p.to.as_deref() == Some("fork")));
-    d.rn.settle(d.engine.rework(&run, "fork", Some(vec!["impl".into()]), "黑盒测试 F1：实现少截了一个", person()).await).await.unwrap();
+    d.rn.settle(d.engine.rework(&run, "fork", Some(vec!["build".into()]), "黑盒测试 F1：实现少截了一个", person()).await).await.unwrap();
 
     d.until(&run, "the end", |r| r.status == RunStatus::Finished).await;
     let rec = d.record(&run).await;
@@ -662,7 +688,7 @@ async fn a_dual_run_forks_two_children_from_one_commit_joins_them_and_archives()
     let findings = std::fs::read_to_string(out.join("ledgers/findings.yaml")).unwrap();
     assert!(findings.contains("resolved"), "{findings}");
     let archived = PathBuf::from(&wt).join(rec.archive.as_ref().unwrap().dir.clone());
-    assert!(archived.join("children/fork/impl/design.md").is_file() && archived.join("children/fork/tests/design.md").is_file(), "{}", archived.display());
+    assert!(archived.join("children/fork/build/design.md").is_file() && archived.join("children/fork/tests/design.md").is_file(), "{}", archived.display());
     assert_eq!(git(root, "rev-parse main"), main_head, "the project's own branch untouched");
 }
 
@@ -671,9 +697,9 @@ async fn a_breaking_interface_change_waits_at_the_proposal_for_the_owners_approv
     let d = drive_setup().await;
     d.breaking.store(true, std::sync::atomic::Ordering::SeqCst);
     let input = CreateIn {
-        flow: "xforge/dual".into(),
+        flow: "xforge/solid".into(),
         subject: "slugify 可换分隔符".into(),
-        inputs: json!({"title": "slugify-sep", "risk": "high", "impact": ["interface"]}),
+        inputs: json!({"title": "slugify-sep", "risk": "medium", "impact": ["interface"]}),
         project_root: Some(d.root.to_string_lossy().into_owned()),
         ..Default::default()
     };
@@ -706,4 +732,119 @@ async fn a_breaking_interface_change_waits_at_the_proposal_for_the_owners_approv
     let vote = &rec.stations["propose"].confirms[0];
     let bound: Vec<_> = vote.binds.as_ref().unwrap().keys().cloned().collect();
     assert!(bound.len() == 1 && bound[0].ends_with("interface-delta.yaml"), "{bound:?}");
+}
+
+/// One ledger entry's history as `(conclusion, the station or person that gave it)`.
+fn history(ledger: &Path, id: &str) -> Vec<(String, String)> {
+    let text = std::fs::read_to_string(ledger).unwrap_or_else(|e| panic!("{}: {e}", ledger.display()));
+    let doc: Value = serde_yaml::from_str(&text).unwrap();
+    let e = doc["entries"].as_array().unwrap().iter().find(|e| e["id"] == id).unwrap_or_else(|| panic!("no {id} in {doc}"));
+    e["history"].as_array().unwrap().iter().map(|h| (h["conclusion"].as_str().unwrap().to_string(), h["by"]["id"].as_str().unwrap().to_string())).collect()
+}
+
+fn pairs(v: &[(&str, &str)]) -> Vec<(String, String)> {
+    v.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect()
+}
+
+#[tokio::test]
+async fn a_major_run_has_the_review_line_find_send_back_and_settle_on_another_model() {
+    if std::process::Command::new("python3").arg("--version").output().is_err() {
+        return;
+    }
+    let d = drive_setup().await;
+    let input = CreateIn {
+        flow: "xforge/major".into(),
+        subject: "给 textkit 加 truncate".into(),
+        inputs: json!({"title": "truncate", "risk": "high"}),
+        project_root: Some(d.root.to_string_lossy().into_owned()),
+        ..Default::default()
+    };
+    let o = d.rn.start_run(input, person()).await.unwrap();
+    let run = o.value["run"].as_str().unwrap().to_string();
+    d.rn.apply(o).await;
+    d.until(&run, "the end", |r| r.status == RunStatus::Finished).await;
+
+    let rec = d.record(&run).await;
+    let out = PathBuf::from(rec.output_dir.clone().unwrap());
+    // The review points the example's defaults turn on ran; the rest were left out.
+    for (st, want) in [("review-spec", StationStatus::Passed), ("review-verify", StationStatus::Skipped)] {
+        assert_eq!(rec.stations[st].status, want, "{st}");
+    }
+    // The spec side: found by the review line, sent back to the proposal, fixed there, checked.
+    assert_eq!(rec.stations["review-spec"].round, 2);
+    assert_eq!(rec.stations["propose"].round, 2, "sent back once, by itself (on_unmet)");
+    assert_eq!(history(&out.join("ledgers/findings.yaml"), "F1"), pairs(&[("open", "review-spec"), ("resolved", "propose"), ("resolved", "review-spec")]));
+    // Settled before the fork, and not sealed: the parent goes on writing that ledger.
+    let sealed = &rec.stations["seal"].tasks[0].output.as_ref().unwrap()["files"];
+    assert!(sealed.get("ledgers/findings.yaml").is_none() && sealed.get("ledgers/constitution.yaml").is_some(), "{sealed}");
+
+    let tasks = &rec.stations["fork"].tasks;
+    let (build, tests) = (d.record(tasks[0].child.as_ref().unwrap()).await, d.record(tasks[1].child.as_ref().unwrap()).await);
+    assert_eq!(build.inputs["review"], rec.parts.settings.as_ref().unwrap()["review"]["major"], "the lines are told their path's review points");
+    // The build line's design: found, disputed with a reason, the review line takes it back.
+    assert_eq!((build.stations["design"].round, build.stations["review-design"].round), (2, 2));
+    // What the line handed in, merged back into the parent's directory (its worktree is gone).
+    let bout = out.join("children/fork/build");
+    assert_eq!(history(&bout.join("ledgers/findings.yaml"), "F1"), pairs(&[("open", "review-design"), ("disputed", "design"), ("rejected", "review-design")]));
+    assert_eq!(build.stations["review-code"].status, StationStatus::Skipped, "code is reviewed only when a person turns it on");
+    assert_eq!((tests.stations["review-tests-design"].status, tests.stations["review-tests"].status), (StationStatus::Passed, StationStatus::Skipped));
+    // Whose principles the review line answered: its own station each time.
+    let replies = std::fs::read_to_string(bout.join("ledgers/constitution.yaml")).unwrap();
+    assert!(replies.contains("id: review-design"), "{replies}");
+
+    // Each line on its own model: the main sessions where its stations run, the review line's
+    // sub-agents told theirs.
+    let settings = rec.parts.settings.clone().unwrap();
+    let model = |line: &str| settings["lines"][line]["model"].as_str().unwrap().to_string();
+    assert_ne!(model("build"), model("review"));
+    let opened = d.host.opened();
+    let main_of = |r: &str| opened.iter().find(|s| s.run == r && s.main).unwrap_or_else(|| panic!("no main session of {r}")).placement.model.clone();
+    assert_eq!(main_of(&run), Some(model("build")));
+    assert_eq!(main_of(&build.id), Some(model("build")));
+    assert_eq!(main_of(&tests.id), Some(model("tests")));
+    for r in [&run, &build.id, &tests.id] {
+        let main = d.host.session_of(&format!("flow:{r}#@main")).unwrap();
+        let review: Vec<_> = d.host.sent_to(&main).into_iter().filter(|t| t.contains("## Skill `xforge/review-")).collect();
+        assert!(!review.is_empty(), "{r}: no review task");
+        for t in review {
+            assert!(t.contains(&format!("`model: \"{}\"`", model("review"))), "{r}: {t}");
+        }
+    }
+    assert!(d.log.lock().unwrap().iter().any(|l| l == "the build line disputed the review's finding"));
+}
+
+#[tokio::test]
+async fn a_review_line_on_the_build_lines_model_stops_the_run_before_any_model_is_paid() {
+    let d = drive_setup().await;
+    let gov = d.root.join(".conix/governance/xforge.yaml");
+    let text = std::fs::read_to_string(&gov).unwrap();
+    let build = text.lines().find_map(|l| l.trim().strip_prefix("build: {model: ")).unwrap().trim_end_matches('}').to_string();
+    std::fs::write(&gov, text.replace("  review: {model: deepseek-chat}", &format!("  review: {{model: {build}}}"))).unwrap();
+    let start = |flow: &str, risk: &str| CreateIn {
+        flow: flow.into(),
+        subject: "s".into(),
+        inputs: json!({"title": "t", "risk": risk}),
+        project_root: Some(d.root.to_string_lossy().into_owned()),
+        ..Default::default()
+    };
+    let o = d.rn.start_run(start("xforge/major", "high"), person()).await.unwrap();
+    let run = o.value["run"].as_str().unwrap().to_string();
+    d.rn.apply(o).await;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+    let check = loop {
+        let rec = d.record(&run).await;
+        if let Some(c) = rec.stations.get("lines").and_then(|s| s.checks.iter().find(|c| c.status == CheckStatus::Error)) {
+            break c.clone();
+        }
+        assert!(tokio::time::Instant::now() < deadline, "{:?}", rec.stations.get("lines"));
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    };
+    assert!(check.detail.contains(&format!("检视线与开发线是同一个模型 {build}")) && check.detail.contains("重新起一次运行"), "{}", check.detail);
+    let theirs: Vec<_> = d.host.opened().into_iter().filter(|s| s.run == run).filter_map(|s| d.host.session_of(&s.key)).collect();
+    assert!(theirs.iter().all(|id| d.host.sent_to(id).is_empty()), "no turn was sent");
+    // solid reviews nothing by default: the same lines are no problem there.
+    let o = d.rn.start_run(start("xforge/solid", "medium"), person()).await.unwrap();
+    let solid = o.value["run"].as_str().unwrap().to_string();
+    d.rn.apply(o).await;
+    d.until(&solid, "the lines passed", |r| r.stations.get("lines").is_some_and(|s| s.status == StationStatus::Passed)).await;
 }

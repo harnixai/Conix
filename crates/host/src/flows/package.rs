@@ -981,9 +981,8 @@ mod tests {
         assert_eq!(
             r.package.flows,
             [
-                "xforge/dual",
-                "xforge/dual-impl",
-                "xforge/dual-tests",
+                "xforge/line-build",
+                "xforge/line-tests",
                 "xforge/major",
                 "xforge/quick",
                 "xforge/solid"

@@ -1,6 +1,13 @@
 name: solid
 title: 常规变更
-description: 低到中风险的变更：提案、设计、独立检查、按工作包实施、验证、归档。
+description: >-
+  低到中风险的变更，两条线。开发线写提案（规格侧），人批准、封存；然后分两路，各在自己的 worktree 里、从同一个分叉提交出发：
+  开发线照规格设计并实现，测试线只照规格写黑盒测试、看不到实现。合起来用黑盒测试跑实现，验证、验收、归档。
+  检视线缺省不开：治理文件的 review.solid 开哪个检视点，哪一处就由检视线检视。
+# 分叉要往运行自己的分支上提交：用户的分支从不自动提交（docs/design/flows.md §6.5）。
+workspace: worktree
+# 开发线的模型：治理文件的 lines.build（没写就是实例的缺省模型）。父运行的会话站都在主会话里。
+main: {model: "${settings.lines.build.model}", provider: "${settings.lines.build.provider}"}
 inputs:
   title:
     schema: {type: string, minLength: 1}
@@ -15,7 +22,15 @@ inputs:
 policies: [by-commands]
 archive:
   name: "${date}${seq}-${inputs.title}"
+  # 两路各自的设计、台账、工作包在 children/ 里：只留声明的制品就丢了一半的来龙去脉。
+  keep: [proposal.md, verification.md, spec-delta.yaml, interface-delta.yaml, "ledgers/**", "children/**"]
 stations:
+  # 进站就判、不调模型：检视线与开发线是同一个模型，检视就不是另一双眼睛。设置钉在运行里，改了治理文件要重新起。
+  - id: lines
+    title: 核对三条线
+    exit:
+      - {kind: gate, gate: lines}
+
   - id: propose
     title: 提案
     executor: {kind: session}
@@ -31,98 +46,102 @@ stations:
       - {kind: gate, gate: spec-delta-shape}
       - {kind: gate, gate: spec-delta}
       - {kind: gate, gate: interface-delta}
-    on_unmet: {rework_to: propose, max: 2}
-
-  - id: design
-    title: 设计
-    executor: {kind: session}
-    skill: design
-    writes: ["${output_dir}/**"]
-    deliverables:
-      - {path: design.md, template: design.md, description: 设计：做法、集成点、失败模式、迁移与回滚、被否决的方案、原则对照、工作包}
-    output:
-      type: object
-      required: [summary, packages]
-      properties:
-        summary: {type: string}
-        packages:
-          type: array
-          minItems: 1
-          items:
-            type: object
-            required: [id, title, paths]
-            properties:
-              id: {type: string}
-              title: {type: string}
-              paths: {type: array, minItems: 1, items: {type: string}}
-              after: {type: array, items: {type: string}}
-    exit:
-      - {kind: output}
-      - {kind: gate, gate: design-sections}
-      - {kind: gate, gate: constitution}
-      # 增量在设计站不过，多半是基线在这期间变了（别的运行归档了）：那是提案的活。
-      - {kind: gate, gate: spec-delta, rework_to: propose}
-      - {kind: gate, gate: interface-delta, rework_to: propose}
+      # 父运行没有设计站：破坏性的接口改动在提案这里就要有接受了的决定。
       - {kind: gate, gate: interface-compat}
-      # 破坏性的接口改动要项目的主人点头：要不要由门禁 interface-compat 算出的 breaking 定，不由模型交的输出定；
-      # 门禁没结论就当要。批的是接口增量：之后它再改，后面的站过不去，回这一站重批。
+      # 检视线打回这里时带着的发现由这一站修掉（resolved）或不同意（disputed，交回检视线定）；开着的挡住这一站。
+      - {kind: gate, gate: ledgers-settled}
+      # 破坏性的改动还要项目的主人点头：要不要由门禁算出的 breaking 定（不由模型交的输出定，门禁没结论就当要）。
       - kind: confirm
         who: owner
         label: 批准破坏性改动
         when: {gate: interface-compat, fact: breaking}
         separate: "${settings.review.separate}"
         binds: ["${output_dir}/interface-delta.yaml"]
-      - {kind: gate, gate: packages-planned}
-      - {kind: gate, gate: ledgers-settled}
-    on_unmet: {rework_to: design, max: 2}
-    rework_to: [propose]
+    on_unmet: {rework_to: propose, max: 2}
 
-  # 不自动打回：台账里 open 的发现根在哪一站，由人照检查的建议定。
-  - id: check
-    title: 独立检查
-    executor: {kind: agent}
-    skill: check
+  # 检视线检视规格侧（检视点 spec）：两个互不相见的人照它会不会做出不一样的东西。发现没结清就自动打回提案，至多两次，之后等人。
+  - id: review-spec
+    title: 检视规格侧
+    when: [{path: settings.review.solid.spec, eq: true, label: 检视点 spec 开着（review.solid.spec）}]
+    executor: {kind: agent, model: "${settings.lines.review.model}"}
+    skill: review-spec
     policies: [review-only]
     output:
       type: object
       required: [summary, ready]
-      properties:
-        summary: {type: string}
-        ready: {type: boolean}
-        rework:
-          type: object
-          required: [to, reason]
-          properties: {to: {enum: [design, propose]}, reason: {type: string}}
+      properties: {summary: {type: string}, ready: {type: boolean}}
     exit:
       - {kind: output}
       - {kind: gate, gate: ledgers-settled}
-      - {kind: gate, gate: constitution-reply}
-      - {kind: confirm, who: reviewer, label: 检查通过, separate: "${settings.review.separate}"}
-    rework_to: [design, propose]
+      # 原则没答全是检视自己的活，不该把提案打回去。
+      - {kind: gate, gate: constitution-reply, rework_to: review-spec}
+    on_unmet: {rework_to: propose, max: 2}
+    rework_to: [propose]
 
-  - id: apply
-    title: 实施
-    foreach: "${stations.design.output.packages}"
-    max_parallel: 1
-    executor: {kind: agent}
-    skill: apply
-    retry: {max: 2}
-    writes: ["${item.paths}"]
+  # 命令步骤：封存规格侧每个文件的摘要，交给两个子运行（输入 spec_side），它们的门禁 spec-unchanged 拿它核对。
+  # 摘要在运行的记录里，子运行改不到。人在这里批准规格侧：批了就是两路照的是同一份，绑住它。
+  - id: seal
+    title: 封存规格侧
+    executor: {kind: command, command: xspec, args: [seal]}
     output:
       type: object
-      required: [package, status, summary]
-      properties: {package: {type: string}, status: {enum: [done, blocked]}, summary: {type: string}}
-    task_exit:
-      - {kind: gate, gate: package-check}
-      - {kind: gate, gate: package-tests}
+      required: [files]
+      properties: {files: {type: object, minProperties: 1, additionalProperties: {type: string}}, count: {type: integer}}
     exit:
       - {kind: output}
-      - {kind: gate, gate: packages-done}
-      # 没人认领的改动是工作包没划全：回设计补包或扩路径。
-      - {kind: gate, gate: unclaimed, rework_to: design}
-      - {kind: gate, gate: unit-tests}
-    on_unmet: {rework_to: apply, max: 2}
-    rework_to: [design]
+      - kind: confirm
+        who: owner
+        label: 规格侧定了
+        separate: "${settings.review.separate}"
+        binds: ["${output_dir}/proposal.md", "${output_dir}/spec-delta.yaml", "${output_dir}/interface-delta.yaml"]
+    rework_to: [propose]
+
+  # 两个子运行从同一个分叉提交分出去，各在自己的 worktree 里，互相读不到（§6.5）。交付了就由派工器合回这次运行的分支。
+  # 打回到这一站：整站打回两路都重新分叉；只打回一个任务（flow_rework 的 tasks）只重做那一路，另一路的结果留着。
+  # 两路的检视点经输入 review 传进去：子运行不知道自己是哪条路径的。
+  - id: fork
+    title: 分两路
+    tasks:
+      - id: build
+        executor:
+          kind: subflow
+          flow: line-build
+          workspace: worktree
+          inputs: {title: "${inputs.title}", spec_side: "${stations.seal.output.files}", review: "${settings.review.solid}"}
+      - id: tests
+        executor:
+          kind: subflow
+          flow: line-tests
+          workspace: worktree
+          inputs: {title: "${inputs.title}", spec_side: "${stations.seal.output.files}", review: "${settings.review.solid}"}
+    exit:
+      - {kind: children, require: all}
+    rework_to: [propose]
+
+  # 两路都合进来了：用黑盒测试跑实现。不自动打回：没过的根在实现还是在测试，由会话按规格判断、记进台账，人决定打回哪一路。
+  - id: join
+    title: 合起来
+    executor: {kind: session}
+    skill: join
+    writes: ["${output_dir}/**"]
+    output:
+      type: object
+      required: [summary, failures]
+      properties:
+        summary: {type: string}
+        failures: {type: integer, minimum: 0}
+        rework:
+          type: object
+          required: [tasks, reason]
+          properties:
+            tasks: {type: array, minItems: 1, uniqueItems: true, items: {enum: [build, tests]}}
+            reason: {type: string}
+    exit:
+      - {kind: output}
+      - {kind: gate, gate: blackbox}
+      - {kind: gate, gate: ledgers-settled}
+      - {kind: confirm, who: owner, label: 两路对上了, separate: "${settings.review.separate}"}
+    rework_to: [fork, propose]
 
   - id: verify
     title: 验证
@@ -136,8 +155,33 @@ stations:
       - {kind: output}
       - {kind: gate, gate: verification}
       - {kind: gate, gate: unit-tests}
+      - {kind: gate, gate: ledgers-settled}
+    on_unmet: {rework_to: verify, max: 2}
+    rework_to: [fork, join]
+
+  # 检视点 verify：验证记录有没有说到做到。solid 的检视点缺省都关。
+  - id: review-verify
+    title: 检视验证
+    when: [{path: settings.review.solid.verify, eq: true, label: 检视点 verify 开着（review.solid.verify）}]
+    executor: {kind: agent, model: "${settings.lines.review.model}"}
+    skill: review-verify
+    policies: [review-only]
+    output:
+      type: object
+      required: [summary, ready]
+      properties: {summary: {type: string}, ready: {type: boolean}}
+    exit:
+      - {kind: output}
+      - {kind: gate, gate: ledgers-settled}
+    on_unmet: {rework_to: verify, max: 2}
+    rework_to: [verify]
+
+  # 检视不替代人：验收是主人的，在检视之后。
+  - id: accept
+    title: 验收
+    exit:
       - {kind: confirm, who: owner, label: 验收, separate: "${settings.review.separate}"}
-    rework_to: [apply, design]
+    rework_to: [verify, fork, join]
 
   - id: archive
     title: 归档

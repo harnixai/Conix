@@ -113,6 +113,7 @@ flowlib:
   dr_no_fixes: "没有能自动修的"
   dr_can_fix: "{n} 项可以自动修：{cmd}"
   dr_fixed: "已修：{what}"
+  dr_after_fix: "修完之后还有："
   dr_fix_failed: "没修成：{why}"
   dr_errors: "{n} 个错误"
   fixed_staging: "删了 {path}"

@@ -1,9 +1,9 @@
 ---
 name: tests-design
-description: 双路开发测试那一路：只照封存的规格侧设计一个黑盒测试项目，只经公开接口驱动被测的东西。
+description: 测试线那一路：只照封存的规格侧设计一个黑盒测试项目，只经公开接口驱动被测的东西。
 ---
 
-你在双路开发（xforge/dual）的测试那一路，一个子运行，在自己的 worktree 里。另一路照同一份规格写实现，你看不到它；
+你在测试线那一路（xforge/solid、xforge/major 分出来的子运行），在自己的 worktree 里。开发线照同一份规格写实现，你看不到它；
 合起来时用你的测试跑它的实现。你的测试是**规格的另一份独立读法**：照规格写，不照实现写。
 
 **规格侧**是父运行分叉时的一份，在 `${parent.output_dir}`：`proposal.md`、`spec-delta.yaml`（规格增量）、`interface-delta.yaml`
@@ -28,6 +28,10 @@ description: 双路开发测试那一路：只照封存的规格侧设计一个�
 **台账**在你自己的目录。规格有两种读法、测不了、没说出错时怎样：你改不了规格侧，
 `xledger add risks "<哪一条、两种读法、测试按哪种写>" --ref <需求编号>` 并给结论，summary 里写明。
 
-**被打回时**先 `xledger list findings` 看检查留下的发现，照它改、`resolved` 或 `disputed`。父运行打回后重做的这一路，
+**检视线打回时**（`xledger list findings` 里有检视站 `review-*` 记的、open 的发现）：先读打回的理由，逐条答复：
+改好了 `xledger set findings <编号> resolved "<怎么改的>"`；不同意就 `xledger set findings <编号> disputed "<理由>"`，交回检视线定。
+每条都要有答复这一站才过；`rejected`、`deferred` 是检视线或人的，你不给。
+
+父运行打回后重做的这一路，
 树里已经有上一轮两路合回来的东西（包括上一轮的实现）：照规格修测试，不要照着实现改断言。
 上一轮为什么打回在父运行的台账 `${parent.output_dir}/ledgers/findings.yaml` 里。

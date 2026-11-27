@@ -5,6 +5,17 @@ governance:
   interface: true   # 接口基线：xforge/interfaces/
 review:
   separate: false   # 作者也能批；团队要分开（交付过的人不能确认）就改 true
+  # 检视点：检视线（与开发线不同的模型）在哪几处检视。缺省 major 开设计阶段的 spec、design、tests-design，solid 都关。
+  # 全链条检视要人手工开：major: {code: true, tests: true, verify: true}。
+  major: {spec: true, design: true, tests-design: true, code: false, tests: false, verify: false}
+  solid: {spec: false, design: false, tests-design: false, code: false, tests: false, verify: false}
+
+# 三条线的模型：开发线写提案、设计、代码；测试线照规格写黑盒测试；检视线检视，要与开发线不同。
+# 换成实例里配了的模型（Conix 里 /model 列出的）；没写的线用实例的缺省模型。
+lines:
+  build: {model: claude-sonnet-5-5}
+  tests: {model: deepseek-chat}
+  review: {model: deepseek-chat}
 
 # 门禁的进程在沙箱里只读：项目的验证（verify.sh）要写构建、缓存目录或要联网的在这里声明。能写的只能是被 git 忽略的目录
 # （门禁判活不干活，写不了交付的文件）。比如 Rust 项目：writable: [target]。
@@ -27,5 +38,5 @@ verify:
     description: 源码都能编译
     argv: [python3, -m, compileall, -q, src]
   blackbox:
-    description: 黑盒测试（tests_blackbox/）：只经 textkit 的公开接口照规格测。xforge/dual 合起来时门禁 blackbox 跑它，测试那一路写在这里
+    description: 黑盒测试（tests_blackbox/）：只经 textkit 的公开接口照规格测。solid、major 两路合起来时门禁 blackbox 跑它，测试线写在这里
     argv: [python3, -m, unittest, discover, -s, tests_blackbox, -q]

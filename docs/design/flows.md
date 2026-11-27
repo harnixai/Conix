@@ -269,7 +269,7 @@ exit:
 打回（`/rework [运行] <站> [理由]`）也能这样打，但它不是只有人能做：模型照样有 `flow_rework`。给人一条命令是因为检查留下
 问题、要不要打回往往是人看了才定的，不该还要绕道对话叫模型去打；打回的目标站推断不出来，所以站一定要写，理由给重做的站看。
 站后面可以带任务：`/rework <站>/<任务>[,<任务>]` 只重做那一站的这几个任务（`RunOp::Rework{tasks}`，同 `flow_rework` 的 `tasks`），
-站里别的任务的结果留着，如 xforge/dual 只重做实现那一路（xforge.md §5.1）。
+站里别的任务的结果留着，如 xforge/solid 只重做开发线那一路（xforge.md §5.1）。
 
 **运行的 worktree 由人收尾**：在自己 worktree 里跑的运行（`workspace: worktree`）结束后，分支不自动合进用户的分支，
 人打 `/worktree [运行] merge | keep | discard`（`RunOp::EndWorktree{how}`，流程库 `Runner::end_worktree`）：合进项目当前的分支
@@ -425,10 +425,10 @@ exit: [{kind: children, require: all}]   # all（缺省）| any | 正整数：�
 黑盒测试、看不到实现；最后一站把两边合起来，用测试跑实现。
 
 ```yaml
-- id: dual
+- id: fork
   tasks:
-    - {id: impl,  executor: {kind: subflow, flow: xforge/dual-impl,  workspace: worktree}}
-    - {id: tests, executor: {kind: subflow, flow: xforge/dual-tests, workspace: worktree}}
+    - {id: build, executor: {kind: subflow, flow: xforge/line-build, workspace: worktree}}
+    - {id: tests, executor: {kind: subflow, flow: xforge/line-tests, workspace: worktree}}
   exit: [{kind: children}]
 ```
 

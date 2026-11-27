@@ -2,7 +2,8 @@ name: ledgers-settled
 title: 台账里没有悬而未决的
 description: >-
   运行目录 ledgers/ 里的每份台账：decisions、risks 没有 open；findings 没有 open / disputed、有 ref、
-  rejected 与 deferred 是检查站或人给的；questions 是人答的。规矩与 xledger 同一份（lib/ledger.js）。
+  rejected 与 deferred 是检视站或人给的；questions 是人答的。检视站（review-*）只判自己记的发现；别的站可以把检视站记的发现
+  标 disputed 交回去，由检视站定。规矩与 xledger 同一份（lib/ledger.js）。
 kind: script
 script: ledgers-settled
 params:

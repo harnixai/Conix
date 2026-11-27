@@ -781,17 +781,7 @@ async fn doctor(
     if report.findings.is_empty() {
         println!("  {}", i18n::t!("flowlib.dr_nothing"));
     }
-    for f in &report.findings {
-        let who = f
-            .bundle
-            .as_deref()
-            .map(|b| format!("{b}: "))
-            .unwrap_or_default();
-        println!("  {} {who}{}", level_mark(f.level), f.text);
-        if let Some(h) = &f.hint {
-            println!("      → {h}");
-        }
-    }
+    print_findings(report.findings.iter());
     if fix {
         if report.fixes.is_empty() {
             println!("{}", i18n::t!("flowlib.dr_no_fixes"));
@@ -825,9 +815,20 @@ async fn doctor(
             )
         );
     }
-    // 修过了就按修完的样子再查一遍定退出码：修好的错误不该让脚本以为还坏着。
+    // 修过了就按修完的样子再查一遍定退出码：修好的错误不该让脚本以为还坏着。修出来的新错误（装上的包自己的自检报的）
+    // 要列出来：只说"还有 1 个错误"，人不知道是哪个。
     let errors = if fix && !report.fixes.is_empty() {
-        check(ctx, home, artifacts, commands, global).await.errors()
+        let after = check(ctx, home, artifacts, commands, global).await;
+        let left: Vec<_> = after
+            .findings
+            .iter()
+            .filter(|f| f.level == doctor::Level::Error)
+            .collect();
+        if !left.is_empty() {
+            println!("{}", i18n::t!("flowlib.dr_after_fix"));
+            print_findings(left.into_iter());
+        }
+        after.errors()
     } else {
         report.errors()
     };
@@ -835,6 +836,20 @@ async fn doctor(
         bail!("{}", i18n::t!("flowlib.dr_errors", n = errors));
     }
     Ok(())
+}
+
+fn print_findings<'a>(findings: impl Iterator<Item = &'a doctor::Finding>) {
+    for f in findings {
+        let who = f
+            .bundle
+            .as_deref()
+            .map(|b| format!("{b}: "))
+            .unwrap_or_default();
+        println!("  {} {who}{}", level_mark(f.level), f.text);
+        if let Some(h) = &f.hint {
+            println!("      → {h}");
+        }
+    }
 }
 
 // ── 改 ──────────────────────────────────────────────────────────────────────

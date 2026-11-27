@@ -14,52 +14,62 @@ conix            # 起实例并接入
 
 在对话里说"用 xforge 做一个变更：给 textkit 加 truncate(text, n)，标题 truncate"，或者打 `/flow:xforge truncate --risk low`。
 没给风险时主 Agent 照 `triage` 读代码判风险与影响面，再选路启动；点名也行：`/flow:xforge:solid <主题> --risk medium`。
-流程在几处停下等人：`/confirm` 放行，`/reject <理由>` 驳回；检查留下没解决的问题时，`/rework design <理由>` 打回设计
-（检查站会建议打回到哪一站，`/xforge:<站>` 接受建议）。
+流程在几处停下等人：`/confirm` 放行，`/reject <理由>` 驳回；停下的站要重做时 `/rework <站> <理由>` 打回
+（站会建议打回到哪一站，`/xforge:<站>` 接受建议）。solid、major 在自己的 worktree 里跑，结束后 `/worktree merge` 合进你的分支。
 
-## 三条路径
+## 三条路径、三条线
 
-`flow_start {flow: "xforge", inputs: {title, risk, impact}}` 按 `risk` 取第一条接受它的：
+**线**是一个角色和它的模型，在 `.conix/governance/xforge.yaml` 的 `lines` 里配：开发线 `build`（提案、设计、代码），
+测试线 `tests`（只照规格写黑盒测试），检视线 `review`（检视，要与开发线不同的模型；测试线与检视线可以是同一个）。
+没写的线用实例的缺省模型。`flow_start {flow: "xforge", inputs: {title, risk, impact}}` 按 `risk` 取第一条接受它的：
 
-| 路径 | 收的风险 | 站 |
+| 路径 | 收的风险 | 线 | 站 |
+|---|---|---|---|
+| `xforge/quick` | low | 开发 | 提案（顺手划工作包）→ 实施（每包一个任务）→ 验证（人验收）→ 归档 |
+| `xforge/solid` | low、medium | 开发 + 测试 | 提案 → 封存（人批「规格侧定了」）→ 分两路 → 合起来（黑盒测试跑实现，人确认）→ 验证 → 验收 → 归档 |
+| `xforge/major` | 都收 | 开发 + 测试 + 检视 | 提案 → 澄清（人答问题）→ 检视规格侧 → 封存 → 分两路（各自的设计带检视）→ 合起来 → 验证 → 验收 → 归档 |
+
+两路是两个子运行，各在自己的 worktree 里、从同一个提交出发，互相看不到：开发线（`xforge/line-build`）照规格设计并实现，
+测试线（`xforge/line-tests`）只照规格（WHEN / THEN、接口登记的签名）写黑盒测试。合回运行的分支后，用黑盒测试跑实现。
+
+**检视**（major 缺省开，solid 缺省关）：开发线交了一样东西，检视线逐条记发现；有没结的就自动打回开发线那一站，开发线逐条修好标
+`resolved`、不同意的标 `disputed` 写理由；检视线再来一轮，核实修好的、认可或驳回不同意的。两轮还没结清就停下等你。
+
+| 检视点 | 检视什么 | 缺省（major） |
 |---|---|---|
-| `xforge/quick` | low | 提案（顺手划工作包）→ 实施（每包一个任务）→ 验证（人验收）→ 归档 |
-| `xforge/solid` | low、medium | 提案 → 设计 → 独立检查（子 Agent，人确认）→ 实施（每包一个子 Agent）→ 验证（人验收）→ 归档 |
-| `xforge/major` | 都收 | 提案 → 澄清（人答问题、确认）→ 设计 → 独立检查 → 实施 → 验证 → 归档 |
+| `spec` | 提案、规格与接口增量：两个互不相见的人照它会不会做出不一样的东西 | 开 |
+| `design` | 开发线的设计 | 开 |
+| `tests-design` | 测试线的设计：测什么、怎么只经公开接口测 | 开 |
+| `code` | 开发线的代码 | 关 |
+| `tests` | 测试线写出的测试 | 关 |
+| `verify` | 验证记录 | 关 |
 
-`impact`（interface / security / data-migration / infra，缺省空）不改路径：提案的「影响面」要逐项交代，破坏兼容的接口改动要它带 interface。
+全链条检视要你在治理文件里手工开：`review: {major: {code: true, tests: true, verify: true}}`；solid 要检视就开 `review.solid` 的检视点。
+检视不替代你：批准破坏性改动、规格侧定了、两路对上了、验收，都照旧是你的。
+
+`impact`（interface / security / data-migration / infra，缺省空）不改路径：提案的「影响面」要逐项交代，破坏兼容的接口改动要它带 interface，
+还要你批「批准破坏性改动」。
 
 | 站 | 交付 | 把关 |
 |---|---|---|
-| 提案 | `proposal.md`（六节）、规格增量（`xspec`）、接口增量（`xarch`）；quick 另有工作包（`xpkg plan`） | 提案六节；影响面与声明一致；增量的形状、对得上基线、与别的在途运行不冲突 |
+| 核对三条线（solid、major） | — | 开着检视点时检视线与开发线不是同一个模型 |
+| 提案 | `proposal.md`（六节）、规格增量（`xspec`）、接口增量（`xarch`）；quick 另有工作包（`xpkg plan`） | 提案六节；影响面与声明一致；增量的形状、对得上基线、与别的在途运行不冲突；破坏兼容有决定 |
 | 澄清（major） | 会改变范围的问题（`xledger add questions`），人答 | 问题都是人答的；人确认 |
-| 设计 | `design.md`（七节）、工作包、决定与风险（`xledger`） | 七节与被否决的方案；原则对照；增量再判一次（不过退回提案）；破坏兼容有决定；工作包对得上；台账都有结论 |
-| 独立检查 | 发现（`xledger add findings`）、逐条答原则（`xledger reply`） | 台账没有悬着的；原则都答了；人确认 |
-| 实施 | 代码与测试；每包登记（`xpkg done`） | 每包交付时：做完、判据有证据、改动都登记了；站：包都做完、没有无人认领的改动（不过退回设计）、项目的验证 |
-| 验证 | `verification.md`：覆盖、连贯性 | 每条需求与元素有结论、有带 `# <编号>` 的测试；项目的验证；人验收 |
+| 检视（`review-*`） | 发现（`xledger add findings`）；设计阶段的逐条答原则（`xledger reply`） | 这一站记的发现都结了；原则都答了 |
+| 封存 | 命令步骤 `xspec seal`：规格侧每个文件的摘要，交给两个子运行 | 人确认「规格侧定了」，绑住提案与两份增量 |
+| 两路的设计 | `design.md`（七节）、工作包、决定与风险 | 七节与被否决的方案；原则对照；工作包对得上；台账都有结论；规格侧没被改（spec-unchanged） |
+| 实施 | 代码与测试；每包登记（`xpkg done`） | 每包交付时：做完、判据有证据、改动都登记了；站：包都做完、没有无人认领的改动、项目的验证 |
+| 合起来 | 跑 verify 菜单的 `blackbox`，没过的记成发现、写明错在实现还是测试 | 黑盒测试都过、台账结清；人确认 |
+| 验证 | `verification.md`：覆盖、连贯性 | 每条需求与元素有结论、有带 `# <编号>` 的测试；项目的验证 |
+| 验收 | — | 人验收（quick 在验证站） |
 | 归档 | 命令步骤 `xspec archive`、`xarch archive`，不用模型 | 规格与接口增量都并进了基线 |
 
 规格、接口、增量、台账、工作包都由包的命令写（`flow_command`）：策略 `by-commands` 不让模型直接改这些文件；各站只能写运行目录，
-实施的每个包只能写它的路径。
+实施的每个包只能写它的路径，检视站只看不改。
 
-## 双路开发
-
-`xforge/dual` 不在按风险选的路里，点名起：`/flow:xforge:dual truncate --risk high`。规格侧写一次、人批准，然后分成两个子运行，
-各在自己的 worktree 里、从同一个提交出发，互相看不到：`xforge/dual-impl` 照规格设计并实现，`xforge/dual-tests` 只照规格（WHEN / THEN、
-接口登记的签名）写黑盒测试。两路合回运行的分支后，用黑盒测试跑实现。
-
-| 站 | 做什么 | 把关 |
-|---|---|---|
-| 提案、澄清 | 同 major | 同 major；破坏兼容的接口改动在提案就要有接受了的决定 |
-| 规格侧检查 | 子 Agent 找两个人照字面会读出两种意思的地方 | 台账、原则；人确认「规格侧定了」，绑住提案与两份增量 |
-| 封存 | 命令步骤 `xspec seal`：规格侧每个文件的摘要，交给两个子运行 | — |
-| 分两路 | 两个子运行：设计 → 独立检查 → 按工作包实施，各自无人值守 | 每站核对规格侧没被改（spec-unchanged）；包的门禁同 solid |
-| 合起来 | 跑 verify 菜单的 `blackbox`，没过的记成发现、写明错在实现还是测试，建议打回哪一路 | 黑盒测试都过、台账结清；人确认 |
-| 验证、归档 | 同 major | 同 major |
-
-黑盒测试放在 `tests_blackbox/`：`.conix/governance/xforge.yaml` 的 verify 菜单里 `blackbox` 一项跑它，两路都照这一项认测试的目录
-（测试那一路只写那里，实现那一路不碰）。里面已经有几条照规格写的、只经公开接口调用的测试。合起来没过时，`/rework fork <理由>`
-两路都重新分叉；只想重做一路，在对话里让主 Agent `flow_rework {to: fork, tasks: [impl]}`。重做的那一路看得见另一路上一轮合回来的东西。
+黑盒测试放在 `tests_blackbox/`：verify 菜单里 `blackbox` 一项跑它，两路都照这一项认测试的目录（测试线只写那里，开发线不碰）。
+里面已经有几条照规格写的、只经公开接口调用的测试。合起来没过时，`/rework fork <理由>` 两路都重新分叉；只想重做一路，
+`/rework fork/build`（或 `fork/tests`）。重做的那一路看得见另一路上一轮合回来的东西。
 
 ## 提交历史报告：xreport
 
@@ -80,9 +90,9 @@ conix            # 起实例并接入
 ```
 .conix/                     脚手架（进 git）
   conix.yaml                flows.artifacts_dir: xforge —— 制品目录叫 xforge
-  flows/xforge/             流程包：bundle.yaml、quick/solid/major.yaml、dual/dual-impl/dual-tests.yaml、skills/、gates/、scripts/、lib/、policies/、templates/、commands/
+  flows/xforge/             流程包：bundle.yaml、quick/solid/major.yaml、line-build/line-tests.yaml（两路）、skills/、gates/、scripts/、lib/、policies/、templates/、commands/
   flows/xreport/            流程包：bundle.yaml、flow.yaml（统计、分析、定稿）、commands/xstat.js、lib/、gates/、scripts/、skills/、templates/
-  governance/               xforge.yaml（开哪几条基线、确认要不要职责分离、工作包能选的 verify 菜单；前两项运行启动时钉住）、constitution.yaml（项目原则）、verify.sh（项目的验证）
+  governance/               xforge.yaml（开哪几条基线、确认要不要职责分离、检视点、三条线的模型、工作包能选的 verify 菜单；整个文件运行启动时钉住）、constitution.yaml（项目原则）、verify.sh（项目的验证）
   roles.yaml                确认的角色（reviewer、owner）
 xforge/                     制品目录，也就是 xforge 包的数据
   specs/textkit.md          规格基线（进 git）

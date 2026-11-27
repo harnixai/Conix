@@ -5,18 +5,18 @@
 //   xledger add <种类> "<内容>" [--ref a,b]            记一条，回它的编号；先是 open
 //                                                      findings 至少一个 --ref：路径#小节，或需求/元素编号
 //   xledger set <种类> <编号> <结论> ["<说明>"]         定结论（open 是重开）；每次都追加进这一条的 history
-//   xledger reply <原则> complies|violates|n-a "<说明>"  逐条答原则（只有检查站或人）；violates 要说明
+//   xledger reply <原则> complies|violates|n-a "<说明>"  逐条答原则（只有检视站或人）；violates 要说明
 //   xledger list [种类]                                 全列出来，含谁给的结论
 //
 // 结论与谁能给：
 //   decisions、risks   open → accepted | rejected | resolved | deferred，谁都能给；离开设计站前都要有结论
 //   findings           open | resolved | disputed | rejected | deferred
 //                      作者（设计等站）只能给 resolved（改好了）、disputed（不同意，算没结）；
-//                      rejected、deferred、重开（open）只有检查站（check）或人能给
+//                      rejected、deferred、重开（open）只有检视站（review-*）或人能给
 //   questions          open | answered | deferred；只有人能给结论，回答写在说明里
 //   constitution       complies | violates | n-a；只能用 reply
 import { need, parseFlags } from "../lib/cli.js";
-import { KINDS, caller, entriesOf, isCheck, isPerson, refuseSet, showBy } from "../lib/ledger.js";
+import { KINDS, caller, entriesOf, isPerson, isReviewer, refuseSet, showBy } from "../lib/ledger.js";
 
 const list = (s) => (s || "").split(",").map((x) => x.trim()).filter(Boolean);
 
@@ -38,7 +38,7 @@ export default function (input, flow) {
 
   if (sub === "reply") {
     const [pid, conclusion, ...why] = rest;
-    need(isPerson(who) || isCheck(who), `只有检查站（check）或人能答原则，现在是 ${showBy(who)}`);
+    need(isPerson(who) || isReviewer(who), `只有检视站（review-*）或人能答原则，现在是 ${showBy(who)}`);
     need(pid && conclusion, "xledger reply <原则> complies|violates|n-a \"<说明>\"");
     need(KINDS.constitution.conclusions.includes(conclusion), `结论是 ${KINDS.constitution.conclusions.join("、")} 之一`);
     const note = why.join(" ").trim();

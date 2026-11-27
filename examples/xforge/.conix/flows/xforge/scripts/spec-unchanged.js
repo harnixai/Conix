@@ -1,10 +1,10 @@
-// spec-unchanged：双路开发的子运行（xforge/dual-impl、xforge/dual-tests）没改规格侧。规格侧是父运行目录分叉时的一份
+// spec-unchanged：两路的子运行（xforge/line-build、xforge/line-tests）没改规格侧。规格侧是父运行目录分叉时的一份
 // （${parent.output_dir}），父运行分叉前封存了它每个文件的摘要（xspec seal），作为子运行的输入 spec_side 传进来。
 // 不用 flow.git.changed 判：运行目录在制品目录里，git 不管它（git.changed 也把制品目录排除在外），子运行改了它 git 看不见。
 // 摘要也不放在规格侧旁边的文件里：那份文件子运行改得到，运行的输入改不到。
 import { sideProblems } from "../lib/side.js";
 
-const NOT_A_CHILD = "这条流程只做 xforge/dual 的子运行（规格侧来自父运行的分叉）：不要单独起它，起 xforge/dual";
+const NOT_A_CHILD = "这条流程只做 xforge/solid、xforge/major 的子运行（规格侧来自父运行的分叉）：不要单独起它，起 xforge/solid 或 xforge/major";
 
 export default function (input, flow) {
   const p = input.params;

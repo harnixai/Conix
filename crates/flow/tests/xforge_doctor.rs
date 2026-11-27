@@ -1,7 +1,7 @@
 //! The xforge bundle's doctor (`scripts/doctor.js`, in Conix; its docs/design/xforge.md §7): the
 //! example project has everything xforge needs; a settings file that does not read, a switch of the
-//! wrong type, a verify entry the menu's own check refuses, a black-box entry with parameters are
-//! errors; no black-box entry, no principles, no `verify.sh`, no git are warnings; empty baselines
+//! wrong type, a verify entry the menu's own check refuses, a black-box entry with parameters, a
+//! review line on the build line's model where a path reviews are errors; no black-box entry, no principles, no `verify.sh`, no git are warnings; empty baselines
 //! are only said. It changes nothing in the project. No model.
 
 use std::path::{Path, PathBuf};
@@ -90,6 +90,36 @@ async fn a_settings_file_that_does_not_read_or_a_switch_of_the_wrong_type_is_an_
 }
 
 #[tokio::test]
+async fn a_review_line_on_the_build_lines_model_or_unnamed_where_a_path_reviews_is_an_error() {
+    let p = project();
+    let lines = |p: &Path, text: &str| edit(p, SETTINGS, |s| {
+        let (head, rest) = s.split_once("lines:\n").unwrap();
+        let tail = rest.split_once("\n\n").map(|(_, t)| t.to_string()).unwrap_or_default();
+        format!("{head}lines:\n{text}\n\n{tail}")
+    });
+    lines(p.path(), "  build: {model: m1}\n  review: {model: m1}");
+    let errors = of(&check(p.path()).await, DoctorLevel::Error);
+    assert_eq!(errors.len(), 1, "{errors:?}");
+    assert!(errors[0].contains("major 开着检视点 spec、design、tests-design，检视线与开发线是同一个模型 m1") && errors[0].contains("核对三条线"), "{}", errors[0]);
+    // Not named: the instance's model, which is the build line's too when that is not named either.
+    lines(p.path(), "  tests: {model: m2}");
+    let errors = of(&check(p.path()).await, DoctorLevel::Error);
+    assert!(errors.len() == 1 && errors[0].contains("检视线没写模型") && errors[0].contains("两条线就是同一个模型"), "{errors:?}");
+    // A path that reviews nothing owes no review line; a line of the wrong shape, a name not known.
+    lines(p.path(), "  build: {model: m1}\n  tests: [m2]\n  reviw: {model: m3}");
+    edit(p.path(), SETTINGS, |s| s.replace("  major: {spec: true, design: true, tests-design: true,", "  major: {spec: false, design: false, tests-design: false,"));
+    let r = check(p.path()).await;
+    let errors = of(&r, DoctorLevel::Error);
+    assert_eq!(errors.len(), 1, "major reviews nothing now: {errors:?}");
+    assert!(errors[0].contains("lines.tests 要写成 {model"), "{errors:?}");
+    assert!(of(&r, DoctorLevel::Warn).iter().any(|m| m.contains("lines.reviw xforge 不认识")), "{r:#?}");
+    // A review point that is no switch: the station's `when` would quietly not review.
+    edit(p.path(), SETTINGS, |s| s.replace("tests-design: false, code: false, tests: false, verify: false}\n  solid", "tests-design: \"yes\", code: false, tests: false, verify: false}\n  solid"));
+    let errors = of(&check(p.path()).await, DoctorLevel::Error);
+    assert!(errors.iter().any(|m| m.contains("review.major.tests-design 要是 true 或 false")), "{errors:?}");
+}
+
+#[tokio::test]
 async fn a_verify_entry_the_menus_own_check_refuses_is_an_error() {
     let p = project();
     edit(p.path(), SETTINGS, |s| s + "  lint:\n    argv: [ruff, \"{target}\"]\n    params: {style: \"[a-z]+\"}\n  Bad:\n    argv: []\n");
@@ -103,14 +133,14 @@ async fn a_verify_entry_the_menus_own_check_refuses_is_an_error() {
 }
 
 #[tokio::test]
-async fn the_black_box_entry_is_wanted_by_dual_and_takes_no_parameters() {
+async fn the_black_box_entry_is_wanted_by_solid_and_major_and_takes_no_parameters() {
     let p = project();
     edit(p.path(), SETTINGS, |s| s.split("\n  blackbox:").next().unwrap().to_string() + "\n");
     let r = check(p.path()).await;
     assert_eq!(of(&r, DoctorLevel::Error), Vec::<String>::new(), "{r:#?}");
     let warns = of(&r, DoctorLevel::Warn);
     assert_eq!(warns.len(), 1, "{warns:?}");
-    assert!(warns[0].contains("xforge/dual 需要 verify.blackbox"), "{}", warns[0]);
+    assert!(warns[0].contains("xforge/solid、xforge/major 需要 verify.blackbox"), "{}", warns[0]);
 
     edit(p.path(), SETTINGS, |s| {
         s + "  blackbox:\n    argv: [python3, -m, unittest, discover, -s, \"{dir}\", -q]\n    params: {dir: \"tests_[a-z]+\"}\n"

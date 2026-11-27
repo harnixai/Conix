@@ -13,6 +13,5 @@ description: 把会改变范围或设计的问题写下来，交给人回答。
 每条用 `/xforge:xledger set questions <编号> answered "<回答>"`（或 `deferred "<为什么以后再说>"`）答，
 都答完打 `/xforge:clarify` 重判这一站，再 `/confirm`。答案改了范围的，人会把运行打回提案。
 
-被检查站打回到这一站时，`xledger list findings` 里 open 的发现多半是范围没说清：把它写成一条问题（`--ref <发现的编号>`）
-交给人答，并 `xledger set findings <编号> resolved "改由问题 <Q#> 定"`；要改提案或增量才能解决的，交出时在 summary 里写明，
-由人打回提案。
+检视线（`review-spec`）的发现根在范围没说清、人打回到这一站时：把它写成一条问题（`--ref <发现的编号>`）交给人答，
+并 `xledger set findings <编号> resolved "改由问题 <Q#> 定"`；要改提案或增量才能解决的，交出时在 summary 里写明，由人打回提案。
