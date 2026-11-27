@@ -467,11 +467,7 @@ impl State {
             return vec![Context::Picker];
         }
         match self.ui.focus {
-            Focus::Composer
-                if self.ask_visible() && self.ui.ask_active && self.ui.task_view.is_none() =>
-            {
-                vec![Context::Dialog]
-            }
+            Focus::Composer if self.ask_has_keys() => vec![Context::Dialog],
             Focus::Composer if !self.picker_candidates().is_empty() => {
                 vec![Context::Picker, Context::Composer]
             }
@@ -522,6 +518,15 @@ impl State {
 
     pub fn ask_visible(&self) -> bool {
         self.conv().is_some_and(|c| !c.prompts.is_empty())
+    }
+
+    /// 提问框此刻拿着键盘：开着、没被输入框的字让出去、焦点在左边。框里的键位行与选中标记照它画——焦点在
+    /// 右栏时 `ask_active` 还记着（转回来就接着答），可这时的 Enter 是右栏的，框里不能还写着「Enter 确认」。
+    pub fn ask_has_keys(&self) -> bool {
+        self.ask_visible()
+            && self.ui.ask_active
+            && self.ui.task_view.is_none()
+            && self.ui.focus == Focus::Composer
     }
 
     /// 右栏会话列表只列主 Agent；子 Agent 的侧链会话挂在它的拆分树下（需求 S-01、S-04）。

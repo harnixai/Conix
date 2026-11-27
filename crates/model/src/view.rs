@@ -488,20 +488,20 @@ fn ask_lines(s: &State, width: usize) -> Option<(Vec<Line>, Option<usize>)> {
     let options = crate::chat_update::ask_options(p);
     let sel = s.ui.ask_selected.min(options.len() - 1);
     for (i, o) in options.iter().enumerate() {
-        let mark = if i == sel && s.ui.ask_active {
+        let mark = if i == sel && s.ask_has_keys() {
             "❯ "
         } else {
             "  "
         };
         lines.push(Line::plain(fit(format!("{mark}{}. {o}", i + 1))));
     }
-    let keys = if s.ui.ask_active {
+    let keys = if s.ask_has_keys() {
         i18n::t!("view.ask.keys_active")
     } else {
         i18n::t!("view.ask.keys_idle")
     };
     lines.push(Line::toned(fit(keys), Tone::Dim));
-    let selected = s.ui.ask_active.then_some(ASK_OPTIONS_OFFSET + sel);
+    let selected = s.ask_has_keys().then_some(ASK_OPTIONS_OFFSET + sel);
     Some((lines, selected))
 }
 
