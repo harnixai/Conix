@@ -929,7 +929,7 @@ async fn the_global_library_is_not_run_until_a_bundle_is_installed() {
     let port::Reply::Library(lib) = flows.command(port::Command::ListLibrary).await.unwrap() else {
         panic!("library")
     };
-    assert_eq!(lib, ["xforge"]);
+    assert_eq!(lib, ["xforge", "xreport"]);
     let e = flows
         .start_run("xforge/quick", "s", json!({}), None)
         .await
