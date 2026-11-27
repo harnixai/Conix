@@ -84,6 +84,19 @@ pub enum FlowCmd {
         #[arg(long)]
         force: bool,
     },
+    /// 把项目里的包回填到全局库。
+    Backfill {
+        bundle: String,
+        #[arg(long)]
+        force: bool,
+    },
+    /// 项目里的与全局库里的差在哪。
+    Diff { bundle: String },
+    /// 清掉备份、暂存的残留、对不上目录的记录。
+    Clean {
+        #[arg(long)]
+        global: bool,
+    },
     /// 看包里的 MANIFEST 并核对：不装。
     Inspect { file: PathBuf },
     /// 核对一份归档：文件与 record.json 的清单、证据与确认的摘要、record.json 与运行账本。
@@ -147,6 +160,16 @@ pub fn localize(c: clap::Command) -> clap::Command {
                 .mut_arg("project", |a| {
                     a.help(i18n::t!("app.cli.flow_import_project"))
                 })
+        })
+        .mut_subcommand("backfill", |c| {
+            force(bundle(c.about(i18n::t!("app.cli.flow_backfill"))))
+        })
+        .mut_subcommand("diff", |c| bundle(c.about(i18n::t!("app.cli.flow_diff"))))
+        .mut_subcommand("clean", |c| {
+            global(
+                c.about(i18n::t!("app.cli.flow_clean")),
+                "app.cli.flow_in_global",
+            )
         })
         .mut_subcommand("inspect", |c| {
             c.about(i18n::t!("app.cli.flow_inspect"))
@@ -300,6 +323,15 @@ pub fn run(args: FlowArgs, home: &Path, here: impl FnOnce() -> Result<PathBuf>) 
             force,
         } => {
             let plan = manage::plan_import(&ctx, &file, project, force).map_err(err)?;
+            change(&ctx, home, vec![plan], vec![], &confirm)
+        }
+        FlowCmd::Backfill { bundle, force } => {
+            let plan = manage::plan_backfill(&ctx, &bundle, force).map_err(err)?;
+            change(&ctx, home, vec![plan], vec![], &confirm)
+        }
+        FlowCmd::Diff { bundle } => diff(&ctx, &bundle),
+        FlowCmd::Clean { global } => {
+            let plan = manage::plan_clean(&ctx, global).map_err(err)?;
             change(&ctx, home, vec![plan], vec![], &confirm)
         }
         FlowCmd::Inspect { file } => {
@@ -496,6 +528,46 @@ fn show(ctx: &Ctx, name: &str, global: bool) -> Result<()> {
     };
     println!("{}", i18n::t!("flowlib.show_source", source = source));
     println!("{}", i18n::t!("flowlib.show_dir", dir = side.dir.display()));
+    Ok(())
+}
+
+fn diff(ctx: &Ctx, name: &str) -> Result<()> {
+    let row = manage::row(ctx, name).map_err(err)?;
+    let (Some(p), Some(g)) = (&row.project, &row.global) else {
+        bail!(
+            "{}",
+            if row.project.is_none() {
+                i18n::t!("flowlib.not_in_project", name = name)
+            } else {
+                i18n::t!("flowlib.no_global", name = name)
+            }
+        );
+    };
+    let pf = package::collect(&p.dir).map_err(err)?;
+    let gf = package::collect(&g.dir).map_err(err)?;
+    // 从全局库看项目：项目多出来的是"增"。
+    let c = manage::diff(Some(&gf), &pf);
+    println!(
+        "{}",
+        i18n::t!(
+            "flowlib.diff_head",
+            name = name,
+            project = p.version,
+            global = g.version
+        )
+    );
+    if c.is_empty() {
+        println!("  {}", i18n::t!("flowlib.diff_same"));
+        return Ok(());
+    }
+    let all = |mark: &str, v: &[String]| {
+        for f in v {
+            println!("  {mark} {f}");
+        }
+    };
+    all("+", &c.added);
+    all("~", &c.changed);
+    all("-", &c.removed);
     Ok(())
 }
 

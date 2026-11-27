@@ -67,3 +67,5 @@ flowlib:
   done: "完成：{action} {name}"
   done_backup: "旧的在：{dir}"
   notified: "已让实例 {name} 重读流程"
+  diff_head: "{name}：项目 {project}，全局库 {global}（从全局库看项目：+ 项目多的，~ 改了的，- 项目没有的）"
+  diff_same: "内容一样"

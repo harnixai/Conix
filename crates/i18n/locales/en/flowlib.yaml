@@ -67,3 +67,5 @@ flowlib:
   done: "Done: {action} {name}"
   done_backup: "The old one is in: {dir}"
   notified: "Told instance {name} to re-read its flows"
+  diff_head: "{name}: project {project}, global library {global} (the project against the global library: + only in the project, ~ changed, - not in the project)"
+  diff_same: "The same content"

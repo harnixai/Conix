@@ -32,7 +32,7 @@ fn cli_help_is_english() {
     assert!(help_of(&["attach", "--help"]).contains("Kick out"));
     for sub in [
         "flow", "list", "show", "install", "update", "remove", "reset", "export", "import",
-        "inspect", "verify",
+        "inspect", "verify", "backfill", "diff", "clean",
     ] {
         let mut a = vec!["flow"];
         if sub != "flow" {
@@ -451,4 +451,147 @@ fn export_and_import_go_between_the_project_the_global_library_and_files() {
     ]);
     assert!(other.global().join("mine/main.yaml").is_file());
     assert!(other.ok(&["list", "--global"]).contains("mine"));
+}
+
+#[test]
+fn backfill_puts_the_project_copy_into_the_global_library_by_the_rules() {
+    let e = Env::new();
+    // 只在项目的包：库里没有就加，source: backfill，lock 跟上。
+    let mine = e.installed("mine");
+    small_bundle(&mine, "mine", "1.0.0");
+    assert!(e.ok(&["list"]).contains("project only"));
+    let out = e.ok(&["backfill", "mine", "--yes"]);
+    assert!(out.contains("backfill mine"), "{out}");
+    assert!(e.global().join("mine/main.yaml").is_file());
+    assert_eq!(
+        e.registry()["bundles"]["mine"]["source"].as_str(),
+        Some("backfill")
+    );
+    assert_eq!(
+        e.lock()["bundles"]["mine"]["version"].as_str(),
+        Some("1.0.0")
+    );
+    assert!(e.ok(&["list"]).contains("installed"));
+    assert!(
+        e.ok(&["backfill", "mine", "--yes"])
+            .contains("already the same")
+    );
+
+    // local.md 不回填。
+    std::fs::create_dir_all(mine.join("skills/s")).unwrap();
+    std::fs::write(
+        mine.join("skills/s/SKILL.md"),
+        "---\nname: s\ndescription: d\n---\nbody\n",
+    )
+    .unwrap();
+    std::fs::write(mine.join("skills/s/local.md"), "ours").unwrap();
+    // 同版本、内容不同：拒绝；改版本就替换（先备份）。
+    assert!(
+        e.fails(&["backfill", "mine", "--yes"])
+            .contains("bump version")
+    );
+    let d = e.ok(&["diff", "mine"]);
+    assert!(
+        d.contains("+ skills/s/SKILL.md") && !d.contains("local.md"),
+        "{d}"
+    );
+    set_version(&mine.join("bundle.yaml"), "1.1.0");
+    let out = e.ok(&["backfill", "mine", "--yes"]);
+    assert!(
+        out.contains("1.0.0 → 1.1.0") && out.contains("backed up"),
+        "{out}"
+    );
+    assert!(e.global().join("mine/skills/s/SKILL.md").is_file());
+    assert!(!e.global().join("mine/skills/s/local.md").exists());
+    assert_eq!(
+        e.lock()["bundles"]["mine"]["version"].as_str(),
+        Some("1.1.0")
+    );
+    assert!(e.ok(&["diff", "mine"]).contains("same content"));
+
+    // 库里更新：拒绝，--force 才盖。
+    set_version(&e.global().join("mine/bundle.yaml"), "2.0.0");
+    std::fs::write(mine.join("extra.md"), "x").unwrap();
+    assert!(e.fails(&["backfill", "mine", "--yes"]).contains("newer"));
+    e.ok(&["backfill", "mine", "--force", "--yes"]);
+    assert!(e.global().join("mine/extra.md").is_file());
+
+    // 回填内置包：库里那份成改过的内置，reset 回去。
+    e.ok(&["install", "xforge", "--yes"]);
+    std::fs::write(e.installed("xforge").join("ours.md"), "x").unwrap();
+    set_version(&e.installed("xforge").join("bundle.yaml"), "9.9.9");
+    let out = e.ok(&["backfill", "xforge", "--yes"]);
+    assert!(out.contains("modified built-in"), "{out}");
+    assert!(e.ok(&["list", "--global"]).contains("built-in, modified"));
+    e.ok(&["reset", "xforge", "--yes"]);
+    assert!(e.ok(&["list", "--global"]).contains("built-in, unmodified"));
+    assert!(
+        e.fails(&["backfill", "nope", "--yes"])
+            .contains("No flow bundle")
+    );
+}
+
+#[test]
+fn clean_removes_backups_staging_and_orphan_entries() {
+    let e = Env::new();
+    e.ok(&["install", "xforge", "--yes"]);
+    e.ok(&["install", "xforge", "--force", "--yes"]);
+    let backups = e.project.path().join(".conix/state/conix/flow-backups");
+    assert!(std::fs::read_dir(&backups).unwrap().count() > 0);
+    std::fs::create_dir_all(e.project.path().join(".conix/state/conix/flow-import-left")).unwrap();
+    std::fs::create_dir_all(
+        e.project
+            .path()
+            .join(".conix/state/conix/flows-builtin/xforge"),
+    )
+    .unwrap();
+    // lock 里有、目录没了。
+    std::fs::remove_dir_all(e.installed("xforge")).unwrap();
+    assert!(e.ok(&["list"]).contains("directory gone"));
+    let out = e.ok(&["clean", "--dry-run"]);
+    assert!(
+        out.contains("flow-import-left") && out.contains("orphan"),
+        "{out}"
+    );
+    assert!(
+        backups.read_dir().unwrap().count() > 0,
+        "dry run did nothing"
+    );
+    e.ok(&["clean", "--yes"]);
+    assert!(!backups.exists() || backups.read_dir().unwrap().count() == 0);
+    assert!(
+        !e.project
+            .path()
+            .join(".conix/state/conix/flow-import-left")
+            .exists()
+    );
+    assert!(
+        !e.project
+            .path()
+            .join(".conix/state/conix/flows-builtin")
+            .exists()
+    );
+    assert!(e.lock()["bundles"]["xforge"].is_null());
+    assert!(e.ok(&["clean", "--yes"]).contains("Nothing to clean"));
+
+    // 全局：备份、暂存、registry 里目录没了的非内置包。
+    let mine = e.installed("mine");
+    small_bundle(&mine, "mine", "1.0.0");
+    e.ok(&["backfill", "mine", "--yes"]);
+    std::fs::remove_dir_all(e.global().join("mine")).unwrap();
+    std::fs::create_dir_all(e.global().join(".staging/flow-import-x")).unwrap();
+    e.ok(&["reset", "xforge", "--yes"]);
+    let out = e.ok(&["clean", "--global", "--yes"]);
+    assert!(out.contains("mine"), "{out}");
+    assert!(e.registry()["bundles"]["mine"].is_null());
+    assert!(
+        !e.registry()["bundles"]["xforge"].is_null(),
+        "built-ins stay"
+    );
+    assert_eq!(
+        std::fs::read_dir(e.global().join(".staging"))
+            .unwrap()
+            .count(),
+        0
+    );
 }
