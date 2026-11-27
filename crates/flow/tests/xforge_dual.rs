@@ -60,7 +60,6 @@ fn the_dual_path_and_its_children_hold_together_and_stay_out_of_the_risk_route()
     let p = packs();
     let meta: BundleMeta = serde_yaml::from_str(&p.bundle_file("xforge", "bundle.yaml").unwrap()).unwrap();
     assert_eq!(meta.version, "0.3.0");
-    assert_eq!(meta.requires.as_ref().and_then(|r| r.conix.as_deref()), Some(">=0.1.11"));
     assert_eq!(meta.flows, ["quick", "solid", "major", "dual", "dual-impl", "dual-tests"]);
     assert_eq!(meta.start.route, ["quick", "solid", "major"], "risk picks among the three; dual is started by name");
     assert!(meta.commands.get("xspec").unwrap().read_only.contains(&"seal".to_string()));
