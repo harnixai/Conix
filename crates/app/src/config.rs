@@ -40,6 +40,8 @@ pub struct Config {
 #[serde(default)]
 pub struct FlowsSection {
     pub command_gates: CommandGates,
+    /// 沙箱兜不住时（Linux 上没装 bwrap）项目与包的进程跑不跑：缺省 `refuse`。
+    pub exec_unconfined: ExecUnconfined,
     /// 项目的制品目录名（docs/design/layout.md）；项目自己的 `.conix/conix.yaml` 写了的以项目的为准，都没写是 `conix`。
     pub artifacts_dir: Option<String>,
 }
@@ -74,6 +76,15 @@ pub enum CommandGates {
     #[default]
     Trusted,
     Off,
+}
+
+/// 沙箱兜不住时（flows.md §7.14）：`refuse`（缺省，进程不起、门禁报错）、`allow`（照样跑，记录里写明没隔离）。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecUnconfined {
+    #[default]
+    Refuse,
+    Allow,
 }
 
 /// 引擎的进程参数（architecture §8.11）：不是 Agix 的设置键，所以放在 `conix.yaml` 而不是 settings.json。

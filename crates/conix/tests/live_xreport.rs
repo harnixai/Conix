@@ -3,7 +3,7 @@
 //! - 包从全局库装进项目：`conix flow install xreport --yes --jobs yes`（flows.md §7.12）——包在 `.conix/flows/xreport/`，
 //!   lock 记下它，建议的作业 `xreport-weekly` 进 `.conix/jobs.json`、本机停用。
 //! - 统计（`xstat collect`，命令步骤）经执行服务跑系统的 git（flows.md §7.14）：两个作者、`.mailmap` 把一个人的旧名字并过来；
-//!   每次起的 git 都在运行历史里记一条 `exec`，带后端守住了什么（`enforced`，现在是 plain 的照传不守）。
+//!   每次起的 git 都在运行历史里记一条 `exec`，进 Agix 的沙箱（`enforced.backend` 是 `agix`，macOS 上读写与网络都守住）。
 //! - 分析由真实模型照 `stats.json` 写 `analysis.md`；定稿（`xstat render`）后用例当主人点「报告定稿」，归档留三个文件。
 //! - `flows.command_gates: off` 时统计站失败，原因写成人看得懂、知道该做什么的话（不调模型）。
 //!
@@ -16,7 +16,7 @@ use std::time::Duration;
 
 use live::{Answering, Live, QUICK};
 use port::{Command, Event, Reply, RunId, RunOp, RunStatus, StationId, StationStatus};
-use serde_json::Value;
+use serde_json::{Value, json};
 
 /// 一次运行跑完的上限：只有分析站用模型，至多打回两次。
 const RUN: Duration = Duration::from_secs(900);
@@ -319,12 +319,14 @@ async fn xreport_installed_from_the_library_reports_a_scripted_history_and_waits
         assert_eq!(d["network"], false, "包没声明网络：{h}");
         assert_eq!(d["code"], 0, "{h}");
         let e = &d["enforced"];
-        assert!(
-            e["backend"].as_str().is_some_and(|b| !b.is_empty())
-                && e["filesystem"].is_boolean()
-                && e["network"].is_boolean(),
-            "守住了什么照实记：{h}"
-        );
+        assert_eq!(e["backend"], "agix", "进的是引擎的沙箱：{h}");
+        if cfg!(target_os = "macos") {
+            assert_eq!(
+                (&e["filesystem"], &e["network"]),
+                (&json!(true), &json!(true)),
+                "macOS 上整份守住：{h}"
+            );
+        }
         assert!(d.get("stdout").is_none(), "不记输出：{h}");
     }
 

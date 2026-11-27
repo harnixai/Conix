@@ -118,6 +118,32 @@ async fn main() -> Result<()> {
     if let Some(Cmd::Flow(args)) = cli.command {
         let artifacts = cfg.flows.artifacts_dir.clone();
         let commands = cfg.flows.command_gates != config::CommandGates::Off;
+        // 包的自检起进程时也进沙箱（flows.md §7.14）：这里没有实例，第一次要起进程时才起一个引擎。
+        let home = config::home();
+        let model = cfg.engine_model();
+        host::exec::install(std::sync::Arc::new(host::exec::LazyExec::new(
+            Box::new(move |project| {
+                Box::pin(async move {
+                    let (embedded, client, _notes) =
+                        engine::Embedded::start(engine::EngineConfig {
+                            data_root: home,
+                            project,
+                            groups_file: None,
+                            settings: host::hub::cli_settings(),
+                            model,
+                            host_lib: Default::default(),
+                        })
+                        .await
+                        .map_err(|e| format!("{e:#}"))?;
+                    let keep: host::exec::Keep = Box::new(embedded);
+                    Ok((
+                        std::sync::Arc::new(client) as std::sync::Arc<dyn host::Engine>,
+                        keep,
+                    ))
+                })
+            }),
+            cfg.flows.exec_unconfined == config::ExecUnconfined::Allow,
+        )));
         return flow_cli::run(args, &config::home(), artifacts, commands, || {
             project_here(&cfg)
         })

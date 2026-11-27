@@ -72,6 +72,9 @@ jobs:
 # projects only (the default); off never runs them.
 # artifacts_dir: the project's directory for flow runs, bundle data and archives (default conix). A
 # project's own .conix/conix.yaml may set flows.artifacts_dir too, and wins.
+# exec_unconfined: these processes (command gates, flow.exec) run in the engine's sandbox; where it
+# cannot hold (Linux without bwrap) refuse (the default) does not run them, allow runs them unconfined.
 # flows:
 #   command_gates: trusted
+#   exec_unconfined: refuse
 #   artifacts_dir: conix

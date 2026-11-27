@@ -137,7 +137,7 @@ async fn xforge_installs_offers_both_flows_and_carries_a_change_from_open_to_arc
     let (engine, client, notes) = engine::Embedded::start(engine::EngineConfig {
         data_root: home.path().to_path_buf(),
         project: project_path.clone(),
-        groups_file: home.path().join("groups.json"),
+        groups_file: Some(home.path().join("groups.json")),
         settings: host::hub::cli_settings(),
         model: None,
         host_lib: host_lib.clone(),

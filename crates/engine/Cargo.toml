@@ -21,6 +21,7 @@ tracing.workspace = true
 
 [dev-dependencies]
 host.workspace = true
+harnix-flow.workspace = true
 port.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["io-util", "sync", "rt", "macros", "time"] }

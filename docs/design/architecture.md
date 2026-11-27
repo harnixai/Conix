@@ -561,8 +561,10 @@ schema；`job_validate` 不落盘，回下 5 次触发时刻与护栏的实际�
 - 实例停时派工器的任务不再等，运行不取消；下次启动 `Runner::start` 接着做上次派出去还没答复的活。
 - **执行服务**（`host/src/exec.rs`，flows.md §7.14）：实例替项目、包、用户配置起的进程都经它——命令门禁、`plan` 的
   run、包 JS 的 `flow.exec`（`RunnerConfig::exec`）、`conix flow doctor` 里包的自检（`DoctorExec`）、通知出口。档位由
-  调用方定，每个进程记一笔（运行历史的 `exec`，或 `host.log` 里 target `flow::exec` 的一行）。现在只有普通子进程
-  （`ConixExec` 加 `Plain`），什么都不隔离，记录照实写；OS 级隔离以后实现 `Confine` 接进来，在 `exec::service()` 里选。
+  调用方定，每个进程记一笔（运行历史的 `exec`，或 `host.log` 里 target `flow::exec` 的一行）。后端是 Agix 的沙箱：
+  `conix host` 起引擎时打开 `EmbedConfig.host_exec`，连上之后 `exec::install` 装上经那条连接调 `exec.run` 的服务（要在流程、
+  通知取 `exec::service()` 之前）；命令行的 `conix flow` 装 `LazyExec`，第一次起进程时才起一个不登记进程组的引擎。沙箱兜不住时
+  拒绝，全局 `flows.exec_unconfined: allow` 才在沙箱外跑。
   `flows.command_gates` 是项目与包定义的全部执行的总开关。参数写死的内部 git（worktree、`@` 补全、体检的
   `check-ignore`）不经它，但都关掉仓库配置里的 `core.fsmonitor`。
 

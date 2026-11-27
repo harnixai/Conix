@@ -827,10 +827,23 @@ const r = flow.exec({ argv: ["git", "--no-pager", "-c", "core.fsmonitor=false", 
 - **记录**：每个进程都记一笔，从不记输出。运行里是运行历史的一条 `exec`（`Engine::note_exec`）：`for`（`gate semgrep`、
   `flow.exec in xreport:xstat`）、`argv`、`cwd`、`profile`、`network`、`code`、`signal`、`timed_out`、`truncated`、`ms`、
   `enforced`，起不来时是 `error`；运行之外是宿主日志里 target `flow::exec` 的一行。argv 进记录，所以别把密钥写进参数，用 `env`。
-- **后端与接缝**：现在只有普通子进程（流程库的 `PlainExec`，Conix 的 `host::exec::ConixExec` 缺省也是它）：档位与网络
-  **照传不守**，每条结果与记录的 `enforced` 都写 `{backend: plain, filesystem: false, network: false}`，读记录的人不会把档位
-  当成隔离。OS 级的隔离（seatbelt、bwrap，或由 Agix 提供）之后再定：它实现 Conix 的 `Confine`（`crates/host/src/exec.rs`），
-  把一个请求包成在隔离里跑的请求并说它守住了什么，再交给 `run_plain` 起；调用方、档位规则、记录都不用改。
+- **后端：Agix 的沙箱**（`host::exec::ConixExec`，Agix 协议 §6.9 `exec.run`；装配时 `EmbedConfig.host_exec` 打开，只在
+  实例自己的那条连接上有）。与会话里的 `Bash` 同一套沙箱策略，但不经模型、不问权限、不进会话：
+  - `read`：哪里都写不了，只有这次调用自己的临时目录（`TMPDIR` 指着它，调用结束删掉）——**门禁的缓存要写进 `TMPDIR`**
+    （xforge 的 `verify.sh` 设 `PYTHONPYCACHEPREFIX`）；`workspace`：另加档位点名的目录，工作目录里还没有的先建出来，
+    工作目录之外还没有的不给（Agix 要每一项都已存在）。
+  - 凭据拒读（`~/.ssh`、`~/.aws`……）；**禁读名单**：双路的子运行里，进程与会话一样读不到父运行与兄弟的 worktree（§6.5）——
+    一路写的测试由门禁跑，输出回到模型，不拦就是一条把另一路的代码带过来的路。名单在记录进程的那一处（`run_audited`）补上，
+    不靠每个调用方。
+  - 环境不继承，只有 Agix 的最小环境加请求给的（宿主的 `TMPDIR` 不传，传了门禁就写不了临时文件）；网络按包的声明。
+  - 时限至多 30 分钟、每路输出至多 4 MiB（Agix 的上限）；要结尾的（门禁）取满上限再在这边截结尾。调用被丢下（运行被停）
+    时发 `exec.cancel`，连同进程组停掉。
+  - `enforced` 照实记：`{backend: agix, filesystem, network, unmet}`，Agix 报 `full` 时两项为真；`partial`（Linux 上一部分
+    规则做不到）两项都记假、`unmet` 列出差在哪。**沙箱兜不住**（Linux 上没装 bwrap）时 Agix 拒绝、进程不起（门禁 `error`、
+    `flow.exec` 抛错）；全局 `conix.yaml` 的 `flows.exec_unconfined: allow` 才在沙箱外跑，记录里 `enforcement` 照样写 `none`。
+    这一项只认全局配置：项目定不了这台机器隔不隔离。
+  - 命令行（`conix flow doctor` 跑包的自检）没有实例：第一次要起进程时才起一个引擎（`host::exec::LazyExec`），不登记
+    进程组；用户自己的通知出口（`host` 档）不进沙箱。没有引擎的地方（单元测试）退回普通子进程，记 `{backend: plain}`。
 - **确定性**：不碰进程的包 JS 照旧确定；用了 `flow.exec` 就不承诺（外部程序的输出流程库管不了）。门禁的证据仍只是它读过的
   文件，进程的输出不算证据。
 - **不经这个服务的**：参数由 Rust 写死的内部 git（`runner/git.rs`、宿主体检的 `check-ignore`、`@` 补全的 `ls-files`）。它们

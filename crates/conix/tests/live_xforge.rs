@@ -926,7 +926,13 @@ async fn the_builtin_xforge_dual_forks_an_implementation_and_black_box_tests_and
         })
         .unwrap_or_else(|| panic!("没有门禁 blackbox 的 exec 记录：{execs:#?}"));
     eprintln!("---- exec {}", bb["detail"]);
-    assert!(bb["detail"]["enforced"]["backend"].is_string(), "{bb}");
+    assert_eq!(
+        bb["detail"]["enforced"]["backend"], "agix",
+        "门禁进引擎的沙箱：{bb}"
+    );
+    if cfg!(target_os = "macos") {
+        assert_eq!(bb["detail"]["enforced"]["filesystem"], true, "{bb}");
+    }
 
     // 归档在父运行的 worktree 里：两条基线都并进了，两路的设计都留着。
     let spec = std::fs::read_to_string(Path::new(&wt).join("xforge/specs/textkit.md")).unwrap();

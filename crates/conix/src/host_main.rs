@@ -44,13 +44,18 @@ pub async fn run(name: String, project: PathBuf) -> Result<()> {
     let (embedded, client, notes) = engine::Embedded::start(engine::EngineConfig {
         data_root: layout.home().to_path_buf(),
         project: project.clone(),
-        groups_file: layout.groups(&name),
+        groups_file: Some(layout.groups(&name)),
         settings: host::hub::cli_settings(),
         // 引擎自带 `anthropic` 的模型，只在设置里没定义 `providers` 时用：conix.yaml 的 engine.model，CONIX_MODEL 覆盖。
         model: cfg.engine_model(),
         host_lib: host_lib.clone(),
     })
     .await?;
+    // 在流程、通知取执行服务之前：项目与包的进程从这里起都进 Agix 的沙箱（flows.md §7.14）。
+    host::exec::install(Arc::new(host::exec::ConixExec::agix(
+        Arc::new(client.clone()),
+        cfg.flows.exec_unconfined == config::ExecUnconfined::Allow,
+    )));
     trust_personal_project(&client, &project, &cfg).await;
     let clock: host::hub::Clock = Arc::new(host::instance::now_ms);
     let hub = Hub::start(

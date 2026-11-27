@@ -67,6 +67,9 @@ jobs:
 # 流程。命令门禁（kind: command）会在这台机器上执行命令：trusted 是受信的项目里才跑（缺省），off 一律不跑。
 # 制品目录（artifacts_dir）：流程运行的目录、流程包的数据与归档放在项目的这个目录下，缺省 conix。
 # 项目自己的 .conix/conix.yaml 也可以写 flows.artifacts_dir，以项目的为准。
+# 这些进程（命令门禁、flow.exec）在引擎的沙箱里跑；沙箱兜不住时（Linux 上没装 bwrap），exec_unconfined 为
+# refuse（缺省）就不跑，allow 照样在沙箱外跑。
 # flows:
 #   command_gates: trusted
+#   exec_unconfined: refuse
 #   artifacts_dir: conix

@@ -11,7 +11,7 @@ async fn the_cli_layer_lets_a_session_loosen_its_mode() {
     let (engine, client, _notes) = engine::Embedded::start(engine::EngineConfig {
         data_root: home.path().to_path_buf(),
         project: project_path.clone(),
-        groups_file: home.path().join("groups.json"),
+        groups_file: Some(home.path().join("groups.json")),
         settings: host::hub::cli_settings(),
         model: None,
         host_lib: Default::default(),

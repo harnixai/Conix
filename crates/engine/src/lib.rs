@@ -22,7 +22,8 @@ pub struct EngineConfig {
     /// `~/.conix`：Agix 的 data_root 与 Conix 的家目录是同一个（architecture §8.1）。
     pub data_root: PathBuf,
     pub project: PathBuf,
-    pub groups_file: PathBuf,
+    /// 进程组登记；`None` 不登记（命令行里为体检临时起的引擎）。
+    pub groups_file: Option<PathBuf>,
     /// cli 层的设置（`EmbedConfig.settings`）：叠在每个项目、场景的设置之上，不受项目信任限制。
     /// 由 `host::hub::cli_settings` 给；`app.history` 在这里补上。写错的键让启动失败。
     pub settings: serde_json::Value,
@@ -92,7 +93,7 @@ impl Embedded {
         // 不给 instance：Agix 的实例锁按"数据根 + 场景"算，同一场景只能锁一份，而 Conix 每个项目
         // 一个实例都在 code 场景里；实例锁由 Conix 自己管（architecture §8.4）。
         c.instance = None;
-        c.groups_file = Some(cfg.groups_file);
+        c.groups_file = cfg.groups_file;
         c.project_dir = Some(PROJECT_DIR.into());
         c.product = PRODUCT_NAME.into();
         // 会话是项目的（architecture §8.4）：受信项目的会话放进 `.conix/state/history/`，全局只留索引。
@@ -110,6 +111,9 @@ impl Embedded {
         }
         let model = c.model.clone();
         c.js_libs.push(conix_lib(cfg.host_lib));
+        // 项目与包的进程（命令门禁、`flow.exec`）经这条连接上的 `exec.run` 进沙箱（flows.md §7.14）；
+        // 只在嵌入方自己的连接上有，unix socket 上没有。
+        c.host_exec = true;
         let engine = agix::embed::Embedded::start(c)
             .await
             .context("start the Agix engine")?;

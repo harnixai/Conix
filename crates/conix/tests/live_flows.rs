@@ -491,7 +491,7 @@ async fn conformance_inside() {
     let (embedded, client, notes) = engine::Embedded::start(engine::EngineConfig {
         data_root: lv.home.path().to_path_buf(),
         project: project.clone(),
-        groups_file: lv.home.path().join("groups.json"),
+        groups_file: Some(lv.home.path().join("groups.json")),
         settings: host::hub::cli_settings(),
         model: Some(live::model()),
         host_lib: Default::default(),
