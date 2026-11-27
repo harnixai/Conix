@@ -33,7 +33,9 @@
 
 门禁的命令、包脚本里的 `flow.exec` 都在**引擎的沙箱**里跑（与会话里的 `Bash` 同一套）：门禁只读，项目里一个文件都写不了，
 只有这次调用自己的临时目录（`$TMPDIR`）可写——测试工具要写缓存的，让它写进 `$TMPDIR`（Python 设
-`PYTHONPYCACHEPREFIX="$TMPDIR/pycache"`，xforge 的 `verify.sh` 就是这么写的）。缺省不联网（包在 `bundle.yaml` 的 `exec`
+`PYTHONPYCACHEPREFIX="$TMPDIR/pycache"`，xforge 的 `verify.sh` 就是这么写的）；要写构建目录的（cargo 的 `target/`），在
+门禁上写 `writable: [target]`，用 xforge 就在 `.conix/governance/xforge.yaml` 的 `checks.writable`（项目的验证）或 verify 菜单
+那一项的 `writable` 里声明。**只给被 git 忽略的目录**：跟踪着的文件门禁永远写不了。要联网的同样写 `network: true`。缺省不联网（包在 `bundle.yaml` 的 `exec`
 里声明才联网），`~/.ssh` 这类凭据读不到。每次起的进程都记进运行历史，带沙箱守住了什么（`enforced`）。macOS 自带沙箱；
 Linux 要装 `bwrap`（bubblewrap），没装时这些命令不跑、门禁报错，确实要在沙箱外跑就在全局 `conix.yaml` 写
 `flows.exec_unconfined: allow`。macOS 上，门禁的进程自己另起进程组再放到后台的（`setsid`），门禁结束后还会留着（仍在沙箱里，

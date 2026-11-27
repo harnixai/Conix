@@ -7,12 +7,11 @@ export function governance(flow) {
   return { spec: g.spec !== false, interface: g.interface === true };
 }
 
-// 人声明的验证命令（docs/design/xforge.md §1 的 verify 菜单），没有就是 null。命令与门禁都从这里读：
-// 治理设置换个来处时只改这一处。它不走 flow.settings（那是启动时钉住的）而是读文件此刻的内容：package-tests
-// 要的正是"包当初选的还合不合现在的菜单"，菜单改了由它报给人看；读到的文件也记进门禁的证据。
+// 人声明的验证命令（docs/design/xforge.md §1 的 verify 菜单），没有就是 null。命令与门禁都从这里读。和治理开关一样
+// 来自钉住的 flow.settings：运行跑到一半有人改了菜单，这次运行的判据不跟着变（改了只管之后启动的运行）。
 export function verifyMenu(flow) {
-  const doc = flow.read.yaml(".conix/governance/xforge.yaml");
-  return (doc && doc.verify) || null;
+  const s = flow.settings || {};
+  return s.verify || null;
 }
 
 // 关着的那条基线，它的门禁回这个：不是没过，是这个项目不欠它。

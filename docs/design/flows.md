@@ -139,6 +139,11 @@ timeout_seconds: 900
   （缺省 `trusted`）。这与 Agix 对项目 hook、项目 MCP stdio server 的规矩一致：项目受信，它的配置才能在本机执行命令。
   这个开关管的是项目与包定义的**全部**执行：命令门禁、`plan` 的 run、包 JS 的 `flow.exec`（§7.14）。
 - 进程经宿主的执行服务起（`sh -c <命令>`，档位 `read`），每起一个在运行历史里记一条 `exec`（§7.14）。
+- **`writable`、`network`**：门禁判活不干活，缺省只读、不联网（网络按包的 `exec`）。测试要写构建、缓存目录（cargo 的
+  `target/`）、要拉依赖的，门禁写 `writable: [target]`、`network: true`，或各写一个 `${settings.<路径>}` 由项目的治理文件
+  声明（xforge 的 `unit-tests`：`writable: "${settings.checks.writable}"`）。**能写的只有被 git 忽略的目录**：起进程前
+  流程库在运行的工作目录里 `git check-ignore` 每一项，跟踪着的（交付的文件）一律拒绝、门禁 `error`；还没有的先建出来。
+  这样门禁能写的永远不是它判的东西。设置里没有这一项算什么都不多给（不像确认的计数，少给是安全的读法）。
 
 #### `plan`：脚本挑，Rust 跑
 
@@ -162,8 +167,8 @@ export default function (input, flow) {
   `; rm -rf ~` 就成了程序。所以分两层：**脚本是策略**，与门禁脚本一样只读、确定，只从人声明过（进 git）的东西里挑，
   挑不出来就自己回门禁结果；**Rust 是机制**，按 `argv` 直接起进程，程序与参数原样传过去，中间没有 shell，`;`、`$(…)`、
   `|` 在参数里只是字符。流程库从不把字符串交给 shell。
-- **脚本回什么**：§3 的门禁结果就照它判，什么都不跑（证据仍是它读过的文件）；`{runs: [{name, argv, cwd?, timeout_seconds?}], summary?}`
-  就依次跑。别的形状、抛错、超时（脚本自己的时限是 30 秒，与 run 的无关）算 `error`。
+- **脚本回什么**：§3 的门禁结果就照它判，什么都不跑（证据仍是它读过的文件）；`{runs: [{name, argv, cwd?, timeout_seconds?, writable?, network?}], summary?}`
+  就依次跑。run 的 `writable`、`network` 叠在门禁的之上（脚本转述人声明的菜单项要写哪、要不要联网），同样只给被 git 忽略的目录。别的形状、抛错、超时（脚本自己的时限是 30 秒，与 run 的无关）算 `error`。
 - **先全部核对，一个不合就一个都不跑**（`error`）：`argv` 非空、程序非空、没有 NUL；`cwd` 相对运行的工作目录，绝对路径、
   `..`、经符号链接出界、不存在的都拒绝；`argv[0]` 是带 `/` 的相对路径时按 `cwd` 找；至多 32 个 run。
 - **跑**：与命令门禁同一套——经宿主的执行服务、档位 `read`、环境变量白名单与宿主的拒绝表、`FLOW_*` 变量、自己的进程组、
@@ -816,7 +821,7 @@ const r = flow.exec({ argv: ["git", "--no-pager", "-c", "core.fsmonitor=false", 
 | 谁在调 | 档位 | 记到 |
 |---|---|---|
 | 门禁脚本（`kind: script`）、`plan` 的脚本、`foreach` 脚本 | `read` | 运行历史 |
-| 命令门禁、`plan` 的 run | `read`：门禁判活，不干活 | 运行历史 |
+| 命令门禁、`plan` 的 run | `read`：门禁判活，不干活；声明了 `writable` 的另加那几个被 git 忽略的目录（§2.2） | 运行历史 |
 | 运行里的命令：只读的子命令 | `read` | 运行历史 |
 | 运行里的命令：会写的子命令、命令步骤（`executor: {kind: command}`） | `workspace`：运行目录、包的数据目录，站有 `writes` 时加上每条 glob 第一个通配符之前的那段目录 | 运行历史 |
 | 运行之外的命令（人调、模型调都一样）、试门禁（`flow_gate_try`）、doctor | `read` | 宿主日志 |

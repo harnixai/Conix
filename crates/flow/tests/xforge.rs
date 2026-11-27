@@ -459,6 +459,27 @@ async fn the_verification_record_covers_every_item_of_both_deltas_with_a_conclus
     assert!(r["findings"].to_string().contains("连贯性"), "{r}");
 }
 
+/// The project's verify may write only what git ignores, as its governance file declares
+/// (`checks.writable`): a build directory yes, a tracked one no.
+#[tokio::test]
+async fn the_projects_verify_writes_only_the_ignored_directories_its_governance_names() {
+    let b = bench();
+    let root = b.project.path();
+    let gov = root.join(".conix/governance/xforge.yaml");
+    let text = std::fs::read_to_string(&gov).unwrap();
+    assert!(text.contains("checks:\n  writable: []\n"), "the example declares checks: {text}");
+    std::fs::write(root.join(".gitignore"), format!("{}build/\n", std::fs::read_to_string(root.join(".gitignore")).unwrap_or_default())).unwrap();
+    let at = json!({"gate": "xforge/unit-tests"});
+    std::fs::write(&gov, text.replace("checks:\n  writable: []\n", "checks:\n  writable: [build]\n")).unwrap();
+    let r = b.ok(TOOL_GATE_TRY, at.clone()).await;
+    assert_eq!(r["verdict"], "pass", "{r}");
+    assert!(root.join("build").is_dir(), "the declared directory is made for it");
+    std::fs::write(&gov, text.replace("checks:\n  writable: []\n", "checks:\n  writable: [src]\n")).unwrap();
+    let r = b.ok(TOOL_GATE_TRY, at).await;
+    assert_eq!(r["verdict"], "error", "{r}");
+    assert!(r["summary"].as_str().unwrap().contains("src is not git-ignored"), "{r}");
+}
+
 #[tokio::test]
 async fn the_projects_verify_is_run_and_its_absence_said() {
     let b = bench();

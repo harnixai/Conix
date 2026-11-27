@@ -39,13 +39,22 @@ verify:
     params: {file: "test_[a-z0-9_]+"}    # {file} 的值要整串匹配这个正则
     cwd: .                               # 可选：项目内的相对目录
     description: 一个测试文件
+  build:
+    argv: [cargo, test, --offline]
+    writable: [target]                   # 可选：能写的目录，只给被 git 忽略的（门禁判活不干活）
+    network: false                       # 可选：要不要联网
 ```
 
 工作包只按名字选、给参数（`xpkg plan --verify test:file=test_trunc`），命令行从不由模型写：值只能落进 `{参数}` 的位置，
 整串匹配人写的正则，起进程时是 argv 的一项（流程库按 argv 直接起，`flows.md` §2.2 的 `plan`）。`argv` 用了没声明的参数、
 声明了没用的参数、正则写错，菜单就有问题，`--verify` 与门禁都拒绝，要人改。`lib/governance.js` 的 `verifyMenu(flow)` 读它，
-核对与展开在 `lib/verify.js`（命令与门禁共用）。没有菜单，工作包就不带 `--verify`。菜单**不钉**：`verifyMenu` 读文件此刻的内容，
-因为 `package-tests` 判的正是"包当初选的还合不合现在的菜单"，菜单在运行中改了由它报 `error` 给人看，不是悄悄按旧菜单跑。
+核对与展开在 `lib/verify.js`（命令与门禁共用）。没有菜单，工作包就不带 `--verify`。菜单与整个文件一起**钉进运行**：
+`verifyMenu` 读 `flow.settings`，运行跑到一半有人改了菜单，这次运行的判据不变，改了只管之后启动的运行；运行之外
+（`xpkg verify-menu`、自检）读文件此刻的内容。
+
+项目的验证（`verify.sh`，门禁 `unit-tests` 跑它）要写构建、缓存目录或要联网的，在同一个文件的 **`checks`** 里声明：
+`checks: {writable: [target], network: false}`（缺省都空）。菜单项与 `checks` 的 `writable` 都只给被 git 忽略的目录
+（`flows.md` §2.2），自检核对写法。
 
 项目的其他治理文件照旧：`.conix/governance/constitution.yaml`（原则）、`.conix/governance/verify.sh`（项目的验证，人写）。
 

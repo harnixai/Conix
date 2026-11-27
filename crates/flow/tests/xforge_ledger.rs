@@ -486,15 +486,22 @@ async fn xpkg_plan_takes_verify_only_from_the_projects_menu() {
     let menu = r.rn.run_command(c).await.unwrap().text;
     assert!(menu.contains("unit：python3 -m unittest discover -s tests -q") && menu.contains("用法：--verify test:file=…") && menu.contains("test_[a-z0-9_]+"), "{menu}");
 
-    // A menu that names a parameter it does not declare is the people's to fix: nothing is chosen from it.
+    // The menu is the one the run pinned when it started: an edit to the file mid-run changes
+    // nothing of what this run may choose…
     r.write(".conix/governance/xforge.yaml", "verify:\n  bad: {argv: [echo, \"{x}\"], params: {y: \"a\"}}\n");
-    refused(r.model("design", "xpkg", &with(&["bad"])).await, &["{x} 在 params 里没有声明", "params.y 在 argv 里没用到", "要人改"]);
-    refused(r.me("xpkg", &["verify-menu"]).await, &["{x}"]);
-    // No menu: nothing to choose, and a package without --verify is planned as before.
+    refused(r.model("design", "xpkg", &with(&["bad"])).await, &["菜单里没有 bad", "compile, test, unit"]);
+    // …while outside any run the file is read as it is now: a menu that names a parameter it does
+    // not declare is the people's to fix, and the menu says so.
+    let outside = |args: &[&str]| {
+        let mut c = CommandCall::new("xforge", "xpkg", args.iter().map(|a| a.to_string()).collect(), CommandBy::model("m"));
+        c.project_root = Some(r.root.clone());
+        let rn = r.rn.clone();
+        async move { rn.run_command(c).await.map(|r| r.text).map_err(|e| e.to_string()) }
+    };
+    refused(outside(&["verify-menu"]).await, &["{x} 在 params 里没有声明", "params.y 在 argv 里没用到"]);
+    // No menu: nothing to choose.
     r.write(".conix/governance/xforge.yaml", "governance: {spec: true}\n");
-    refused(r.model("design", "xpkg", &with(&["unit"])).await, &["没有声明验证"]);
-    r.ok(r.model("design", "xpkg", &with(&[])).await).await;
-    assert!(r.ok(r.me("xpkg", &["verify-menu"]).await).await.contains("没有声明验证"));
+    assert!(r.ok(outside(&["verify-menu"]).await).await.contains("没有声明验证"));
 }
 
 // ── the package gates ────────────────────────────────────────────────────────
@@ -674,8 +681,9 @@ async fn package_tests_runs_what_the_package_chose_from_the_menu() {
     let c = r.judge(json!({})).await;
     assert_eq!(c.status, CheckStatus::Pass, "{}", said(&c));
     assert_eq!(c.detail, "工作包 p1: 2 passed: unit, test:file=test_textkit");
+    // The evidence is the package's file; the menu is the one the run pinned, not a file read now.
     let read: Vec<&str> = c.evidence.iter().map(|e| e.path.as_str()).collect();
-    assert!(read.contains(&".conix/governance/xforge.yaml") && read.iter().any(|p| p.ends_with("work-packages.yaml")), "{read:?}");
+    assert!(!read.contains(&".conix/governance/xforge.yaml") && read.iter().any(|p| p.ends_with("work-packages.yaml")), "{read:?}");
 
     // A failing test: a finding for that choice, with what unittest said; the others still run.
     let r = Rig::trusted("tests").await;
@@ -709,13 +717,12 @@ async fn package_tests_runs_what_the_package_chose_from_the_menu() {
     assert!(said(&c).contains("需要人看") && said(&c).contains("不合"), "{}", said(&c));
     assert!(!r.root.join("pwned").exists());
 
-    // The menu changed under a planned package: the people's to look at.
+    // The menu edited under a planned package mid-run: the run goes on by the one it pinned.
     let r = Rig::trusted("tests").await;
     plan(&r, "p1", "src/**", &["--verify", "test:file=test_textkit"]).await;
     r.write(".conix/governance/xforge.yaml", "verify:\n  unit: {argv: [python3, -m, unittest, discover, -s, tests]}\n");
     let c = r.judge(json!({})).await;
-    assert_eq!(c.status, CheckStatus::Error);
-    assert!(said(&c).contains("菜单里没有 test"), "{}", said(&c));
+    assert_eq!((c.status, c.detail.as_str()), (CheckStatus::Pass, "工作包 p1: 1 passed: test:file=test_textkit"), "{}", said(&c));
 
     // Not trusted, the project's commands do not run, as for any command gate.
     let r = Rig::new("tests").await;

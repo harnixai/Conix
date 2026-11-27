@@ -4,7 +4,7 @@
 
 const PLACEHOLDER = /\{([A-Za-z_][A-Za-z0-9_]*)\}/g;
 const NAME = /^[a-z0-9][a-z0-9-]*$/;
-const FIELDS = ["argv", "params", "cwd", "description"];
+const FIELDS = ["argv", "params", "cwd", "description", "writable", "network"];
 
 const placeholders = (arg) => [...arg.matchAll(PLACEHOLDER)].map((m) => m[1]);
 const anchored = (re) => new RegExp(`^(?:${re})$`);
@@ -49,8 +49,20 @@ export function menuProblems(menu) {
     if (m.cwd !== undefined && (typeof m.cwd !== "string" || m.cwd.startsWith("/") || m.cwd.split("/").includes(".."))) {
       out.push(`${at}.cwd 要是项目内的相对目录`);
     }
+    for (const p of writableProblems(m.writable)) out.push(`${at}.writable ${p}`);
+    if (m.network !== undefined && typeof m.network !== "boolean") out.push(`${at}.network 要是 true 或 false`);
   }
   return out;
+}
+
+// 门禁的进程能写的目录（verify 菜单的一项、治理文件的 checks）：项目内的相对目录，每个都要被 git 忽略——门禁判活不干活，
+// 能写的只有构建与缓存（target/、node_modules/.cache），流程库起进程前再查一次忽略。没写是 []。
+export function writableProblems(w) {
+  if (w === undefined || w === null) return [];
+  if (!Array.isArray(w)) return ["要写成目录的列表，如 [target]"];
+  return w.flatMap((d) => (typeof d !== "string" || !d.trim() || d.startsWith("/") || d.split("/").includes("..") || d.split("/")[0] === ".git"
+    ? [`里的 ${JSON.stringify(d)} 要是项目内的相对目录（不是 .git）`]
+    : []));
 }
 
 // 双路开发合起来时跑的那一项（xforge/dual 的门禁 blackbox）：菜单里名叫 blackbox，不带参数。
@@ -104,7 +116,12 @@ export function expand(menu, entry) {
     if (!anchored(re).test(v)) throw new Error(`验证 ${entry.name} 的参数 ${p}=${v} 不合菜单的 ${re}（整串匹配）`);
   }
   const argv = m.argv.map((a) => a.replace(PLACEHOLDER, (_, p) => String(given[p])));
-  return m.cwd ? { argv, cwd: m.cwd } : { argv };
+  return {
+    argv,
+    ...(m.cwd ? { cwd: m.cwd } : {}),
+    ...(m.writable && m.writable.length ? { writable: m.writable } : {}),
+    ...(typeof m.network === "boolean" ? { network: m.network } : {}),
+  };
 }
 
 // 给人和模型看的菜单：每项一行命令，有参数的另起一行写参数与用法。
@@ -112,7 +129,8 @@ export function describeMenu(menu) {
   return Object.entries(menu || {}).map(([name, m]) => {
     const cmd = m.argv.map((a) => (/^[\w@%+=:,./{}-]+$/.test(a) ? a : JSON.stringify(a))).join(" ");
     const params = Object.entries(m.params || {});
-    return `${name}：${cmd}${m.cwd ? `（在 ${m.cwd}）` : ""}${m.description ? `\n  ${m.description}` : ""}`
+    const access = [m.writable && m.writable.length ? `可写 ${m.writable.join("、")}` : "", m.network ? "联网" : ""].filter(Boolean).join("，");
+    return `${name}：${cmd}${m.cwd ? `（在 ${m.cwd}）` : ""}${access ? `（${access}）` : ""}${m.description ? `\n  ${m.description}` : ""}`
       + (params.length
         ? `\n  参数：${params.map(([k, re]) => `${k} 整串匹配 ${re}`).join("；")}\n  用法：--verify ${name}:${params.map(([k]) => `${k}=…`).join(",")}`
         : `\n  用法：--verify ${name}`);

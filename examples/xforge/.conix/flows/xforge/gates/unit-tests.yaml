@@ -7,3 +7,6 @@ command: |
   [ -f "$f" ] || { echo "项目没有 .conix/governance/verify.sh：写一份（跑单测、lint），退出码 0 算过"; exit 1; }
   sh "$f"
 timeout_seconds: 600
+# 项目的验证要写构建、缓存目录（cargo 的 target/）、要联网的，在治理文件的 checks 里声明（人写、进 git）；能写的只给被 git 忽略的。
+writable: "${settings.checks.writable}"
+network: "${settings.checks.network}"

@@ -24,5 +24,6 @@ settings:
   defaults:
     governance: {spec: true, interface: false}
     review: {separate: false}
+    checks: {writable: [], network: false}
 # 自检（docs/design/xforge.md §7）：宿主的 conix flow doctor 在运行之外为项目跑 scripts/doctor.js，只读、不修。
 doctor: doctor

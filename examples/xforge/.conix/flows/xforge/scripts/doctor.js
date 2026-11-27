@@ -8,7 +8,7 @@
 import { governance, verifyMenu } from "../lib/governance.js";
 import { readBaseline } from "../lib/arch.js";
 import { readSpecs } from "../lib/specs.js";
-import { BLACKBOX, blackboxProblem, menuProblems } from "../lib/verify.js";
+import { BLACKBOX, blackboxProblem, menuProblems, writableProblems } from "../lib/verify.js";
 
 // 与 bundle.yaml 的 settings.file、门禁 constitution 与 unit-tests 写的路径是同一份。
 const SETTINGS = ".conix/governance/xforge.yaml";
@@ -18,13 +18,14 @@ const VERIFY_SH = ".conix/governance/verify.sh";
 // 治理文件里每个开关该是什么类型。review.separate 不是布尔值时启动就拒（确认出口的 separate）；
 // governance 的两个按"spec 不写 false 就开、interface 写 true 才开"解释，写成 "no" 不报错却意思反了，所以一样算错。
 const SWITCHES = { governance: ["spec", "interface"], review: ["separate"] };
-const TOP = ["governance", "review", "verify"];
+const TOP = ["governance", "review", "checks", "verify"];
 
 export default function (input, flow) {
   const out = [];
   const add = (level, message, path, fix) => out.push({ level, message, ...(path ? { path } : {}), ...(fix ? { fix } : {}) });
   const settingsOk = checkSettings(flow, add);
   if (settingsOk) {
+    checkChecks(flow, add);
     checkMenu(flow, add);
     checkBaselines(flow, input.data_dir, add);
   }
@@ -44,7 +45,7 @@ function checkSettings(flow, add) {
   try {
     s = flow.settings;
   } catch (e) {
-    add("error", `治理文件读不成，xforge 的每条流程都会拒绝启动：${e.message}`, SETTINGS, "改成 YAML 映射：governance、review、verify（docs/design/xforge.md §1）");
+    add("error", `治理文件读不成，xforge 的每条流程都会拒绝启动：${e.message}`, SETTINGS, "改成 YAML 映射：governance、review、checks、verify（docs/design/xforge.md §1）");
     return false;
   }
   let ok = true;
@@ -70,6 +71,18 @@ function checkSettings(flow, add) {
     }
   }
   return ok;
+}
+
+// checks：项目的验证（门禁 unit-tests）能写的目录与联网，与菜单的一项同一份核对。被不被 git 忽略由流程库起进程前查。
+function checkChecks(flow, add) {
+  const c = (flow.settings || {}).checks;
+  if (c === undefined || c === null) return;
+  if (typeof c !== "object" || Array.isArray(c)) {
+    add("error", "checks 要写成 {writable: [...], network: false}", SETTINGS);
+    return;
+  }
+  for (const p of writableProblems(c.writable)) add("error", `checks.writable ${p}`, SETTINGS, "写项目内被 git 忽略的目录，如 [target]");
+  if (c.network !== undefined && typeof c.network !== "boolean") add("error", "checks.network 要是 true 或 false", SETTINGS);
 }
 
 // verify 菜单：与 xpkg plan --verify、门禁 package-tests 同一份核对；黑盒一项与门禁 blackbox 同一份判法。
