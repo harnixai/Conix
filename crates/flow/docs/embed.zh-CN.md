@@ -442,6 +442,8 @@ Conix 在 Harnix 0.4.7 分叉了这个库，先把站的治理（门禁、确认
   记父运行的 worktree、分支、映射过来的输出目录（`${parent.output_dir}`）。子运行结束交出 **`WorkItem::Join`**（代替直接交回
   父任务）：合回父运行的分支、删掉 worktree，经 **`Engine::subflow_joined`** 报回，冲突时父任务失败、列出冲突的文件。
   **`OpenSpec::deny_read`**：子运行的会话不能读的目录（父运行与兄弟子运行的 worktree），宿主要连沙箱一起拒读。
+  一轮的分叉提交同时给这一轮要分叉的每个任务取好子运行的 id（`ForkPoint::children`），子运行分叉时兄弟的 worktree 就定下来
+  （`ForkRec::siblings`，还没建的也在）：先分叉的子运行的会话也挡得住后分叉的兄弟，同一个会话每次开的名单都一样。
 - **试运行用会话所在的流程包**：`Sandbox::start_in(input, by, packs)`；`flow_dry_run` 用会话读的那份（项目的流程、件），
   不再只看应用自己的包——项目里的流程以前试运行时找不到。
 - **事后可核对的归档**（Conix）：`record.json` 带 `format` 与 `files: [{path, sha256, size}]`（归档里其余每个文件），
