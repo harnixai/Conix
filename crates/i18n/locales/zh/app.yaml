@@ -70,4 +70,5 @@ app:
     flow_file: "包文件（zip）。"
     flow_force: "规矩不让时也照做（覆盖、降级），旧的先备份。"
     flow_yes: "不问，直接做（不在终端里时必须给）。"
+    flow_jobs: "包建议的作业：ask 问（缺省）、yes 加、no 不加。加进来的都是停用的；给了 --yes 而没写这项就不加。"
     flow_dry_run: "只列出要做什么，不做。"

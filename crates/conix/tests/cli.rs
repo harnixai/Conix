@@ -736,3 +736,102 @@ fn copy(from: &Path, to: &Path) {
         }
     }
 }
+
+/// 包建议的作业：装的时候列出来，`--yes` 不写 `--jobs` 不加，`--jobs yes` 才加、加进来是停用的；项目里已有的 ID
+/// 不动；更新只提新版新带来的；删包不删作业、只提醒。
+#[test]
+fn a_bundles_suggested_jobs_are_offered_at_install_and_added_disabled_only_when_asked() {
+    let e = Env::new();
+    let jobs_json = e.project.path().join(".conix/jobs.json");
+    let state_json = e.project.path().join(".conix/state/conix/jobs-state.json");
+    let read = |p: &Path| -> serde_json::Value {
+        serde_json::from_str(&std::fs::read_to_string(p).unwrap()).unwrap()
+    };
+    let with_jobs = |dir: &Path, version: &str, extra: &str| {
+        small_bundle(dir, "mine", version);
+        let y = dir.join("bundle.yaml");
+        let mut t = std::fs::read_to_string(&y).unwrap();
+        t.push_str(concat!(
+            "jobs:\n",
+            "  - {id: daily, name: Daily check, cron: \"0 9 * * *\", kind: {simple: {prompt: Look at yesterday's errors and report in three lines}}}\n",
+            "  - {id: weekly, name: Weekly run, cron: \"0 10 * * 1\", kind: {flow: {flow: mine/main}}}\n",
+        ));
+        t.push_str(extra);
+        std::fs::write(&y, t).unwrap();
+    };
+    // 坏的 cron：流程库只看形状，宿主校验包时判出来，进不了库。
+    let mine = e.installed("mine");
+    with_jobs(
+        &mine,
+        "1.0.0",
+        "  - {id: bad, name: Bad, cron: \"99 * * * *\", kind: {simple: {prompt: x}}}\n",
+    );
+    let out = e.fails(&["backfill", "mine", "--yes"]);
+    assert!(
+        out.contains("does not validate") && out.contains("cron"),
+        "{out}"
+    );
+    std::fs::remove_dir_all(&mine).unwrap();
+    with_jobs(&mine, "1.0.0", "");
+    e.ok(&["backfill", "mine", "--yes"]);
+    e.ok(&["remove", "mine", "--yes"]);
+
+    // --dry-run 列出来；--yes 不写 --jobs：装了包、作业不加，说一声。
+    let out = e.ok(&["install", "mine", "--dry-run"]);
+    assert!(
+        out.contains("Jobs the bundle suggests (2 to add")
+            && out.contains("+ daily  Daily check  0 9 * * *")
+            && out.contains("starts the flow mine/main"),
+        "{out}"
+    );
+    let out = e.ok(&["install", "mine", "--yes"]);
+    assert!(out.contains("--jobs yes"), "{out}");
+    assert!(mine.join("bundle.yaml").is_file() && !jobs_json.exists());
+    e.ok(&["remove", "mine", "--yes"]);
+
+    // 项目里已有 daily：不覆盖；weekly 加进来、停用。
+    std::fs::create_dir_all(jobs_json.parent().unwrap()).unwrap();
+    std::fs::write(
+        &jobs_json,
+        r#"[{"id":"daily","name":"Ours","cron":"0 8 * * *","kind":{"simple":{"prompt":"ours"}}}]"#,
+    )
+    .unwrap();
+    let out = e.ok(&["install", "mine", "--yes", "--jobs", "yes"]);
+    assert!(
+        out.contains("daily  Ours: the project already has this id")
+            && out.contains("Added the job weekly (disabled)"),
+        "{out}"
+    );
+    let defs = read(&jobs_json);
+    assert_eq!(defs.as_array().unwrap().len(), 2, "{defs}");
+    assert_eq!(defs[0]["name"], "Ours");
+    assert_eq!(defs[1]["id"], "weekly");
+    assert_eq!(defs[1]["kind"]["flow"]["flow"], "mine/main");
+    assert_eq!(defs[1]["kind"]["flow"]["subject"], "Weekly run");
+    assert_eq!(read(&state_json)["weekly"]["enabled"], false);
+
+    // 新版多带一个：只提它，旧版提过的不再提。
+    let g = e.global().join("mine");
+    std::fs::remove_dir_all(&g).unwrap();
+    with_jobs(
+        &g,
+        "1.1.0",
+        "  - {id: monthly, name: Monthly, cron: \"0 0 1 * *\", kind: {simple: {prompt: tidy up}}}\n",
+    );
+    let out = e.ok(&["update", "mine", "--dry-run"]);
+    assert!(
+        out.contains("(1 to add") && out.contains("+ monthly") && !out.contains("+ daily"),
+        "{out}"
+    );
+    let out = e.ok(&["update", "mine", "--force", "--yes", "--jobs", "no"]);
+    assert!(!out.contains("Added the job"), "{out}");
+    assert_eq!(read(&jobs_json).as_array().unwrap().len(), 2);
+
+    // 删包：作业留着，提醒哪几个起的是它的流程。
+    let out = e.ok(&["remove", "mine", "--yes"]);
+    assert!(
+        out.contains("not removed with it") && out.contains("Weekly run (weekly)"),
+        "{out}"
+    );
+    assert_eq!(read(&jobs_json).as_array().unwrap().len(), 2);
+}

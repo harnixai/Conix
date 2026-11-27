@@ -324,6 +324,8 @@ pub struct Plan {
     pub orphans: Vec<String>,
     /// 只把这个包记进 lock（内容已经一样）。
     pub lock_only: bool,
+    /// 包建议、项目里还没有的作业（install、带来新作业的 update）：命令行问过人才加（`apply` 不加）。
+    pub jobs: crate::jobs::suggest::Offer,
     files: Option<Files>,
     requires: Option<ManifestRequires>,
     /// 计划时目标的摘要（没有是 `None`）：`apply` 拿锁后再对一次。
@@ -345,6 +347,7 @@ impl Plan {
             paths: vec![],
             orphans: vec![],
             lock_only: false,
+            jobs: Default::default(),
             files: None,
             requires: None,
             expect: None,
@@ -384,6 +387,11 @@ pub fn plan_install(ctx: &Ctx, name: &str, force: bool) -> Result<Plan, String> 
     p.backup = existing.as_ref().map(|_| ctx.project_backups());
     p.expect = digest_opt(existing.as_deref());
     p.notes.extend(gate_note(&g));
+    p.jobs = crate::jobs::suggest::offer(
+        &ctx.project,
+        crate::jobs::suggest::jobs_in(&g).0,
+        &Default::default(),
+    );
     p.files = Some(files);
     Ok(p)
 }
@@ -454,6 +462,14 @@ pub fn plan_update(ctx: &Ctx, name: &str, force: bool) -> Result<Plan, String> {
     p.changes = changes;
     p.backup = Some(ctx.project_backups());
     p.notes.extend(gate_note(&g));
+    // 只提新版新带来的：旧版建议过的，人当时没要，更新时不再追着问。
+    let offered: BTreeSet<String> = crate::jobs::suggest::jobs_in(&pd)
+        .0
+        .into_iter()
+        .map(|j| j.id.0)
+        .collect();
+    p.jobs =
+        crate::jobs::suggest::offer(&ctx.project, crate::jobs::suggest::jobs_in(&g).0, &offered);
     p.files = Some(files);
     Ok(p)
 }
@@ -529,6 +545,16 @@ pub fn plan_remove(ctx: &Ctx, name: &str, global: bool, force: bool) -> Result<P
         p.notes.push(i18n::t!(
             "flowlib.note_remove_runs",
             runs = list_short(&runs)
+        ));
+    }
+    let jobs: Vec<String> = crate::jobs::suggest::referencing(&ctx.project, name)
+        .into_iter()
+        .map(|j| format!("{} ({})", j.name, j.id))
+        .collect();
+    if !jobs.is_empty() {
+        p.notes.push(i18n::t!(
+            "flowlib.note_remove_jobs",
+            jobs = list_short(&jobs)
         ));
     }
     Ok(p)

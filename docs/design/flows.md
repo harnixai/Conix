@@ -487,6 +487,9 @@ settings:                              # 项目的治理文件，启动时读、
   file: .conix/governance/xforge.yaml
   defaults: {governance: {spec: true, interface: false}, review: {separate: false}}
 doctor: doctor                         # 自检脚本 scripts/doctor.js（§7.13）
+jobs:                                  # 建议的作业（示意：内置的 xforge 现在不带）：装包时问要不要加（§7.12），加进来是停用的
+  - {id: spec-drift, name: 规格巡检, cron: "0 9 * * 1", kind: {simple: {prompt: 对照 specs/ 看上周的提交，有没写进规格的改动用三五行回报}}}
+  - {id: weekly-quick, name: 每周小修, cron: "0 10 * * 5", kind: {flow: {flow: xforge/quick, subject: 每周小修, inputs: {risk: low}}}}
 ```
 
 | 字段 | 意思 |
@@ -499,6 +502,7 @@ doctor: doctor                         # 自检脚本 scripts/doctor.js（§7.13
 | `settings` | 项目里的设置文件（`file`，相对项目根、不出项目）与缺省（`defaults`，映射）。见下 |
 | `doctor` | 包的自检脚本（`scripts/<名>.js`），宿主在运行之外为一个项目跑它，查这个项目给包备齐了没有（§7.13）。与别的脚本引用一样读包时校验：名字不对、文件不在，包里的流程都报错 |
 | `exec` | 包起的进程（`flow.exec`、命令门禁、`plan` 的 run）能有什么：`{network: bool, env: [名字, 前缀*]}`，缺省都没有（§7.14）。读包时校验，启动时钉进运行 |
+| `jobs` | 包建议的作业，每条与项目 `.conix/jobs.json` 的一条同形：`id`、`name`、`cron`、`kind`（`{simple: {prompt, skills?, model?}}` 或 `{flow: {flow, subject?, inputs?}}`）、`catch_up?`、`guard?`。不跑，装包时问（§7.12）。见下 |
 
 - **`read_only`** 按命令名后的第一个词匹配，照 Agix `[[command]]` 的约定。声明它是为了让运行之外也能放心地查
   （`/flow:xforge:xspec list`）：会写的命令运行之外只有人能调（§7.6）。
@@ -514,6 +518,13 @@ doctor: doctor                         # 自检脚本 scripts/doctor.js（§7.13
   - 读的是项目根的文件，worktree 运行也是：规则是项目此刻说的，不是 worktree 检出那一刻提交里的。
   - 同一个包的子运行沿用父运行钉住的设置；换路（§7.3）保留运行原来的。
   - 用在确认出口的 `${settings.<路径>}`（§4.1）与包 JS 的 `flow.settings`（§7.7）。
+- **`jobs`：建议，不是安装。** 包可以说"用这个包的项目通常还要定时做这几件事"，但作业会无人值守地花钱、改文件，装包不能顺手把它们
+  跑起来：装的时候列出来问（§7.12），要了才写进项目的 `.conix/jobs.json`，而且**在这台机器上是停用的**（同克隆下来的仓库带着的作业，
+  architecture §8.5），要人启用。读包时校验：`id` 是 `[A-Za-z0-9_-]+`、不重复（它进项目后是触发记录的文件名）；`name`、`prompt` 不空；
+  `cron` 是 5 段，能不能解析由宿主判（流程库没有 cron 解析，宿主校验包时一并判，坏的进不了库也装不进项目）；`guard` 只收宿主护栏有的键；
+  流程作业的 `flow` 只能是**这个包的**流程：`<包>/<流程>`，或只写 `<包>`——包自己的 `flow.yaml`，或包只有一条流程时就是它
+  （写进项目时换成全名）。不能指别的包：装进来的包不能替项目安排别人的流程。`subject` 不写就是作业的 `name`。
+  不收 `project`（那是这台机器上的路径）与启停、时刻（那是这台机器的状态）。
 
 ### 7.2 启动与选路
 
@@ -675,8 +686,8 @@ files: [{path, sha256, size}, …]
 conix flow list    [--global | --all]            项目的（缺省）/ 全局库的 / 两边对照，带状态
 conix flow show    <包> [--global]                说明、流程、命令、版本、要求的 Conix、来源
 conix flow diff    <包>                           项目 vs 全局库：版本、增删改的文件
-conix flow install <包> [--force]                 全局库 → 项目；项目已有同名就拒绝（用 update）
-conix flow update  [<包> | --all] [--force]       全局库 → 项目
+conix flow install <包> [--force] [--jobs ask|yes|no]          全局库 → 项目；项目已有同名就拒绝（用 update）
+conix flow update  [<包> | --all] [--force] [--jobs ask|yes|no]  全局库 → 项目
 conix flow backfill <包> [--force]                项目 → 全局库（回填；库里没有就新加）
 conix flow remove  <包> [--global] [--force]      删项目的（缺省）或库里的；都先备份
 conix flow clean   [--global]                     清备份、暂存残留、孤儿条目
@@ -714,6 +725,14 @@ backfill（项目 → 全局库），`local.md` 不回填：
 - import 已有同名拒绝，`--force` 覆盖；`--project` 进项目、不记 lock。export 缺省导项目的，`--global` 导库里的；插件的包不在这里导。
 - **确认**：改东西的命令先列出要做什么（包、版本从→到、增删改的文件、备份到哪、要留意的：命令门禁、回填内置包……），问 `[y/N]`；
   `--yes` 跳过；不是终端（脚本里）不给 `--yes` 就拒绝；`--dry-run` 只列不做。确认之后拿锁再看一眼目标，确认期间被别处改了就不做。
+- **包建议的作业**（§7.1 的 `jobs`）：install，以及带来新作业的 update（新版有、装着的那版没有的；旧版提过的人当时没要，不再追着问），
+  计划里列出每个作业（ID、名字、cron、做什么），项目里已有同 ID 的标出来、**不加也不改**。包装好之后**另问一句**
+  `把这 N 个建议的作业加进项目（停用）？[y/N]`：装包与让它定时做事是两件事，前一句的 y 不替后一句答。`--jobs yes` 不问就加、`no` 不加、
+  `ask`（缺省）问；给了 `--yes` 而没写 `--jobs` 就**不加**，并说一声怎么加——不问的时候替人多加会定时跑的东西，哪怕停着，也该是人明说的。
+  不是终端、没有 `--yes` 照旧拒绝；`--dry-run` 连作业一起列。加进去的写 `.conix/jobs.json`，本机的 `jobs-state.json` 记停用；
+  在跑的实例经 socket 收一帧 `ReloadJobs`（同 `ReloadFlows`），重读作业，作业标签跟着变。命令行写作业定义不看项目受不受信：
+  是人在终端里让它做的，加的又都停着；实例那边照旧按信任读。
+- **删包不删作业**：remove 列出起这个包的流程的作业（`<包>` 或 `<包>/…`），提醒它们之后会因为找不到流程失败；删不删在作业标签里说。
 - **在跑的实例**：命令行改了项目的包，这个项目若有实例在跑，经它的 socket 发一帧 `ReloadFlows`（不接入、不踢人，architecture §8.3），
   实例重列流程、流程标签跟着变；不在、连不上都不算错。界面里没有导出导入（以前的 `/flow:export`、`/flow:import` 与端口的
   `ExportFlow`/`ImportFlow` 去掉了）；地址或 `flow_start` 指的包项目里没有、库里有时，回的话里写 `conix flow install <包>`

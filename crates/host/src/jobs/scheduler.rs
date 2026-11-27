@@ -106,6 +106,12 @@ impl Scheduler {
             .collect()
     }
 
+    /// 定义在实例之外变了（命令行加了作业）：按此刻的信任重读，规矩同 [`Scheduler::set_trusted`]。
+    pub fn reload(&self) -> Vec<port::JobId> {
+        let trusted = self.lock().trusted();
+        self.set_trusted(trusted)
+    }
+
     pub fn set_enabled(&self, id: &str, enabled: bool) -> Result<bool, String> {
         let r = self.lock().set_enabled(id, enabled, self.now())?;
         self.wake.notify_one();
@@ -293,6 +299,23 @@ mod tests {
         fn fired(&self) -> Vec<(String, u64)> {
             self.log.lock().unwrap().clone()
         }
+    }
+
+    /// 命令行在实例之外加了作业（装包时建议的）：重读就看得到，停着的不跑。
+    #[tokio::test(start_paused = true)]
+    async fn reload_reads_jobs_added_outside_the_instance() {
+        let r = rig().await;
+        r.sched.upsert(job("a", "* * * * *", false)).unwrap();
+        let mut other = store_at(r.dir.path());
+        let mut b = job("b", "* * * * *", false);
+        b.enabled = false;
+        other.upsert(b, T0).unwrap();
+        assert_eq!(r.sched.list().len(), 1);
+        assert!(r.sched.reload().is_empty());
+        let ids: Vec<String> = r.sched.list().into_iter().map(|j| j.id.0).collect();
+        assert_eq!(ids, ["a", "b"]);
+        r.advance(MIN).await;
+        assert_eq!(r.fired(), vec![("a".into(), T0 + MIN)]);
     }
 
     #[tokio::test(start_paused = true)]

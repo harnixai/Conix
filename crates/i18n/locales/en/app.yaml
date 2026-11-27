@@ -69,4 +69,5 @@ app:
     flow_file: "The package file (a zip)."
     flow_force: "Go ahead where the rules refuse (overwrite, downgrade); the old one is backed up first."
     flow_yes: "Do not ask (required when not in a terminal)."
+    flow_jobs: "The jobs the bundle suggests: ask (the default), yes adds them, no does not. Added jobs are disabled; with --yes and no --jobs none are added."
     flow_dry_run: "Only list what would be done."

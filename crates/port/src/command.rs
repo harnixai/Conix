@@ -197,6 +197,9 @@ pub enum Command {
 
     // 作业
     ListJobs,
+    /// 项目的作业定义在实例之外变了（`conix flow install` 加了包建议的作业）：重读。同 `ReloadFlows`，
+    /// 命令行可以不接入、只发这一帧，回 `Ok` 就断开。
+    ReloadJobs,
     SaveJob {
         job: Job,
     },
@@ -306,6 +309,7 @@ impl Command {
             Command::ReloadFlows => "reload_flows",
             Command::ListLibrary => "list_library",
             Command::ListJobs => "list_jobs",
+            Command::ReloadJobs => "reload_jobs",
             Command::SaveJob { .. } => "save_job",
             Command::DeleteJob { .. } => "delete_job",
             Command::SetJobEnabled { .. } => "set_job_enabled",

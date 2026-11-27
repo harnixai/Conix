@@ -587,7 +587,8 @@ pub fn compatible(dir: &Path) -> Result<(), String> {
     check_compatible(&requires_of(&meta), &meta)
 }
 
-/// 用流程库校验解开的流程包目录（`<父>/<包名>`）：每个流程、每个件、`commands` 里列的命令文件。
+/// 用流程库校验解开的流程包目录（`<父>/<包名>`）：每个流程、每个件、`commands` 里列的命令文件，
+/// 再加上流程库判不了的：建议的作业的 cron 与护栏（`jobs::suggest`）。
 pub fn validate_bundle(dir: &Path, catalog: Catalog) -> Vec<String> {
     let Some(name) = dir.file_name().and_then(|n| n.to_str()) else {
         return vec!["no bundle name".into()];
@@ -630,6 +631,7 @@ pub fn validate_bundle(dir: &Path, catalog: Catalog) -> Vec<String> {
             }
         }
     }
+    out.extend(crate::jobs::suggest::jobs_in(dir).1);
     out
 }
 

@@ -356,8 +356,8 @@ conix（一个二进制）
 - **握手**：第一帧必须是 `Hello{client, force}`。实例空着 → 回 `Hello{instance, flows, jobs}`；
   有人接入且不带 `force` → 回 `Err(Occupied{holder, idle_ms})` 并关掉这条连接；带 `force` → 先给旧连接推
   `Kicked{by, at_ms}` 再关掉它，然后接受新连接。被踢的一方不重连。
-  唯一的例外是 `ReloadFlows`：`conix flow …` 改了项目的流程包后发它当第一帧，实例重列流程、回 `Ok` 就关掉，
-  不接入、不踢人（flows.md §7.12）。
+  唯一的例外是 `ReloadFlows` 与 `ReloadJobs`：`conix flow …` 改了项目的流程包、加了包建议的作业后发它当第一帧，
+  实例重列流程（重读作业）、回 `Ok` 就关掉，不接入、不踢人（flows.md §7.12）。
 - 对端校验：accept 后取对端 uid（`peer_cred`），与实例进程的不同就直接关掉。
 - **心跳**：model 每 10 秒发 `Heartbeat{last_input_ms}`；实例 35 秒没收到任何帧就断开这条连接（TUI 僵死、
   ssh 半开）。`last_input_ms` 只用来报接入者空闲了多久（`conix list`、被占用的提示）。**没有空闲脱离**：

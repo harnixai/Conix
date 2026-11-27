@@ -518,6 +518,20 @@ impl Hub {
                 },
             },
             C::ListJobs => Ok(Reply::Jobs(self.scheduler()?.list())),
+            C::ReloadJobs => {
+                // 没有作业的实例（不在项目里）没什么可重读的：同 `ReloadFlows`，不算错。
+                let Ok(sched) = self.scheduler() else {
+                    return Ok(Reply::Ok);
+                };
+                let gone = sched.reload();
+                let mut events: Vec<Event> = gone
+                    .into_iter()
+                    .map(|job| Event::JobRemoved { job })
+                    .collect();
+                events.extend(sched.list().into_iter().map(Event::JobUpserted));
+                self.emit_events(events);
+                Ok(Reply::Ok)
+            }
             C::SaveJob { job } => {
                 let job = self.normalize_job(job).await.map_err(PortError::Failed)?;
                 let saved = self.scheduler()?.upsert(job).map_err(PortError::Failed)?;

@@ -46,6 +46,8 @@ pub enum FlowCmd {
         bundle: String,
         #[arg(long)]
         force: bool,
+        #[arg(long, value_enum, value_name = "ask|yes|no")]
+        jobs: Option<JobsChoice>,
     },
     /// 用全局库里的更新项目里装的。
     Update {
@@ -54,6 +56,8 @@ pub enum FlowCmd {
         all: bool,
         #[arg(long)]
         force: bool,
+        #[arg(long, value_enum, value_name = "ask|yes|no")]
+        jobs: Option<JobsChoice>,
     },
     /// 删掉项目的（缺省）或全局库的，都先备份。
     Remove {
@@ -116,12 +120,22 @@ pub enum FlowCmd {
     },
 }
 
+/// 包建议的作业加不加（flows.md §7.12）。不写是问；`--yes` 而不写 `--jobs` 是不加：不问就替人多加了会定时跑的东西，
+/// 哪怕是停着的，也该是人明说要的。
+#[derive(Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum JobsChoice {
+    Ask,
+    Yes,
+    No,
+}
+
 /// 帮助文字按当前语言重写（见 `main::localized_command`）。
 pub fn localize(c: clap::Command) -> clap::Command {
     let force = |c: clap::Command| c.mut_arg("force", |a| a.help(i18n::t!("app.cli.flow_force")));
     let bundle =
         |c: clap::Command| c.mut_arg("bundle", |a| a.help(i18n::t!("app.cli.flow_bundle")));
     let global = |c: clap::Command, key: &str| c.mut_arg("global", |a| a.help(i18n::tr(key)));
+    let jobs = |c: clap::Command| c.mut_arg("jobs", |a| a.help(i18n::t!("app.cli.flow_jobs")));
     c.about(i18n::t!("app.cli.flow"))
         .mut_arg("project_dir", |a| a.help(i18n::t!("app.cli.flow_project")))
         .mut_arg("yes", |a| a.help(i18n::t!("app.cli.flow_yes")))
@@ -138,10 +152,10 @@ pub fn localize(c: clap::Command) -> clap::Command {
             )
         })
         .mut_subcommand("install", |c| {
-            force(bundle(c.about(i18n::t!("app.cli.flow_install"))))
+            jobs(force(bundle(c.about(i18n::t!("app.cli.flow_install")))))
         })
         .mut_subcommand("update", |c| {
-            force(bundle(c.about(i18n::t!("app.cli.flow_update"))))
+            jobs(force(bundle(c.about(i18n::t!("app.cli.flow_update")))))
                 .mut_arg("all", |a| a.help(i18n::t!("app.cli.flow_update_all")))
         })
         .mut_subcommand("remove", |c| {
@@ -255,15 +269,27 @@ pub async fn run(
     let confirm = Confirm {
         yes: args.yes,
         dry_run: args.dry_run,
+        jobs: None,
     };
     match args.cmd {
         FlowCmd::List { global, all } => list(&ctx, global, all),
         FlowCmd::Show { bundle, global } => show(&ctx, &bundle, global),
-        FlowCmd::Install { bundle, force } => {
+        FlowCmd::Install {
+            bundle,
+            force,
+            jobs,
+        } => {
             let plan = manage::plan_install(&ctx, &bundle, force).map_err(err)?;
+            let confirm = Confirm { jobs, ..confirm };
             change(&ctx, home, vec![plan], vec![], &confirm)
         }
-        FlowCmd::Update { bundle, all, force } => {
+        FlowCmd::Update {
+            bundle,
+            all,
+            force,
+            jobs,
+        } => {
+            let confirm = Confirm { jobs, ..confirm };
             let names = match (bundle, all) {
                 (Some(b), _) => vec![b],
                 (None, true) => {
@@ -780,7 +806,9 @@ async fn doctor(
                 Err(e) => eprintln!("{}", i18n::t!("flowlib.dr_fix_failed", why = e)),
             }
         }
-        if installed && let Some(name) = notify_instance(home, &ctx.project) {
+        if installed
+            && let Some(name) = notify_instance(home, &ctx.project, port::Command::ReloadFlows)
+        {
             println!("{}", i18n::t!("flowlib.notified", name = name));
         }
     } else if !report.fixes.is_empty() {
@@ -814,6 +842,8 @@ async fn doctor(
 struct Confirm {
     yes: bool,
     dry_run: bool,
+    /// 包建议的作业（install、update）：`None` 是没写 `--jobs`。
+    jobs: Option<JobsChoice>,
 }
 
 fn where_text(w: Where) -> String {
@@ -895,6 +925,47 @@ fn print_plan(p: &Plan) {
     for n in &p.notes {
         println!("  {n}");
     }
+    print_jobs(&p.jobs);
+}
+
+/// 作业做什么，一句：简单作业是那句话的开头，流程作业是起哪条流程。
+fn job_what(j: &port::Job) -> String {
+    match &j.kind {
+        port::JobKind::Simple { prompt, .. } => {
+            let first = prompt.lines().next().unwrap_or_default();
+            let mut s: String = first.chars().take(40).collect();
+            if s.chars().count() < prompt.chars().count() {
+                s.push('…');
+            }
+            i18n::t!("flowlib.job_simple", prompt = s)
+        }
+        port::JobKind::Flow { flow, .. } => i18n::t!("flowlib.job_flow", flow = flow),
+    }
+}
+
+fn print_jobs(o: &host::jobs::suggest::Offer) {
+    if o.is_empty() {
+        return;
+    }
+    println!("  {}", i18n::t!("flowlib.plan_jobs", n = o.new.len()));
+    for j in &o.new {
+        println!("    + {}  {}  {}  {}", j.id, j.name, j.cron, job_what(j));
+    }
+    for j in &o.existing {
+        println!(
+            "    = {}",
+            i18n::t!("flowlib.plan_job_exists", id = j.id, name = j.name)
+        );
+    }
+}
+
+/// 人在终端里答 y 才算。
+fn ask(question: &str) -> Result<bool> {
+    print!("{question} ");
+    std::io::stdout().flush()?;
+    let mut answer = String::new();
+    std::io::stdin().lock().read_line(&mut answer)?;
+    Ok(matches!(answer.trim(), "y" | "Y" | "yes" | "YES" | "Yes"))
 }
 
 /// 列出计划、确认、照做；做完了项目的告诉在跑的实例。`errors` 是计划不出来的那几个，最后报错退出。
@@ -929,17 +1000,26 @@ fn change(
         if !std::io::stdin().is_terminal() {
             bail!("{}", i18n::t!("flowlib.cli_need_yes"));
         }
-        print!("{} ", i18n::t!("flowlib.cli_ask"));
-        std::io::stdout().flush()?;
-        let mut answer = String::new();
-        std::io::stdin().lock().read_line(&mut answer)?;
-        if !matches!(answer.trim(), "y" | "Y" | "yes" | "YES" | "Yes") {
+        if !ask(&i18n::t!("flowlib.cli_ask"))? {
             println!("{}", i18n::t!("flowlib.cli_cancelled"));
             return Ok(());
         }
     }
+    // 作业另问一次：包装不装与要不要它定时做事是两件事，前一句的 y 不替后一句答。
+    let offered: usize = todo.iter().map(|p| p.jobs.new.len()).sum();
+    let add_jobs = offered > 0
+        && match (c.jobs, c.yes) {
+            (Some(JobsChoice::Yes), _) => true,
+            (Some(JobsChoice::No), _) => false,
+            (_, true) => {
+                println!("{}", i18n::t!("flowlib.cli_jobs_not_added"));
+                false
+            }
+            (_, false) => ask(&i18n::t!("flowlib.cli_jobs_ask", n = offered))?,
+        };
     let mut errors = errors;
     let mut touched_project = false;
+    let mut added_jobs = false;
     for p in todo {
         match manage::apply(ctx, p) {
             Ok(done) => {
@@ -951,6 +1031,22 @@ fn change(
                 if let Some(b) = done.backup {
                     println!("  {}", i18n::t!("flowlib.done_backup", dir = b.display()));
                 }
+                if add_jobs && !p.jobs.new.is_empty() {
+                    match host::jobs::suggest::add(&ctx.project, &p.jobs.new, now_ms()) {
+                        Ok(ids) => {
+                            added_jobs |= !ids.is_empty();
+                            for id in ids {
+                                println!("  {}", i18n::t!("flowlib.job_added", id = id));
+                            }
+                            println!("  {}", i18n::t!("flowlib.jobs_disabled_hint"));
+                        }
+                        Err(e) => {
+                            let e = i18n::t!("flowlib.jobs_failed", why = e);
+                            eprintln!("{e}");
+                            errors.push(e);
+                        }
+                    }
+                }
             }
             Err(e) => {
                 eprintln!("{e}");
@@ -958,14 +1054,27 @@ fn change(
             }
         }
     }
-    if touched_project && let Some(name) = notify_instance(home, &ctx.project) {
+    if touched_project
+        && let Some(name) = notify_instance(home, &ctx.project, port::Command::ReloadFlows)
+    {
         println!("{}", i18n::t!("flowlib.notified", name = name));
+    }
+    if added_jobs && let Some(name) = notify_instance(home, &ctx.project, port::Command::ReloadJobs)
+    {
+        println!("{}", i18n::t!("flowlib.notified_jobs", name = name));
     }
     finish(&errors)
 }
 
-/// 这个项目若有实例在跑，经它的 socket 让它重读流程（尽力而为：不在、连不上都不算错）。回实例名。
-fn notify_instance(home: &Path, project: &Path) -> Option<String> {
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+/// 这个项目若有实例在跑，经它的 socket 让它重读流程或作业（`cmd`；尽力而为：不在、连不上都不算错）。回实例名。
+fn notify_instance(home: &Path, project: &Path, cmd: port::Command) -> Option<String> {
     use std::os::unix::net::UnixStream;
     use std::time::Duration;
     let layout = client::Layout::new(home);
@@ -991,7 +1100,7 @@ fn notify_instance(home: &Path, project: &Path) -> Option<String> {
         let _ = s.set_write_timeout(Some(Duration::from_secs(5)));
         let frame = port::link::ClientFrame {
             id: 1,
-            cmd: port::Command::ReloadFlows,
+            cmd: cmd.clone(),
         };
         let Ok(mut line) = serde_json::to_string(&frame) else {
             continue;

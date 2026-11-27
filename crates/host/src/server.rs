@@ -190,12 +190,12 @@ async fn connection(sh: Arc<Shared>, stream: UnixStream, conn: u64) {
             id,
             cmd: Command::Hello { client, force },
         }) => (id, client, force),
-        // `conix flow …` 改了项目的流程包：不接入、不踢人，做完回一句就断开。
+        // `conix flow …` 改了项目的流程包、加了作业：不接入、不踢人，做完回一句就断开。
         Ok(ClientFrame {
             id,
-            cmd: Command::ReloadFlows,
+            cmd: cmd @ (Command::ReloadFlows | Command::ReloadJobs),
         }) => {
-            let r = sh.svc.handle(Command::ReloadFlows).await;
+            let r = sh.svc.handle(cmd).await;
             let _ = write_frame(&mut wr, &reply(id, r)).await;
             let _ = wr.shutdown().await;
             return;

@@ -5,6 +5,7 @@ pub mod guard;
 pub mod ledger;
 pub mod scheduler;
 pub mod store;
+pub mod suggest;
 
 pub use scheduler::{Fire, Scheduler};
 pub use store::{JobStore, StoredJob};

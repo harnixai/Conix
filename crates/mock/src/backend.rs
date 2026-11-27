@@ -503,7 +503,7 @@ impl ScriptedBackend {
                 .find(|f| &f.summary.name == name)
                 .map(|f| Reply::Flow(Box::new(f.detail())))
                 .ok_or_else(|| PortError::Failed(format!("没有流程 {name}"))),
-            ReloadFlows => Ok(Reply::Ok),
+            ReloadFlows | ReloadJobs => Ok(Reply::Ok),
             ListLibrary => Ok(Reply::Library(st().library.clone())),
             ListRuns { flow } => {
                 let mut runs: Vec<_> = st()
