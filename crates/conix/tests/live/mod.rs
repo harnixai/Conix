@@ -339,6 +339,55 @@ impl Live {
         read_json_file(&self.state().dir().join(file))
     }
 
+    /// 同上，文件还没有（或读不成）时是 `None`：等子运行的记录出现时用。
+    pub fn try_state(&self, file: &str) -> Option<serde_json::Value> {
+        std::fs::read_to_string(self.state().dir().join(file))
+            .ok()
+            .and_then(|t| serde_json::from_str(&t).ok())
+    }
+
+    /// 一次运行的历史（`flow-runs/<运行>.history.jsonl`）：每行一条，`op`、`station`、`detail`……
+    pub fn run_history(&self, run: &str) -> Vec<serde_json::Value> {
+        let p = self
+            .state()
+            .flow_runs()
+            .join(format!("{run}.history.jsonl"));
+        std::fs::read_to_string(&p)
+            .unwrap_or_else(|e| panic!("{}：{e}", p.display()))
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect()
+    }
+
+    /// 在这个用例的家目录下跑 `conix flow -C <项目> <args>`（英文输出、stdin 不是终端）：包的管理只在命令行，
+    /// 有实例在跑时它经 socket 通知实例重读。
+    pub fn conix_flow(&self, args: &[&str]) -> std::process::Output {
+        let project = self.project_path();
+        let mut all = vec!["flow", "-C", project.as_str()];
+        all.extend_from_slice(args);
+        std::process::Command::new(conix())
+            .args(&all)
+            .env("CONIX_HOME", self.home.path())
+            .env("CONIX_LANG", "en")
+            .env_remove("DYLD_FALLBACK_LIBRARY_PATH")
+            .stdin(std::process::Stdio::null())
+            .output()
+            .unwrap()
+    }
+
+    /// 应当成功的 `conix flow …`：回 stdout 与 stderr 拼起来的文字。
+    pub fn conix_flow_ok(&self, args: &[&str]) -> String {
+        let o = self.conix_flow(args);
+        let text = format!(
+            "{}{}",
+            String::from_utf8_lossy(&o.stdout),
+            String::from_utf8_lossy(&o.stderr)
+        );
+        assert!(o.status.success(), "conix flow {args:?}：{text}");
+        text
+    }
+
     /// 作业定义：`.conix/jobs.json`。
     pub fn read_jobs(&self) -> serde_json::Value {
         read_json_file(&self.state().jobs())

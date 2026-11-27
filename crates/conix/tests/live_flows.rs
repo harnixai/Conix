@@ -108,6 +108,13 @@ async fn flows(c: &live::Client) -> Vec<port::FlowSummary> {
     }
 }
 
+async fn jobs(c: &live::Client) -> Vec<port::Job> {
+    match c.ok(Command::ListJobs).await {
+        Reply::Jobs(v) => v,
+        r => panic!("list_jobs 回的是 {r:?}"),
+    }
+}
+
 async fn start(c: &live::Client, flow: &str, subject: &str) -> port::RunSummary {
     match c
         .ok(Command::StartRun {
@@ -829,4 +836,93 @@ async fn flows_live_in_the_project_and_the_global_library_is_not_run_until_insta
     let all = flows(&c).await;
     let solid = find(&all, "xforge/solid").expect("装进来就有");
     assert_eq!(solid.origin, FlowOrigin::Project);
+}
+
+/// 命令行改了项目的包、加了包建议的作业，在跑的实例经 socket 收到 `ReloadFlows` 与 `ReloadJobs`（flows.md §7.12）：
+/// 接着的界面不用重新接入，流程标签多出包的流程、作业标签多出建议的作业（停用）。`update` 带来新版新加的作业时也一样。
+/// 不调模型。
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "live"]
+async fn installing_and_updating_a_bundle_from_the_command_line_reloads_the_running_instance() {
+    let lv = Live::new();
+    let mut c = lv.start_trusted().await;
+    let find = |all: &[port::FlowSummary], name: &str| all.iter().find(|f| f.name == name).cloned();
+    assert!(find(&flows(&c).await, "xreport").is_none(), "还没装");
+    assert!(jobs(&c).await.is_empty());
+
+    c.skip_past();
+    let out = lv.conix_flow_ok(&["install", "xreport", "--yes", "--jobs", "yes"]);
+    assert!(
+        out.contains("Added the job xreport-weekly (disabled)")
+            && out.contains(&format!(
+                "Told instance {} to re-read its flows",
+                live::NAME
+            ))
+            && out.contains(&format!("Told instance {} to re-read its jobs", live::NAME)),
+        "{out}"
+    );
+    let from = c.mark();
+    c.wait_event("流程标签多出 xreport", QUICK, |e| match e {
+        Event::FlowUpserted(f) if f.name == "xreport" => Some(()),
+        _ => None,
+    })
+    .await;
+    c.rewind_to(from);
+    let weekly = c
+        .wait_event("作业标签多出建议的作业", QUICK, |e| match e {
+            Event::JobUpserted(j) if j.id.0 == "xreport-weekly" => Some(j.clone()),
+            _ => None,
+        })
+        .await;
+    assert!(!weekly.enabled, "加进来是停用的：{weekly:?}");
+    assert!(
+        matches!(&weekly.kind, port::JobKind::Flow { flow, inputs, .. } if flow == "xreport" && inputs["days"] == 7),
+        "{weekly:?}"
+    );
+    let xr = find(&flows(&c).await, "xreport").expect("装进来就列得出");
+    assert_eq!(xr.origin, FlowOrigin::Project);
+    let listed = jobs(&c).await;
+    assert!(
+        listed
+            .iter()
+            .any(|j| j.id.0 == "xreport-weekly" && !j.enabled),
+        "{listed:?}"
+    );
+
+    // 库里出了新版、多带一个作业：update 只加新的那个，实例照样重读。
+    let lib = lv.home.path().join("flows/xreport/bundle.yaml");
+    let text = std::fs::read_to_string(&lib).unwrap();
+    assert!(
+        text.contains("version: 0.1.0\n") && text.ends_with('\n'),
+        "内置的 xreport 换了版本，这里跟着改"
+    );
+    std::fs::write(
+        &lib,
+        text.replace("version: 0.1.0\n", "version: 0.1.1\n")
+            + "  - {id: xreport-monthly, name: Monthly report, cron: \"0 9 1 * *\", kind: {flow: {flow: xreport, subject: last month, inputs: {days: 31}}}}\n",
+    )
+    .unwrap();
+    c.skip_past();
+    let out = lv.conix_flow_ok(&["update", "xreport", "--yes", "--jobs", "yes"]);
+    assert!(
+        out.contains("Added the job xreport-monthly (disabled)")
+            && !out.contains("Added the job xreport-weekly")
+            && out.contains("re-read its flows")
+            && out.contains("re-read its jobs"),
+        "{out}"
+    );
+    let monthly = c
+        .wait_event("作业标签多出新版的作业", QUICK, |e| match e {
+            Event::JobUpserted(j) if j.id.0 == "xreport-monthly" => Some(j.clone()),
+            _ => None,
+        })
+        .await;
+    assert!(!monthly.enabled, "{monthly:?}");
+    let listed = jobs(&c).await;
+    assert_eq!(listed.len(), 2, "{listed:?}");
+    let installed = std::fs::read_to_string(
+        std::path::Path::new(&lv.project_path()).join(".conix/flows/xreport/bundle.yaml"),
+    )
+    .unwrap();
+    assert!(installed.contains("version: 0.1.1"), "{installed}");
 }
