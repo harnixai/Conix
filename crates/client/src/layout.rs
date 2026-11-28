@@ -142,6 +142,11 @@ impl ProjectState {
         self.dir().join("quarantine")
     }
 
+    /// 命令行（`conix flow install` 这类）写项目的流程包时拿的 flock。
+    pub fn flows_cli_lock(&self) -> PathBuf {
+        self.dir().join("flows-cli.lock")
+    }
+
     pub fn sessions(&self) -> PathBuf {
         self.dir().join("sessions.json")
     }

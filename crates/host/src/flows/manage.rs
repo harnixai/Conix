@@ -17,8 +17,6 @@ use super::package::{self, Files, ManifestRequires};
 
 /// 项目里记装了什么的文件（相对项目根），进 git。不放进 `.conix/flows/`：那里的每个 yaml 都当流程读。
 pub const LOCK_FILE: &str = ".conix/flows.lock.yaml";
-/// 命令行写项目的流程包时拿的 flock（相对项目根）。
-const PROJECT_LOCK: &str = ".conix/state/conix/flows-cli.lock";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LockEntry {
@@ -786,7 +784,9 @@ pub fn apply(ctx: &Ctx, plan: &Plan) -> Result<Applied, String> {
         (Action::Clean, here) => {
             let _l = match here {
                 Where::Global => ctx.library.lock()?,
-                Where::Project => library::lock_file(&ctx.project.join(PROJECT_LOCK))?,
+                Where::Project => {
+                    library::lock_file(&client::ProjectState::new(&ctx.project).flows_cli_lock())?
+                }
             };
             for p in &plan.paths {
                 let r = if p.is_dir() {
@@ -816,7 +816,7 @@ pub fn apply(ctx: &Ctx, plan: &Plan) -> Result<Applied, String> {
             Ok(Applied::default())
         }
         (Action::Install | Action::Update | Action::Import, Where::Project) => {
-            let _l = library::lock_file(&ctx.project.join(PROJECT_LOCK))?;
+            let _l = library::lock_file(&client::ProjectState::new(&ctx.project).flows_cli_lock())?;
             let target = ctx.flows_dir().join(name);
             recheck(plan, ctx.project_dir(name).as_deref())?;
             let digest = package::digest_of(&files);
@@ -847,7 +847,7 @@ pub fn apply(ctx: &Ctx, plan: &Plan) -> Result<Applied, String> {
             Ok(Applied { backup })
         }
         (Action::Remove, Where::Project) => {
-            let _l = library::lock_file(&ctx.project.join(PROJECT_LOCK))?;
+            let _l = library::lock_file(&client::ProjectState::new(&ctx.project).flows_cli_lock())?;
             recheck(plan, ctx.project_dir(name).as_deref())?;
             let backup =
                 package::back_up(&ctx.flows_dir().join(name), &ctx.project_backups(), name)?;
@@ -890,7 +890,9 @@ pub fn apply(ctx: &Ctx, plan: &Plan) -> Result<Applied, String> {
                         )?
                     };
                     // 回填的就是项目里这一份：lock 跟上，项目对全局不再算改过。
-                    let _p = library::lock_file(&ctx.project.join(PROJECT_LOCK))?;
+                    let _p = library::lock_file(
+                        &client::ProjectState::new(&ctx.project).flows_cli_lock(),
+                    )?;
                     let mut lock = read_lock(&ctx.project)?;
                     lock.bundles.insert(
                         name.to_string(),

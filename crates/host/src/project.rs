@@ -192,7 +192,9 @@ fn known_lock(layout: &Layout) -> Result<Flock<File>, ProjectError> {
 /// 锁文件与以前的 `quarantine/` 不动，其余的挪走；什么都没有（第一次）就不建目录。
 fn quarantine(state: &ProjectState, now_ms: u64) -> Result<Option<PathBuf>, ProjectError> {
     let dir = state.dir();
-    let keep = [state.lock(), state.quarantine()];
+    // 锁文件不是状态：命令行（`conix flow install`）常在实例第一次起来之前就建了它的锁；挪走它，
+    // 一个新项目头一回起实例就会报"不是这台机器写的"，正拿着它的命令行也锁不住了。
+    let keep = [state.lock(), state.quarantine(), state.flows_cli_lock()];
     let entries: Vec<PathBuf> = fs::read_dir(&dir)?
         .filter_map(|e| e.ok().map(|e| e.path()))
         .filter(|p| !keep.contains(p))
@@ -258,6 +260,17 @@ mod tests {
         assert!(!state.jobs_state().exists() && !state.flow_runs().exists());
         let owner: Owner = read_json(&state.owner()).unwrap();
         assert_ne!(owner.token, "planted");
+    }
+
+    /// 先 `conix flow install` 再起实例：命令行的锁文件留着，不算认不出的状态。
+    #[test]
+    fn a_lock_the_command_line_took_first_is_not_quarantined() {
+        let (_t, layout, state) = setup();
+        fs::create_dir_all(state.dir()).unwrap();
+        fs::write(state.flows_cli_lock(), "").unwrap();
+        let c = claim(&layout, state.clone(), "a", 7).unwrap();
+        assert!(c.quarantined().is_none());
+        assert!(state.flows_cli_lock().exists());
     }
 
     #[test]
