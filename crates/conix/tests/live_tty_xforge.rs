@@ -20,9 +20,11 @@ use std::collections::BTreeSet;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
+use live::snap::Snaps;
+use live::stats;
 use live::tty::{self, ASK_ACTIVE, Step, Tty};
 use live::{Live, QUICK, TURN};
-use serde_json::Value;
+use serde_json::{Value, json};
 
 /// 一次变更的上限。
 const CHANGE: Duration = Duration::from_secs(2 * 3600);
@@ -356,23 +358,96 @@ fn change_three(t: &mut Tty, lv: &Live, to: &str) -> String {
     run
 }
 
+/// 拍快照（testing.md §8.2）：退出 `conix`（停实例）、打包，再起、接入。回新的终端。
+fn snapshot<'a>(
+    t: Tty<'a>,
+    lv: &'a Live,
+    snaps: &mut Snaps,
+    name: &str,
+    runs: &[String],
+) -> Tty<'a> {
+    if !snaps.wants(name) {
+        return t;
+    }
+    t.quit();
+    let stats = stats::report(lv, name, runs);
+    snaps.take(lv, name, stats);
+    let mut t = Tty::start(lv);
+    t.close_away();
+    t
+}
+
 #[test]
 #[ignore = "live"]
 fn a_sample_project_is_changed_three_times_by_keyboard_through_quick_solid_and_major() {
-    let lv = claude_or_skip!();
-    let to = sample(&lv);
-    let specs_before = std::fs::read_to_string(Path::new(&to).join("xforge/specs/textkit.md"))
-        .unwrap()
-        .matches("\n### ")
-        .count();
-    let mut t = open(&lv);
-    let one = change_one(&mut t, &lv);
-    // quick 改在项目的工作区里，人看过、提交了再起下一个：worktree 的运行合回来时 git 不往没提交的改动上合。
-    git_commit(&to, "加 truncate");
-    let two = change_two(&mut t, &lv);
+    let Some(opts) = tty::claude_opts(live::Opts::default()) else {
+        eprintln!("skipped: .env has no CLAUDE_API_KEY / CLAUDE_MODEL");
+        return;
+    };
+    let begun = std::time::Instant::now();
+    let mut snaps = Snaps::new("tty3", &example().join(".conix/flows/xforge"));
+    // 续跑时：项目里的 xforge 换成这次构建带的（内置的源头就是演示项目里那份），提交。
+    let lv = snaps.live(opts, |lv| {
+        lv.conix_flow_ok(&["install", "xforge", "--yes", "--force", "--jobs", "no"]);
+        git_commit(&lv.project_path(), "dev: 换成现在的 xforge");
+    });
+    let to = lv.project_path();
+    let mut t = if snaps.resumed.is_some() {
+        let mut t = Tty::start(&lv);
+        t.close_away();
+        t
+    } else {
+        sample(&lv);
+        let specs = std::fs::read_to_string(Path::new(&to).join("xforge/specs/textkit.md"))
+            .unwrap()
+            .matches("\n### ")
+            .count();
+        snaps.vars.insert("specs_before".into(), json!(specs));
+        open(&lv)
+    };
+    let var = |snaps: &Snaps, k: &str| snaps.vars.get(k).and_then(Value::as_str).map(String::from);
+    let one = match var(&snaps, "one") {
+        Some(r) => r,
+        None => {
+            let one = change_one(&mut t, &lv);
+            // quick 改在项目的工作区里，人看过、提交了再起下一个：worktree 的运行合回来时 git 不往没提交的改动上合。
+            git_commit(&to, "加 truncate");
+            snaps.vars.insert("one".into(), json!(one));
+            t = snapshot(
+                t,
+                &lv,
+                &mut snaps,
+                "after-quick",
+                std::slice::from_ref(&one),
+            );
+            one
+        }
+    };
+    let two = match var(&snaps, "two") {
+        Some(r) => r,
+        None => {
+            let two = change_two(&mut t, &lv);
+            snaps.vars.insert("two".into(), json!(two));
+            t = snapshot(
+                t,
+                &lv,
+                &mut snaps,
+                "after-solid",
+                &[one.clone(), two.clone()],
+            );
+            two
+        }
+    };
     let three = change_three(&mut t, &lv, &to);
     shows_finished(&mut t, &lv, 3);
     t.quit();
+    stats::finish(
+        &lv,
+        "tty3",
+        &[one.clone(), two.clone(), three.clone()],
+        begun.elapsed().as_secs(),
+    );
+    let specs_before = snaps.vars["specs_before"].as_u64().unwrap() as usize;
 
     // 项目的验证过；三次的改动都在。
     eprintln!(

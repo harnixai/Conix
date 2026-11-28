@@ -6,11 +6,21 @@
 #   scripts/live.sh live_jobs          只跑一个文件（live_instance / live_attach / live_sessions / live_turns / live_jobs / live_tools / live_flows / live_models / live_tui …）
 #   scripts/live.sh live_jobs catch_up 再按用例名过滤
 #   scripts/live.sh tty                只跑真终端那一组（live_tty*.rs：伪终端里起真的 conix，键盘进、屏幕出），可再跟用例名过滤
+#   scripts/live.sh snaps [用例]       列出拍过的快照（§8.2）；LIVE_FROM=<用例>/<快照> 从那一处续跑，LIVE_SNAPS=0 不拍
 #
 # 同时起的实例数用 LIVE_THREADS 控制（缺省 4），太多会撞上模型服务的限流。
 set -euo pipefail
 cd "$(dirname "$0")/.."
 threads="${LIVE_THREADS:-4}"
+if [[ ${1:-} == snaps ]]; then
+    dir=target/tmp/live-snap/${2:-}
+    [[ -d $dir ]] || { echo "没有快照：$dir"; exit 0; }
+    find "$dir" -name '*.json' | sort | while read -r m; do
+        case=$(basename "$(dirname "$m")"); name=$(basename "$m" .json)
+        printf '%s/%s  %s\n' "$case" "$name" "$(grep -oE '"(conix|elapsed_s)": [^,]*' "$m" | tr '\n' ' ')"
+    done
+    exit 0
+fi
 if [[ ${1:-} == tty ]]; then
     shift
     files=()

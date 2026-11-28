@@ -22,14 +22,18 @@ mod live;
 use std::path::Path;
 use std::time::Duration;
 
+use live::snap::Snaps;
+use live::stats;
 use live::{Answering, Client, Endpoint, Live};
 use port::{
     Command, Event, ProposalStatus, Reply, RunId, RunOp, RunStatus, RunView, StationId,
     StationStatus, TaskId, WorktreeEnd,
 };
-use serde_json::Value;
+use serde_json::{Value, json};
 
 const RUN: Duration = Duration::from_secs(3600);
+/// 驱动多久没动静就照此刻的样子再看一遍：从快照续跑时运行正停在等人的地方，不会再有事件来。
+const TICK: Duration = Duration::from_secs(30);
 
 fn example() -> &'static Path {
     Path::new(concat!(
@@ -245,9 +249,27 @@ struct People {
     reworks: std::collections::BTreeMap<String, u32>,
     /// 子运行还在跑时看到的它的 worktree（合回去之后就删了）。
     worktrees_seen: std::collections::BTreeSet<String>,
+    /// 确认过的（站、轮次）：事件与视图可能比实例慢一步，同一处不确认两次。
+    acted: std::collections::BTreeSet<String>,
 }
 
 impl People {
+    /// 拍快照时记下、续跑时取回：确认过哪些、打回过几次，续跑之后照样算。
+    fn to_json(&self) -> Value {
+        json!({"confirmed": self.confirmed, "clarify_rounds": self.clarify_rounds,
+               "reworks": self.reworks, "worktrees_seen": self.worktrees_seen, "acted": self.acted})
+    }
+
+    fn from_json(v: &Value) -> People {
+        People {
+            confirmed: serde_json::from_value(v["confirmed"].clone()).unwrap_or_default(),
+            clarify_rounds: v["clarify_rounds"].as_u64().unwrap_or(0) as u32,
+            reworks: serde_json::from_value(v["reworks"].clone()).unwrap_or_default(),
+            worktrees_seen: serde_json::from_value(v["worktrees_seen"].clone()).unwrap_or_default(),
+            acted: serde_json::from_value(v["acted"].clone()).unwrap_or_default(),
+        }
+    }
+
     fn count(&mut self, key: &str, max: u32) {
         let n = self.reworks.entry(key.to_string()).or_default();
         *n += 1;
@@ -309,13 +331,25 @@ async fn tend_child(c: &mut Client, lv: &Live, child: &RunId, p: &mut People) {
     }
 }
 
-/// 把一次运行（连同它的子运行）跑到结束：确认等人的站、答澄清、没达标时照建议打回。
-async fn drive(c: &mut Client, lv: &Live, id: &RunId) -> (RunView, People) {
+/// 把一次运行（连同它的子运行）跑到结束：确认等人的站、答澄清、没达标时照建议打回。人要动手的地方先拍一张快照
+/// （`snaps`，testing.md §8.2）：停实例、打包、再起，之后照此刻的样子再判一遍。
+async fn drive(
+    c: &mut Client,
+    lv: &Live,
+    id: &RunId,
+    snaps: &mut Snaps,
+    mut p: People,
+) -> (RunView, People) {
     let rec_of = |run: &str| lv.read_state(&format!("flow-runs/{run}.json"));
-    let mut p = People::default();
+    let deadline = std::time::Instant::now() + RUN;
     let done = loop {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "{}s 内没跑完",
+            RUN.as_secs()
+        );
         let at = c
-            .wait_event("运行有动静", RUN, |e| match e {
+            .poll_event(TICK, |e| match e {
                 Event::RunDetail(v)
                     if v.summary.id == *id || v.summary.flow.starts_with("xforge/line-") =>
                 {
@@ -324,9 +358,18 @@ async fn drive(c: &mut Client, lv: &Live, id: &RunId) -> (RunView, People) {
                 _ => None,
             })
             .await;
-        if at != *id {
-            tend_child(c, lv, &at, &mut p).await;
-            continue;
+        match at {
+            Some(at) if at != *id => {
+                tend_child(c, lv, &at, &mut p).await;
+                continue;
+            }
+            Some(_) => {}
+            // 一阵没动静：子运行也照此刻的样子看一遍。
+            None => {
+                for child in child_runs_of(&rec_of(&id.0)) {
+                    tend_child(c, lv, &RunId(child), &mut p).await;
+                }
+            }
         }
         // 照此刻的样子判，不照事件里的：事件可能是做了上一步之前发的。
         let v = view(c, id).await;
@@ -338,16 +381,40 @@ async fn drive(c: &mut Client, lv: &Live, id: &RunId) -> (RunView, People) {
             RunStatus::Finished => break v,
             RunStatus::Cancelled => panic!("运行被取消了：{:#?}", v.stations),
             RunStatus::Waiting { reason } if reason == "confirm" => {
-                let st = v
-                    .stations
-                    .iter()
-                    .find(|s| s.status == StationStatus::Working)
-                    .unwrap_or_else(|| panic!("等确认却没有在做的站：{:#?}", v.stations))
-                    .id
-                    .0
-                    .clone();
+                // 等人的是哪一站：运行记录里有一道确认在等的那一站（视图可能比实例慢一步）。
+                let rec = rec_of(&id.0);
+                let Some((st, round, label)) = rec["stations"]
+                    .as_object()
+                    .into_iter()
+                    .flatten()
+                    .find_map(|(k, s)| {
+                        // 一站可以有两道确认同时在等（批准破坏性改动与影响面扩大）：各确认一次。
+                        let waiting = (s["status"] == "working")
+                            .then(|| {
+                                s["checks"]
+                                    .as_array()
+                                    .into_iter()
+                                    .flatten()
+                                    .find(|c| c["kind"] == "confirm" && c["status"] == "wait")
+                            })
+                            .flatten()?;
+                        Some((
+                            k.clone(),
+                            s["round"].as_u64().unwrap_or(0),
+                            waiting["label"].as_str().unwrap_or_default().to_string(),
+                        ))
+                    })
+                else {
+                    continue;
+                };
+                if p.acted.contains(&format!("{st} {round} {label}")) {
+                    continue;
+                }
+                if take(snaps, lv, c, id, &st, &p).await {
+                    continue;
+                }
                 let why = match st.as_str() {
-                    "propose" => "破坏性改动看过了，批准",
+                    "propose" => "破坏性改动与影响面看过了，批准",
                     "clarify" => "范围定了",
                     "seal" => "规格侧定了",
                     "join" => "两路对上了",
@@ -365,6 +432,7 @@ async fn drive(c: &mut Client, lv: &Live, id: &RunId) -> (RunView, People) {
                     },
                 })
                 .await;
+                p.acted.insert(format!("{st} {round} {label}"));
                 p.confirmed.push(st);
             }
             RunStatus::Waiting { reason } if reason == "unmet" => {
@@ -374,6 +442,9 @@ async fn drive(c: &mut Client, lv: &Live, id: &RunId) -> (RunView, People) {
                     .find(|s| s.status == StationStatus::Unmet)
                     .map(|s| s.id.0.clone())
                     .unwrap_or_default();
+                if take(snaps, lv, c, id, &st, &p).await {
+                    continue;
+                }
                 eprintln!("==== {st} 没达标");
                 report(&rec_of(&id.0));
                 match st.as_str() {
@@ -490,8 +561,9 @@ async fn drive(c: &mut Client, lv: &Live, id: &RunId) -> (RunView, People) {
     (done, p)
 }
 
-/// 每条线的会话在配置的模型上：主会话（开发线、测试线），检视站的子 Agent（检视线）。
-async fn models_of(lv: &Live, run: &str, main: &str, review: Option<&str>) {
+/// 每条线的会话在配置的模型上：主会话（开发线、测试线），检视站的子 Agent（检视线）。实例重启过（`strict` 为假：
+/// 拍过快照、或从快照续的）时，重启之前的子 Agent 不在实例的内存里了：在的那些照样查，没有不算错。
+async fn models_of(lv: &Live, run: &str, main: &str, review: Option<&str>, strict: bool) {
     let r = run_report(lv, run).await;
     assert_eq!(
         r["main_session"]["model"].as_str(),
@@ -508,7 +580,7 @@ async fn models_of(lv: &Live, run: &str, main: &str, review: Option<&str>) {
     match review {
         Some(m) => {
             assert!(
-                !agents.is_empty(),
+                !strict || !agents.is_empty(),
                 "{run} 没有检视站的子 Agent：{}",
                 r["main_session"]
             );
@@ -538,6 +610,127 @@ fn child_runs(rec: &Value) -> std::collections::BTreeMap<String, String> {
         .collect()
 }
 
+/// 分叉站起的子运行（还没分叉时是空的）。
+fn child_runs_of(rec: &Value) -> Vec<String> {
+    rec["stations"]["fork"]["tasks"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|t| t["child"].as_str().map(String::from))
+        .collect()
+}
+
+/// 快照与续跑（testing.md §8.2）认的流程包源头。
+fn bundle() -> std::path::PathBuf {
+    example().join(".conix/flows/xforge")
+}
+
+/// 续跑时：项目里的 xforge 换成仓库里现在的这份，提交（运行的 worktree 合回来时不往没提交的改动上合）。
+fn refresh(lv: &Live) {
+    sh(
+        &lv.project_path(),
+        &format!(
+            "rm -rf .conix/flows/xforge && mkdir -p .conix/flows/xforge && cp -R {}/. .conix/flows/xforge/ && git add -A .conix/flows \
+             && (git diff --cached --quiet || git -c user.name=live -c user.email=live@conix commit -qm 'dev: 换成现在的 xforge')",
+            bundle().display()
+        ),
+    );
+}
+
+/// 人要动手的这一处拍一张：名字是运行、站与轮次。回拍了没有（拍了实例就重启过，照此刻再判）。
+async fn take(
+    snaps: &mut Snaps,
+    lv: &Live,
+    c: &mut Client,
+    id: &RunId,
+    st: &str,
+    p: &People,
+) -> bool {
+    let round = lv.read_state(&format!("flow-runs/{}.json", id.0))["stations"][st]["round"]
+        .as_u64()
+        .unwrap_or(0);
+    let name = format!("{}-{st}-r{round}", id.0.trim_start_matches("xforge."));
+    if !snaps.wants(&name) {
+        return false;
+    }
+    snaps.vars.insert("people".into(), p.to_json());
+    let run = id.0.clone();
+    snaps
+        .point(lv, c, &name, || stats::report(lv, &name, &[run]))
+        .await
+}
+
+/// 一次 LIVE 的开头：从头时建项目、起实例、起运行；`LIVE_FROM` 指着这个用例的快照时解开它、起实例（换钉），
+/// 运行与演人的记账照快照里的。
+struct Case {
+    lv: Live,
+    c: Client,
+    id: RunId,
+    snaps: Snaps,
+    people: People,
+    to: String,
+    begun: std::time::Instant,
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn begin(
+    case: &str,
+    cl: &Endpoint,
+    ds: &Endpoint,
+    lines: &str,
+    review: Option<(&str, &str)>,
+    flow: &str,
+    subject: &str,
+    inputs: Value,
+) -> Case {
+    let begun = std::time::Instant::now();
+    let mut snaps = Snaps::new(case, &bundle());
+    let lv = snaps.live(
+        live::Opts {
+            settings: Some(providers(cl, ds)),
+            ..Default::default()
+        },
+        refresh,
+    );
+    let to = lv.project_path();
+    if snaps.resumed.is_some() {
+        // 换上现在的流程包又提交了一次：项目的分支从这里算。
+        snaps
+            .vars
+            .insert("base".into(), json!(sh(&to, "git rev-parse HEAD").trim()));
+        let c = lv.start_again().await;
+        c.answering(Answering::Auto);
+        let id = RunId(snaps.vars["run"].as_str().expect("快照里的运行").into());
+        let people = People::from_json(&snaps.vars["people"]);
+        return Case {
+            lv,
+            c,
+            id,
+            snaps,
+            people,
+            to,
+            begun,
+        };
+    }
+    project(&lv, lines, review);
+    snaps
+        .vars
+        .insert("base".into(), json!(sh(&to, "git rev-parse HEAD").trim()));
+    let c = lv.start_trusted().await;
+    c.answering(Answering::Auto);
+    let id = start(&c, flow, subject, inputs).await;
+    snaps.vars.insert("run".into(), json!(id.0));
+    Case {
+        lv,
+        c,
+        id,
+        snaps,
+        people: People::default(),
+        to,
+        begun,
+    }
+}
+
 fn status_of(rec: &Value, st: &str) -> String {
     rec["stations"][st]["status"]
         .as_str()
@@ -553,22 +746,21 @@ async fn the_builtin_xforge_quick_runs_one_line_with_only_the_owners_acceptance(
         return;
     };
     let ds = live::deepseek();
-    let lv = Live::with(live::Opts {
-        settings: Some(providers(&cl, &ds)),
-        ..Default::default()
-    });
-    let _log = LogOnPanic(&lv);
-    let to = project(&lv, &lines_of(&cl, &ds), None);
-    let mut c = lv.start_trusted().await;
-    c.answering(Answering::Auto);
-    let id = start(
-        &c,
+    let Case { lv, mut c, id, mut snaps, people, to, begun } = begin(
+        "quick",
+        &cl,
+        &ds,
+        &lines_of(&cl, &ds),
+        None,
         "xforge/quick",
         "给 textkit 加 truncate(text, n)：文字超过 n 个字符时截成前 n-1 个字符再加一个省略号 …，不超过时原样返回",
-        serde_json::json!({"title": "truncate", "risk": "low"}),
+        // 加一个公开函数是接口的改动：照实声明，就只有主人验收（没声明时提案站要主人认「影响面扩大」）。
+        serde_json::json!({"title": "truncate", "risk": "low", "impact": ["interface"]}),
     )
     .await;
-    let (done, p) = drive(&mut c, &lv, &id).await;
+    let _log = LogOnPanic(&lv);
+    let (done, p) = drive(&mut c, &lv, &id, &mut snaps, people).await;
+    let strict = !snaps.restarted();
     for s in &done.stations {
         assert_eq!(s.status, StationStatus::Passed, "{}", s.id.0);
     }
@@ -585,7 +777,13 @@ async fn the_builtin_xforge_quick_runs_one_line_with_only_the_owners_acceptance(
         .filter(|h| h["op"] == "spawn")
         .collect();
     assert!(spawned.is_empty(), "quick 不起子运行：{spawned:?}");
-    models_of(&lv, &id.0, &cl.model, None).await;
+    models_of(&lv, &id.0, &cl.model, None, strict).await;
+    stats::finish(
+        &lv,
+        "quick",
+        std::slice::from_ref(&id.0),
+        begun.elapsed().as_secs(),
+    );
 
     let spec = std::fs::read_to_string(Path::new(&to).join("xforge/specs/textkit.md")).unwrap();
     assert!(spec.contains("### TK-R3"), "{spec}");
@@ -614,23 +812,21 @@ async fn the_builtin_xforge_solid_forks_the_build_and_tests_lines_and_joins_them
         return;
     };
     let ds = live::deepseek();
-    let lv = Live::with(live::Opts {
-        settings: Some(providers(&cl, &ds)),
-        ..Default::default()
-    });
-    let _log = LogOnPanic(&lv);
-    let to = project(&lv, &lines_of(&cl, &ds), None);
-    let base = sh(&to, "git rev-parse HEAD").trim().to_string();
-    let mut c = lv.start_trusted().await;
-    c.answering(Answering::Auto);
-    let id = start(
-        &c,
+    let Case { lv, mut c, id, mut snaps, people, to, begun } = begin(
+        "solid",
+        &cl,
+        &ds,
+        &lines_of(&cl, &ds),
+        None,
         "xforge/solid",
         "给 textkit 加 truncate(text, n)：文字超过 n 个字符时截成前 n-1 个字符再加一个省略号 …，不超过时原样返回；n 小于 1 时抛 ValueError",
         serde_json::json!({"title": "truncate", "risk": "medium"}),
     )
     .await;
-    let (done, p) = drive(&mut c, &lv, &id).await;
+    let _log = LogOnPanic(&lv);
+    let (done, p) = drive(&mut c, &lv, &id, &mut snaps, people).await;
+    let strict = !snaps.restarted();
+    let base = snaps.vars["base"].as_str().unwrap().to_string();
     let rec_of = |run: &str| lv.read_state(&format!("flow-runs/{run}.json"));
     let rec = rec_of(&id.0);
     // 父运行没有检视站（solid 只检视两路的设计），各站都过了。
@@ -767,10 +963,17 @@ async fn the_builtin_xforge_solid_forks_the_build_and_tests_lines_and_joins_them
         "{changed}"
     );
     // 每条线在自己的模型上：父运行与开发线在开发线的模型上，测试线在测试线的。
-    models_of(&lv, &id.0, &cl.model, None).await;
-    models_of(&lv, &children["build"], &cl.model, None).await;
-    models_of(&lv, &children["tests"], &ds.model, None).await;
+    // 两路的设计由检视线检视（solid 只检视这两处）：检视站的子 Agent 在检视线的模型上。
+    models_of(&lv, &id.0, &cl.model, None, strict).await;
+    models_of(&lv, &children["build"], &cl.model, Some(&ds.model), strict).await;
+    models_of(&lv, &children["tests"], &ds.model, Some(&ds.model), strict).await;
     both_spent(&lv);
+    stats::finish(
+        &lv,
+        "solid",
+        std::slice::from_ref(&id.0),
+        begun.elapsed().as_secs(),
+    );
 
     // 门禁 blackbox 真跑了黑盒测试，最后一轮过了；它起的进程进了引擎的沙箱，记成运行历史的 exec。
     let logs = find_files(Path::new(&to), "gate-xforge-blackbox.log");
@@ -903,27 +1106,35 @@ fn reviewed_findings(out: &Path) -> Vec<Reviewed> {
 }
 
 /// 一次 major：返回运行、它的记录、两路的运行。
-async fn major_run(
-    lv: &Live,
-    c: &mut Client,
+/// major 跑一次到结束：回运行、记录、两个子运行、演人的记账，与这一次的 `Case`。
+async fn major_case(
+    case: &str,
+    cl: &Endpoint,
+    ds: &Endpoint,
+    review: Option<(&str, &str)>,
     subject: &str,
 ) -> (
-    RunId,
+    Case,
     Value,
     std::collections::BTreeMap<String, String>,
     People,
 ) {
-    let id = start(
-        c,
+    let mut k = begin(
+        case,
+        cl,
+        ds,
+        &lines_of(cl, ds),
+        review,
         "xforge/major",
         subject,
-        serde_json::json!({"title": "truncate", "risk": "high"}),
+        serde_json::json!({"title": "truncate", "risk": "high", "impact": ["interface"]}),
     )
     .await;
-    let (_, p) = drive(c, lv, &id).await;
-    let rec = lv.read_state(&format!("flow-runs/{}.json", id.0));
+    let people = std::mem::take(&mut k.people);
+    let (_, p) = drive(&mut k.c, &k.lv, &k.id, &mut k.snaps, people).await;
+    let rec = k.lv.read_state(&format!("flow-runs/{}.json", k.id.0));
     let children = child_runs(&rec);
-    (id, rec, children, p)
+    (k, rec, children, p)
 }
 
 // 留了一处边界没说：规格侧的检视多半会记下它，打回提案补上。
@@ -938,15 +1149,9 @@ async fn the_builtin_xforge_major_reviews_the_design_stages_on_another_model() {
         return;
     };
     let ds = live::deepseek();
-    let lv = Live::with(live::Opts {
-        settings: Some(providers(&cl, &ds)),
-        ..Default::default()
-    });
-    let _log = LogOnPanic(&lv);
-    project(&lv, &lines_of(&cl, &ds), None);
-    let mut c = lv.start_trusted().await;
-    c.answering(Answering::Auto);
-    let (id, rec, children, p) = major_run(&lv, &mut c, MAJOR_SUBJECT).await;
+    let (k, rec, children, p) = major_case("major", &cl, &ds, None, MAJOR_SUBJECT).await;
+    let (lv, id, strict) = (&k.lv, &k.id, !k.snaps.restarted());
+    let _log = LogOnPanic(lv);
     let rec_of = |run: &str| lv.read_state(&format!("flow-runs/{run}.json"));
     // 缺省的检视点真跑了，代码、测试、验证的跳过。
     assert_eq!(
@@ -995,10 +1200,16 @@ async fn the_builtin_xforge_major_reviews_the_design_stages_on_another_model() {
     });
     assert!(looped.is_some(), "没有一条走完四步的发现：{found:#?}");
     // 每条线在自己的模型上；检视站的子 Agent 在检视线的模型上。
-    models_of(&lv, &id.0, &cl.model, Some(&ds.model)).await;
-    models_of(&lv, &children["build"], &cl.model, Some(&ds.model)).await;
-    models_of(&lv, &children["tests"], &ds.model, Some(&ds.model)).await;
-    both_spent(&lv);
+    models_of(lv, &id.0, &cl.model, Some(&ds.model), strict).await;
+    models_of(lv, &children["build"], &cl.model, Some(&ds.model), strict).await;
+    models_of(lv, &children["tests"], &ds.model, Some(&ds.model), strict).await;
+    both_spent(lv);
+    stats::finish(
+        lv,
+        "major",
+        std::slice::from_ref(&id.0),
+        k.begun.elapsed().as_secs(),
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1009,28 +1220,20 @@ async fn the_builtin_xforge_major_reviews_the_whole_chain_when_a_person_turns_it
         return;
     };
     let ds = live::deepseek();
-    let lv = Live::with(live::Opts {
-        settings: Some(providers(&cl, &ds)),
-        ..Default::default()
-    });
-    let _log = LogOnPanic(&lv);
     // 人在 Conix 之外打开全链条：改治理文件。
-    project(
-        &lv,
-        &lines_of(&cl, &ds),
+    let (k, rec, children, _) = major_case(
+        "chain",
+        &cl,
+        &ds,
         Some((
             "major: {spec: true, design: true, tests-design: true, code: false, tests: false, verify: false}",
             "major: {spec: true, design: true, tests-design: true, code: true, tests: true, verify: true}",
         )),
-    );
-    let mut c = lv.start_trusted().await;
-    c.answering(Answering::Auto);
-    let (id, rec, children, _) = major_run(
-        &lv,
-        &mut c,
         "给 textkit 加 truncate(text, n)：文字超过 n 个字符时截成前 n-1 个字符再加一个省略号 …，不超过时原样返回；n 小于 1 时抛 ValueError",
     )
     .await;
+    let (lv, id, strict) = (&k.lv, &k.id, !k.snaps.restarted());
+    let _log = LogOnPanic(lv);
     let rec_of = |run: &str| lv.read_state(&format!("flow-runs/{run}.json"));
     let (b, t) = (rec_of(&children["build"]), rec_of(&children["tests"]));
     for (r, st) in [
@@ -1043,7 +1246,13 @@ async fn the_builtin_xforge_major_reviews_the_whole_chain_when_a_person_turns_it
     ] {
         assert_eq!(status_of(r, st), "passed", "{st} 真跑了");
     }
-    models_of(&lv, &id.0, &cl.model, Some(&ds.model)).await;
+    models_of(lv, &id.0, &cl.model, Some(&ds.model), strict).await;
+    stats::finish(
+        lv,
+        "chain",
+        std::slice::from_ref(&id.0),
+        k.begun.elapsed().as_secs(),
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]

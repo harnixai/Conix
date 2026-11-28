@@ -297,6 +297,30 @@ xterm 发的字节写进去，`vt100` 照 `conix` 写出的 VT 序列还原屏�
 斜杠命令的 `--k v` 都是字，实例在人的那扇门（`Command::StartRun`）照流程输入的 schema 读成数、开关或逗号分开的列表
 （`crates/host/src/flows/typed.rs`）：`--days 7` 就是 xreport 的整数 7。
 
+### 8.2 快照、续跑与统计
+
+xforge 的 LIVE 一跑就是几十分钟、几十万 token，在后面的站失败时从头再来又是一遍。长的用例（`live_xforge.rs` 的 quick、
+solid、major、chain，`live_tty_xforge.rs` 的三次连改）在**人要动手的地方**拍快照，改了流程包或 Conix 以后从失败前的那一处续跑
+（`live/snap.rs`）。
+
+- **拍在哪**：端口驱动的在每个等人的地方（确认、没达标要人打回、答澄清），名字是运行、站与轮次（`solid-1-join-r1`）；
+  真终端的在每次变更做完之后（`after-quick`、`after-solid`）。那时没有在跑的会话。
+- **怎么拍**：停掉实例，把整个世界（CONIX_HOME 与项目，连同 `.wkts/` 下的 worktree）打成 `target/tmp/live-snap/<用例>/<序号>-<名字>.tar`，
+  旁边的 `.json` 记 Conix 的提交、流程包每个文件的摘要、用例记下的变量（运行的 id、演人的记账：确认过哪些、打回过几次）、
+  到这一处的用时与统计；再起实例接着跑。每拍一次就重启一次实例，顺带测了"重启后运行接着跑"。`LIVE_SNAPS=0` 不拍。
+- **世界放在固定的路径**：`/tmp/cxw-<用例>/`。worktree、项目登记（`known-projects.json`）、运行记录里写的都是绝对路径，
+  解到别处就断；socket 的路径有 104 字节的上限，所以不放 `target/` 下。
+- **续跑**：`scripts/live.sh snaps` 列出有哪些；`LIVE_FROM=<用例>/<快照> scripts/live.sh live_xforge solid` 解开到同一个路径，
+  把项目里的 xforge 换成现在的这份（端口驱动的拷演示项目的，真终端的 `conix flow install --force`）并提交，实例带
+  `CONIX_DEV_REPIN=1` 起来：没结束的运行换钉成包现在的样子（flows.md §7.15），驱动接着走。驱动本来就看运行记录行事，
+  端口驱动的另每 30 秒没动静就照此刻的样子再看一遍（续上时运行正停在等人的地方，不会再有事件来）。续跑时先打一行：
+  拍的时候 Conix 是哪个提交、现在是哪个，流程包改了哪些文件。
+- **重启丢掉的**：实例内存里的东西只剩重启之后的（子 Agent 的任务这类）。重启过的用例，运行报告里检视站的子 Agent
+  在的照样查模型，没有不算错。
+- **统计**（`live/stats.rs`）：从项目里的运行记录算，每个运行（连同子运行）每一站的模型、轮数、用时、token（输入、输出、
+  缓存读写），按模型汇总，加上各家的额度台账。worktree 的运行合回项目以后它过程目录里的报告跟着 worktree 没了，运行记录还在。
+  每拍一次快照、每个用例结束打一张表，并追加一行进 `target/tmp/live-stats.jsonl`，看得到历次的走势。
+
 ### 需求与用例的对照
 
 每条需求（`docs/reqs/conix-requirements.md`）一行，再加需求文档之后做的几项。**层**：LIVE（`crates/conix/tests/live_*.rs`，

@@ -8,6 +8,8 @@
 
 #![allow(dead_code)]
 
+pub mod snap;
+pub mod stats;
 pub mod tty;
 pub mod tui;
 
@@ -177,9 +179,25 @@ pub fn now_ms() -> u64 {
 }
 
 /// 一个用例的世界：家目录、示例项目、拉起实例用的 `SocketInstances`。
+/// 用例的一个目录：平常是临时的（用完删掉）；拍快照的用例放在固定的路径（[`snap`]），解快照要回到同一个
+/// 绝对路径——worktree、项目登记、运行记录里写的都是它。
+pub enum Dir {
+    Temp(tempfile::TempDir),
+    Fixed(PathBuf),
+}
+
+impl Dir {
+    pub fn path(&self) -> &Path {
+        match self {
+            Dir::Temp(t) => t.path(),
+            Dir::Fixed(p) => p,
+        }
+    }
+}
+
 pub struct Live {
-    pub home: tempfile::TempDir,
-    pub project: tempfile::TempDir,
+    pub home: Dir,
+    pub project: Dir,
     pub instances: Arc<SocketInstances>,
     extra_env: Vec<(String, String)>,
 }
@@ -192,6 +210,8 @@ pub struct Opts {
     pub settings: Option<serde_json::Value>,
     /// 只给实例进程的额外环境变量（比如缩短心跳超时）。
     pub env: Vec<(String, String)>,
+    /// 放在固定的目录里（`<它>/home`、`<它>/project`），不用临时目录：拍快照的用例（[`snap`]）。
+    pub world: Option<PathBuf>,
 }
 
 impl Live {
@@ -201,10 +221,19 @@ impl Live {
 
     pub fn with(opts: Opts) -> Live {
         prewarm();
-        let home = tempfile::Builder::new()
-            .prefix("cxl")
-            .tempdir_in("/tmp")
-            .unwrap();
+        let home = match &opts.world {
+            Some(w) => {
+                let _ = std::fs::remove_dir_all(w);
+                std::fs::create_dir_all(w.join("home")).unwrap();
+                Dir::Fixed(w.join("home"))
+            }
+            None => Dir::Temp(
+                tempfile::Builder::new()
+                    .prefix("cxl")
+                    .tempdir_in("/tmp")
+                    .unwrap(),
+            ),
+        };
         // 提问超时放长，等人回答的不会自己撤掉。模型不写设置：0.4 里没定义 providers 时，
         // 自带的 anthropic 用进程参数取模型，由 CONIX_MODEL 交给实例进程（见下面的 env）。
         let mut settings = serde_json::json!({
@@ -223,7 +252,20 @@ impl Live {
         if let Some(y) = &opts.conix_yaml {
             std::fs::write(home.path().join("conix.yaml"), y).unwrap();
         }
-        let project = new_project("app");
+        let project = match &opts.world {
+            Some(w) => {
+                let p = w.join("project");
+                std::fs::create_dir_all(&p).unwrap();
+                init_project(&p);
+                Dir::Fixed(p)
+            }
+            None => Dir::Temp(new_project("app")),
+        };
+        Live::over(home, project, &opts)
+    }
+
+    /// 已有的两个目录（解开的快照）上的 `Live`：不改里面的东西。
+    pub fn over(home: Dir, project: Dir, opts: &Opts) -> Live {
         let mut env: Vec<(String, String)> = credentials()
             .iter()
             .map(|(k, v)| (k.clone(), v.clone()))
@@ -238,6 +280,18 @@ impl Live {
             instances,
             extra_env: env,
         }
+    }
+
+    /// 像人在另一个终端里打 `conix <args>`（`start lv`、`stop lv`）：同步的，真终端的用例用。
+    pub fn conix_cli(&self, args: &[&str]) -> std::process::Output {
+        std::process::Command::new(conix())
+            .args(args)
+            .envs(self.extra_env.iter().map(|(k, v)| (k.as_str(), v.as_str())))
+            .env("CONIX_HOME", self.home.path())
+            .env_remove("DYLD_FALLBACK_LIBRARY_PATH")
+            .stdin(std::process::Stdio::null())
+            .output()
+            .unwrap()
     }
 
     pub fn layout(&self) -> Layout {
@@ -550,15 +604,20 @@ fn read_json_file(p: &std::path::Path) -> serde_json::Value {
 
 pub fn new_project(name: &str) -> tempfile::TempDir {
     let dir = tempfile::Builder::new().prefix(name).tempdir().unwrap();
+    init_project(dir.path());
+    dir
+}
+
+fn init_project(dir: &Path) {
     std::fs::write(
-        dir.path().join("README.md"),
+        dir.join("README.md"),
         "# app\n\nA tiny sample project for Conix live tests.\n",
     )
     .unwrap();
     let git = |args: &[&str]| {
         std::process::Command::new("git")
             .args(args)
-            .current_dir(dir.path())
+            .current_dir(dir)
             .output()
             .unwrap()
     };
@@ -581,7 +640,6 @@ pub fn new_project(name: &str) -> tempfile::TempDir {
         "-m",
         "init",
     ]);
-    dir
 }
 
 /// 收到提问时怎么办。
@@ -668,6 +726,10 @@ impl Client {
         *self.shared.answering.lock().unwrap() = a;
     }
 
+    pub fn answering_now(&self) -> Answering {
+        *self.shared.answering.lock().unwrap()
+    }
+
     pub fn heartbeat(&self, b: Beat) {
         if let Some(h) = self.beat.lock().unwrap().take() {
             h.abort();
@@ -732,8 +794,25 @@ impl Client {
         &mut self,
         what: &str,
         timeout: Duration,
-        mut want: impl FnMut(&Event) -> Option<T>,
+        want: impl FnMut(&Event) -> Option<T>,
     ) -> T {
+        match self.poll_event(timeout, want).await {
+            Some(t) => t,
+            None => panic!(
+                "{}s 内等不到{what}。最近的事件：\n{}",
+                timeout.as_secs(),
+                self.recent(30)
+            ),
+        }
+    }
+
+    /// 同 [`Client::wait_event`]，等不到回 `None`：驱动拿它当心跳，过一阵没动静就照此刻的样子再看一遍
+    /// （从快照续跑时，运行正停在等人的地方，不会再有事件来）。
+    pub async fn poll_event<T>(
+        &mut self,
+        timeout: Duration,
+        mut want: impl FnMut(&Event) -> Option<T>,
+    ) -> Option<T> {
         let deadline = Instant::now() + timeout;
         // 每个事件只交给 `want` 一次：`finish_turn` 的闭包会往 `TurnOutcome` 里累加，重复看会重复累加。
         let mut seen = self.cursor;
@@ -745,17 +824,13 @@ impl Client {
                     seen = i + 1;
                     if let Some(t) = want(e) {
                         self.cursor = i + 1;
-                        return t;
+                        return Some(t);
                     }
                 }
             }
             let left = deadline.saturating_duration_since(Instant::now());
             if left.is_zero() || tokio::time::timeout(left, notified).await.is_err() {
-                panic!(
-                    "{}s 内等不到{what}。最近的事件：\n{}",
-                    timeout.as_secs(),
-                    self.recent(30)
-                );
+                return None;
             }
         }
     }

@@ -69,7 +69,12 @@ pub fn listed_state(lv: &Live) -> Option<String> {
 
 /// 主模型用 Claude 的 [`Live`]（`.env` 没有 Claude 的 key 就是 `None`，用例跳过）：provider 排在前面的是
 /// Claude，DeepSeek 在后面给要换一家模型的站用（`model: <DeepSeek 的模型>`）。
-pub fn on_claude(mut opts: super::Opts) -> Option<Live> {
+pub fn on_claude(opts: super::Opts) -> Option<Live> {
+    claude_opts(opts).map(Live::with)
+}
+
+/// [`on_claude`] 的设置，不建 `Live`：拍快照的用例交给 `Snaps::live`。
+pub fn claude_opts(mut opts: super::Opts) -> Option<super::Opts> {
     let cl = super::claude()?;
     let ds = super::deepseek();
     let one = |id: &str, e: &super::Endpoint| {
@@ -89,7 +94,7 @@ pub fn on_claude(mut opts: super::Opts) -> Option<Live> {
         }
     }
     opts.settings = Some(settings);
-    Some(Live::with(opts))
+    Some(opts)
 }
 
 /// 终端里的一个 `conix`。
@@ -123,6 +128,13 @@ impl<'a> Tty<'a> {
     /// 像用户在项目目录里敲 `conix new --name lv`：新建实例 `lv` 并接入，等到连上。
     pub fn new(lv: &'a Live) -> Tty<'a> {
         let mut t = Tty::spawn(lv, &["new", "--name", NAME]);
+        t.wait_attached();
+        t
+    }
+
+    /// 像 `conix start lv`：把停了的实例起来再接入（拍完快照、从快照续跑时）。
+    pub fn start(lv: &'a Live) -> Tty<'a> {
+        let mut t = Tty::spawn(lv, &["start", NAME]);
         t.wait_attached();
         t
     }
