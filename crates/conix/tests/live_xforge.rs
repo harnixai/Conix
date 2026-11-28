@@ -5,13 +5,15 @@
 //! 用例演所有的人：确认、照默认答澄清的问题、照建议打回（都有上限，免得模型绕圈时一直烧钱）。
 //!
 //! - quick：只有开发线；只有主人验收；不起子运行；主会话在开发线的模型上。
-//! - solid：开发线与测试线。规格侧写一次、人批准、封存；两个子运行由 fork 站起、从同一个分叉提交出发、各在 `.wkts/` 下
+//! - solid：三条线。规格侧写一次、人批准、封存；两个子运行由 fork 站起、从同一个分叉提交出发、各在 `.wkts/` 下
 //!   自己的 worktree 里，禁读名单盖住父运行与兄弟；测试线只写 `tests_blackbox/`；合回父运行的分支，门禁 blackbox 真跑了；
-//!   检视点都关着，检视站都跳过；归档在父运行的 worktree 里；人 `/worktree merge` 之后项目才有改动。
+//!   检视线只检视两路的设计（review-design、review-tests-design 真跑，代码与测试的跳过，父运行没有检视站）；
+//!   归档在父运行的 worktree 里；人 `/worktree merge` 之后项目才有改动。
 //! - major：三条线。缺省的检视点（spec、design、tests-design）真跑、代码、测试、验证的跳过；每条线的会话在配置的模型上，
 //!   检视站的子 Agent 在检视线的模型上，两家都花了；检视线至少一次"记发现 → 自动打回 → 作者答复 → 检视线结掉"，台账历史里看得到。
 //! - major 的全链条：治理文件里打开 code、tests、verify，这三站真跑。
-//! - 检视线配成与开发线同一个模型：major 第一站就 error，一个会话都没开始干活。
+//! - 检视线配成与开发线同一个模型：照跑，major 第一站过了、带一条告警；运行的视图与报告（`conix-report.json`）里都有，
+//!   自检也提醒。看到提案站开工就取消，免得跑满。
 //!
 //! 约定见 docs/design/xforge.md。没有 Claude 的 key 就跳过。quick 约 10 分钟，solid 20–30 分钟，major 40–60 分钟。
 
@@ -631,14 +633,10 @@ async fn the_builtin_xforge_solid_forks_the_build_and_tests_lines_and_joins_them
     let (done, p) = drive(&mut c, &lv, &id).await;
     let rec_of = |run: &str| lv.read_state(&format!("flow-runs/{run}.json"));
     let rec = rec_of(&id.0);
-    // 检视点都关着：检视站跳过，别的都过了。
+    // 父运行没有检视站（solid 只检视两路的设计），各站都过了。
     for s in &done.stations {
-        let want = if s.id.0.starts_with("review-") {
-            StationStatus::Skipped
-        } else {
-            StationStatus::Passed
-        };
-        assert_eq!(s.status, want, "{}", s.id.0);
+        assert!(!s.id.0.starts_with("review-"), "{}", s.id.0);
+        assert_eq!(s.status, StationStatus::Passed, "{}", s.id.0);
     }
     for st in ["seal", "join", "accept"] {
         assert!(
@@ -731,7 +729,13 @@ async fn the_builtin_xforge_solid_forks_the_build_and_tests_lines_and_joins_them
         }
         for (st, s) in r["stations"].as_object().unwrap() {
             if st.starts_with("review-") {
-                assert_eq!(s["status"], "skipped", "{task} {st}");
+                // 设计环节的检视真跑了（缺省开），代码与测试的 solid 没有。
+                let want = if st.ends_with("design") {
+                    "passed"
+                } else {
+                    "skipped"
+                };
+                assert_eq!(s["status"], want, "{task} {st}");
                 continue;
             }
             let checks = s["checks"].as_array().cloned().unwrap_or_default();
@@ -1044,7 +1048,7 @@ async fn the_builtin_xforge_major_reviews_the_whole_chain_when_a_person_turns_it
 
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "live"]
-async fn a_review_line_on_the_build_lines_model_stops_major_before_any_work() {
+async fn a_review_line_on_the_build_lines_model_is_a_warning_and_major_goes_on() {
     let Some(cl) = live::claude() else {
         eprintln!("skipped: .env has no CLAUDE_API_KEY / CLAUDE_MODEL");
         return;
@@ -1061,36 +1065,52 @@ async fn a_review_line_on_the_build_lines_model_stops_major_before_any_work() {
         &c,
         "xforge/major",
         "加 truncate",
-        serde_json::json!({"title": "truncate", "risk": "high"}),
+        serde_json::json!({"title": "truncate", "risk": "high", "impact": ["interface"]}),
     )
     .await;
+    // 第一站过了、提案站开工：同一个模型只告警，不挡。
     let v = c
-        .wait_event("第一站停下", Duration::from_secs(120), |e| match e {
-            Event::RunDetail(v) if v.summary.id == id && matches!(&v.summary.status, RunStatus::Waiting { reason } if reason == "unmet") => {
+        .wait_event("提案站开工", Duration::from_secs(120), |e| match e {
+            Event::RunDetail(v)
+                if v.summary.id == id
+                    && v.stations
+                        .iter()
+                        .any(|s| s.id.0 == "propose" && s.status == StationStatus::Working) =>
+            {
                 Some((**v).clone())
             }
             _ => None,
         })
         .await;
-    let rec = lv.read_state(&format!("flow-runs/{}.json", id.0));
-    report(&rec);
+    let said = format!("检视线与开发线是同一个模型 {}", cl.model);
     let lines = v.stations.iter().find(|s| s.id.0 == "lines").unwrap();
-    assert_eq!(lines.status, StationStatus::Unmet);
-    let check = rec["stations"]["lines"]["checks"][0].clone();
-    assert_eq!(check["status"], "error", "{check}");
+    assert_eq!(lines.status, StationStatus::Passed);
     assert!(
-        check["detail"]
-            .as_str()
-            .unwrap()
-            .contains(&format!("检视线与开发线是同一个模型 {}", cl.model)),
-        "{check}"
+        v.warnings
+            .iter()
+            .any(|w| w.station.0 == "lines" && w.message.contains(&said)),
+        "{:?}",
+        v.warnings
     );
+    // 取消，免得跑满；结束的运行写报告，告警在里面。
+    c.ok(Command::RunOp {
+        run: id.clone(),
+        op: RunOp::Cancel,
+    })
+    .await;
+    let r = run_report(&lv, &id.0).await;
+    let warnings = r["warnings"].as_array().cloned().unwrap_or_default();
     assert!(
-        !matches!(status_of(&rec, "propose").as_str(), "working" | "passed"),
-        "提案站还没进：{}",
-        rec["stations"]["propose"]
+        warnings
+            .iter()
+            .any(|w| w["station"] == "lines"
+                && w["message"].as_str().is_some_and(|m| m.contains(&said))),
+        "{r:#}"
     );
-    // 自检说的是同一件事。
+    // 自检说的是同一件事，也只是提醒。
     let doctor = String::from_utf8_lossy(&lv.conix_flow(&["doctor"]).stdout).into_owned();
-    assert!(doctor.contains("检视线与开发线是同一个模型"), "{doctor}");
+    assert!(
+        doctor.contains("◐ xforge:") && doctor.contains(&said),
+        "{doctor}"
+    );
 }

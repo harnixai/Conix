@@ -2,9 +2,10 @@ name: xforge
 title: XForge 开发流程
 description: >-
   规格驱动的变更：提案与规格、接口增量，设计与工作包，按工作包实施，验证，归档并进基线。按风险选路，每条路径几条线：
-  quick 是低风险的小改动，只有开发线；solid 是常规变更，开发线与测试线（规格定了分两路，一路实现、一路只照规格写黑盒测试，
-  合起来用测试跑实现）；major 是高风险或跨系统的变更，先澄清，再加一条与开发线不同模型的检视线，各设计阶段检视、打回、修复、确认。
-version: 0.4.0
+  quick 是低风险的小改动，只有开发线；solid 是常规变更，三条线：规格定了分两路，一路实现、一路只照规格写黑盒测试，合起来用测试跑实现，
+  检视线（与开发线不同的模型）只检视两路的设计；major 是高风险或跨系统的变更，先澄清，检视线检视规格侧与两路的设计、可以开到整条链，
+  检视、打回、修复、确认。
+version: 0.5.0
 flows: [quick, solid, major, line-build, line-tests]
 # 只按风险选这三条；line-build、line-tests 是 solid、major 的两路，只由它们的 fork 站起。
 start:
@@ -24,10 +25,10 @@ settings:
     governance: {spec: true, interface: false}
     review:
       separate: false
-      # 检视点：每条路径一份，哪几处由检视线检视。major 缺省开设计阶段的三个，solid 缺省都关；quick 没有检视线。
-      solid: {spec: false, design: false, tests-design: false, code: false, tests: false, verify: false}
+      # 检视点：每条路径一份，哪几处由检视线检视。solid 只有设计环节的两个、缺省开；major 缺省开设计阶段的三个；quick 没有检视线。
+      solid: {design: true, tests-design: true}
       major: {spec: true, design: true, tests-design: true, code: false, tests: false, verify: false}
-    # 三条线的模型：build 开发线、tests 测试线、review 检视线（要与开发线不同）。没写的线用实例的缺省模型。
+    # 三条线的模型：build 开发线、tests 测试线、review 检视线（该与开发线不同，相同只告警）。没写的线用实例的缺省模型。
     lines: {}
     checks: {writable: [], network: false}
 # 自检（docs/design/xforge.md §7）：宿主的 conix flow doctor 在运行之外为项目跑 scripts/doctor.js，只读、不修。

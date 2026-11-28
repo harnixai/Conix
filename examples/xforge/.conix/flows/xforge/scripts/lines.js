@@ -1,5 +1,6 @@
 // lines：solid、major 的第一站，进站就判，不调模型（lib/lines.js，自检用同一份）。
-import { REVIEWED, modelOf, reviewLineProblem, stagesOn } from "../lib/lines.js";
+// 检视线与开发线同一个模型只告警、不挡：运行照跑，告警记在这一站、进运行的报告，实例也给人一条提示。
+import { REVIEWED, modelOf, reviewLineWarning, stagesOn } from "../lib/lines.js";
 
 const FILE = ".conix/governance/xforge.yaml";
 
@@ -10,11 +11,11 @@ export default function (input, flow) {
   const on = stagesOn(s, path);
   const line = (l) => modelOf(s, l) || "实例的缺省模型";
   const said = `开发线 ${line("build")}，测试线 ${line("tests")}${on.length ? `，检视线 ${line("review")}（检视点 ${on.join("、")}）` : "，检视点都关着"}`;
-  const problem = reviewLineProblem(s, path);
-  if (!problem) return { verdict: "pass", summary: said, findings: [] };
+  const warning = reviewLineWarning(s, path);
+  if (!warning) return { verdict: "pass", summary: said, findings: [] };
   return {
-    verdict: "error",
-    summary: `${problem}。改 ${FILE} 的 lines.review.model（或关掉 review.${path} 的检视点），再重新起一次运行：设置钉在运行里，这次改了也不算`,
-    findings: [{ rule: "lines", severity: "error", path: FILE, message: problem }],
+    verdict: "pass",
+    summary: `${said}；告警：${warning}`,
+    findings: [{ rule: "lines", severity: "warn", path: FILE, message: `${warning}。要另一双眼睛就改 ${FILE} 的 lines.review.model，下次起的运行才算` }],
   };
 }

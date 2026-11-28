@@ -34,11 +34,14 @@ lines:                # 三条线的模型（§5.1）：缺省都不写，用实
 - **`review.separate`**：每条路径的每个 `confirm`（批准破坏性改动、major 的范围定了、solid 与 major 的规格侧定了与两路对上了、验收）都写 `separate: "${settings.review.separate}"`。
   `true` 时这次运行里交付过、做过任务或发起运行的人不能确认（flows.md §4.1 的 `not: [author]`），要别人批；缺省 `false`，
   因为一个人用时作者就是批准人，强制了就走不通。
-- **`review.solid`、`review.major`**：这条路径哪几个检视点由检视线检视（§5.2）。检视站的 `when` 读它（flows.md §7.1 的
+- **`review.solid`、`review.major`**：这条路径哪几个检视点由检视线检视（§5.2）。solid 只有设计环节的 `design`、`tests-design`，
+  major 六个都有。检视站的 `when` 读它（flows.md §7.1 的
   `settings` 根）：关着的站进站即跳过，不调模型。只有人改文件能打开，模型改不了：它在钉住的设置里，运行里谁都动不了。
 - **`lines`**：每条线一个模型，`model` 必写、`provider` 可选（flows.md §7.1：流程的 `main` 与执行方式的模型写成
-  `${settings.lines.<线>.model}`）。没写的线用实例的缺省模型。开着检视点的路径，检视线要写明、且与开发线不同：同一个模型
-  检视自己写的东西不是另一双眼睛，solid、major 的第一站（门禁 `lines`）就停下，自检也报 `error`。
+  `${settings.lines.<线>.model}`）。没写的线用实例的缺省模型。开着检视点的路径，检视线该写明、且与开发线不同：同一个模型
+  检视自己写的东西不是另一双眼睛。但只配了一家模型也要能用，所以相同（或没写）**只告警**：solid、major 的第一站（门禁 `lines`）
+  照过、记一条 `warn`，实例日志与界面各说一次，运行的报告（`conix-report.json` 的 `warnings`）里也有；自检报 `warn`。
+  缺省的配法是开发线 Claude、测试线与检视线 DeepSeek。
 
 同一个文件可以带 **`verify` 菜单**：工作包做完时能跑的验证，人声明、进 git。
 
@@ -155,7 +158,7 @@ elements:
 | `packages-planned` | script | 交出的 packages 与 `xpkg plan` 的一一对得上；每包有路径、至少一条判据；`after` 指的包存在、无环；包的路径不重叠 |
 | `ledgers-settled` | script | §2.3 的规矩：没有 open / disputed；findings 有 ref；`rejected`/`deferred` 的 findings 是检视站或人给的；questions 是人答的。按在哪一站判（`input.station`）分两头：检视站只判**自己记的**发现（`history` 的第一条是它）；别的站可以把检视站记的发现标 `disputed` 交回去 |
 | `constitution-reply` | script | 检视站的 `constitution` 台账覆盖每条原则；`violates` 有说明 |
-| `lines` | script（solid、major 的第一站） | 这条路径开着检视点时，`lines.review.model` 写了、且与 `lines.build.model` 不同（没写的开发线是实例的缺省模型）；不成立是 `error`，说改哪里、要重新起 |
+| `lines` | script（solid、major 的第一站） | 写出三条线的模型；这条路径开着检视点时，`lines.review.model` 没写、或与 `lines.build.model` 相同（没写的开发线是实例的缺省模型），`pass` 带一条 `warn`：说改哪里、下次起的运行才算 |
 | `package-check` | script（**任务级出口**） | 这一包：`status: done`（blocked 就不过，说卡在哪）；每条判据有证据；`files` 都在包的路径里；`flow.git.changed()` 里落在这个包路径下的改动都登记在 `files` 里 |
 | `package-tests` | command，`plan`（**任务级出口**） | 这一包 `verify` 登记的每一项按菜单重新核对、展开成 argv，流程库直接起进程，都退出 0 才过；没登记就不欠；登记的对不上菜单（有人改过其中一个文件）是 `error`，要人看 |
 | `packages-done` | check: schema | 工作包都 done |
@@ -186,7 +189,7 @@ solid 收 low、medium，major 都收。
 | 路径 | 线 | 站 |
 |---|---|---|
 | quick | 开发 | propose（顺手划包）→ apply → verify（人验收）→ archive |
-| solid | 开发 + 测试（检视缺省关） | lines → propose → review-spec → seal → fork（line-build、line-tests）→ join → verify → review-verify → accept → archive |
+| solid | 开发 + 测试 + 检视（只检视两路的设计） | lines → propose → seal → fork（line-build、line-tests）→ join → verify → accept → archive |
 | major | 开发 + 测试 + 检视 | lines → propose → clarify → review-spec → seal → fork → join → verify → review-verify → accept → archive |
 
 两路：`line-build` 是 design → review-design → apply → review-code，`line-tests` 是 design → review-tests-design → apply → review-tests。
@@ -194,7 +197,7 @@ solid 收 low、medium，major 都收。
 | 站 | 执行 | 写入范围 | 出口 |
 |---|---|---|---|
 | lines 核对三条线 | 检查点（不调模型） | — | `lines` |
-| propose 提案 | 会话（开发线） | 运行目录 | output、proposal-sections、impact、spec-delta-shape、spec-delta、interface-delta、interface-compat、有破坏性改动时的「批准破坏性改动」（§5.3）；solid、major 另加 ledgers-settled（检视线的发现），quick 另加 packages-planned |
+| propose 提案 | 会话（开发线） | 运行目录 | output、proposal-sections、impact、spec-delta-shape、spec-delta、interface-delta、interface-compat、有破坏性改动时的「批准破坏性改动」（§5.3）、增量动到的比声明的多时的「影响面扩大」（§5.4）；solid、major 另加 ledgers-settled，quick 另加 packages-planned |
 | clarify 澄清（major） | 会话 | 运行目录 | output、ledgers-settled（questions 由人答）、confirm owner「范围定了」，只绑 `questions` 台账 |
 | review-* 检视 | 子 Agent（检视线），只看不改 | 不能写 | output、ledgers-settled（只判自己记的）；规格侧与两路的设计另加 constitution-reply（不过回自己）；`on_unmet: {rework_to: <作者那一站>, max: 2}` |
 | seal 封存规格侧 | 命令步骤 `xspec seal` | — | output：运行目录每个文件的摘要；confirm owner「规格侧定了」，绑提案、规格增量、接口增量（major 加 `questions` 台账） |
@@ -247,18 +250,20 @@ solid 收 low、medium，major 都收。
 
 检视点是一个检视站，开关在治理文件的 `review.<路径>`（§1），每条路径一份：
 
-| 检视点 | 站 | 检视什么 | 打回到 | major 缺省 | solid 缺省 |
+| 检视点 | 站 | 检视什么 | 打回到 | major 缺省 | solid |
 |---|---|---|---|---|---|
-| `spec` | 父运行 `review-spec` | 提案、规格与接口增量：两个互不相见的人照它会不会做出不一样的东西 | propose | 开 | 关 |
-| `design` | `line-build` 的 `review-design` | 开发线的设计 | design | 开 | 关 |
-| `tests-design` | `line-tests` 的 `review-tests-design` | 测试线的设计（测什么、怎么只经公开接口测） | design | 开 | 关 |
-| `code` | `line-build` 的 `review-code` | 开发线的代码（对着设计与规格） | apply | 关 | 关 |
-| `tests` | `line-tests` 的 `review-tests` | 测试线写出的测试 | apply | 关 | 关 |
-| `verify` | 父运行 `review-verify` | 验证记录 | verify | 关 | 关 |
+| `spec` | 父运行 `review-spec` | 提案、规格与接口增量：两个互不相见的人照它会不会做出不一样的东西 | propose | 开 | 没有 |
+| `design` | `line-build` 的 `review-design` | 开发线的设计 | design | 开 | 开（可关） |
+| `tests-design` | `line-tests` 的 `review-tests-design` | 测试线的设计（测什么、怎么只经公开接口测） | design | 开 | 开（可关） |
+| `code` | `line-build` 的 `review-code` | 开发线的代码（对着设计与规格） | apply | 关 | 没有 |
+| `tests` | `line-tests` 的 `review-tests` | 测试线写出的测试 | apply | 关 | 没有 |
+| `verify` | 父运行 `review-verify` | 验证记录 | verify | 关 | 没有 |
 
-缺省只开设计阶段的三个；全链条写 `review: {major: {code: true, tests: true, verify: true}}`，只能人改文件打开。父运行的两个检视站
-读 `settings.review.<路径>.<点>`；两路的读输入 `inputs.review.<点>`——子运行不知道自己是哪条路径的，fork 站把这条路径的那一份传进去。
-quick 没有检视线。
+三条路径由此拉开：quick 只有开发线；solid 三条线，检视线**只检视设计环节**（两路的设计，`review.solid` 只有这两个开关，缺省开）；
+major 先澄清、检视规格侧与两路的设计，全链条写 `review: {major: {code: true, tests: true, verify: true}}`，只能人改文件打开。
+要检视 solid 没有的那几处，走 major；`review.solid` 里写了别的检视点，自检报 `warn`「不起作用」。major 父运行的两个检视站
+读 `settings.review.major.<点>`；两路的读输入 `inputs.review.<点>`——子运行不知道自己是哪条路径的，fork 站把这条路径的那一份传进去
+（solid 的没有 `code`、`tests`，那两站跳过）。
 
 **一个检视点里的四步**：开发线设计 → 检视线检视 → 开发线修复 → 检视线确认。
 
@@ -271,10 +276,11 @@ quick 没有检视线。
 5. 两轮还没结清（自动打回用完了）：站停下等人（`/rework`、`/force <理由>`，或改了再重判）。
 
 台账的历史里看得到这四步：`open（review-design）→ disputed（design）→ rejected（review-design）`。
-检视不替代人的批准：批准破坏性改动、规格侧定了、两路对上了、验收，都照旧是主人的；验收在 `review-verify` 之后（accept 站）。
+检视不替代人的批准：批准破坏性改动、影响面扩大、规格侧定了、两路对上了、验收，都照旧是主人的；major 的验收在 `review-verify` 之后（accept 站）。
 
 **模型**：`lines` 在运行启动时钉住，检视站的子 Agent 被告知 `model: <lines.review.model>`。开着检视点时检视线与开发线是同一个模型
-（或检视线没写），第一站 `lines` 就 `error`、不调模型；自检也报（§7）。测试线与检视线可以是同一个模型。没写的线用实例的缺省模型。
+（或检视线没写），第一站 `lines` 照过、带一条告警（§1）；自检报 `warn`（§7）。测试线与检视线可以是同一个模型（缺省就都是 DeepSeek）。
+没写的线用实例的缺省模型。
 
 ### 5.3 破坏性的接口改动要主人批
 
@@ -299,6 +305,18 @@ quick 没有检视线。
   一个是"这次可以破坏这个接口"，一个是"两路可以照这份规格各干各的"。驳回就是这条出口不过，按站的 `on_unmet` 打回提案重写。
 - quick 也判：走小路不省人。
 
+### 5.4 增量动到的比声明的多：影响面扩大
+
+启动时的 `impact` 是人（或替人起运行的主 Agent）说的，选路靠它；提案的「影响面」要和它一一对应。可做下去才发现接口增量里有改动，
+而启动时没声明 `interface`——以前门禁 impact 只拿提案对声明，没声明就要提案写"无"，模型为了过门禁会把「影响面」改成"无"，
+增量里明明「新增 1」它也照过（LIVE 里真出过）。
+
+- 门禁 impact 同时读接口增量（开着接口基线时）：有改动而没声明 `interface`，影响面就是声明的加上它。提案照实写，写"无"不过；
+  结果带事实 `widened`、`undeclared`。
+- 多出来的由主人认：三条路径的 propose 都有一条 `{kind: confirm, who: owner, label: 影响面扩大, when: {gate: impact, fact: widened}}`，
+  绑提案与接口增量。没多出来时它记在 `not_required` 里。声明是人定的，模型改不了、也不该为了过门禁去迁就它。
+- 破坏性的改动不在这里放宽：interface-compat 仍要启动时声明了 `interface`（选路与风险都跟着它），没声明就换路或重开。
+
 ## 6. 演示项目
 
 `examples/xforge/`：Python 小库 `textkit`；`xforge/specs/textkit.md` 是规格基线，`xforge/interfaces/textkit.yaml` 是接口基线（已有的
@@ -319,7 +337,8 @@ quick 没有检视线。
 | 治理文件（§1）读得成、顶层是映射 | `error`：每条流程都会拒绝启动；后两行不再查（在同一个文件里） |
 | `governance.spec`、`governance.interface`、`review.separate`、`review.solid.*`、`review.major.*` 是布尔值；`governance`、`review` 是映射 | `error`：`separate` 不是布尔值启动就拒；`spec: "no"` 不报错但意思反了（"不写 false 就开"）；检视点写成 `"yes"` 那一处就悄悄不检视了 |
 | 治理文件里 xforge 不认识的键（顶层与 `governance`、`review`、`lines` 下） | `warn`：多半是写错了名字 |
-| `lines`：每条线 `{model, provider?}`，都是名字；开着检视点的路径，检视线写了、且与开发线不同（`lib/lines.js`，与门禁 `lines` 同一份） | `error`：那条路径第一站就停下 |
+| `lines`：每条线 `{model, provider?}`，都是名字；开着检视点的路径，检视线写了、且与开发线不同（`lib/lines.js`，与门禁 `lines` 同一份） | 形状不对 `error`；检视线没写或与开发线相同 `warn`：照跑，第一站记告警 |
+| `review.solid` 只有 `design`、`tests-design` | 写了别的检视点 `warn`「不起作用」：solid 只检视设计环节，要检视那一处走 major |
 | `verify` 菜单：`menuProblems`，与 `xpkg plan --verify`、`package-tests` 同一份（名字、字段、`argv`、`params` 的正则、没声明与没用到的参数、`cwd`） | 每条一个 `error`；没有菜单是 `info` |
 | `verify.blackbox`：`blackboxProblem`，与门禁 `blackbox` 同一份 | 没有：`warn`（solid、major 需要它，quick 不用）；带参数：`error` |
 | 开着的基线：`<数据目录>/specs/*.md`、`<数据目录>/interfaces/*.yaml` 读得成 | 读不成 `error`；还是空的 `info`（第一次变更的 `xspec init`、`xarch module` 与归档会建） |

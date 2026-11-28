@@ -1,8 +1,8 @@
 name: lines
-title: 检视线与开发线不是同一个模型
+title: 三条线的模型
 description: >-
-  solid、major 进站就判：这条路径开着检视点（治理文件的 review.solid / review.major）时，检视线的模型（lines.review.model）
-  要写明、且与开发线（lines.build.model，没写就是实例的缺省模型）不同：同一个模型检视自己写的东西，不是另一双眼睛。
-  没开检视点就不欠。设置钉在运行里：改了治理文件要重新起一次运行。
+  solid、major 进站就判，不调模型：写出三条线各用什么模型。这条路径开着检视点（治理文件的 review.solid / review.major）时，
+  检视线的模型（lines.review.model）没写、或与开发线（lines.build.model，没写就是实例的缺省模型）相同，只告警、不挡：
+  同一个模型检视自己写的东西不是另一双眼睛，但只配了一家模型也要能跑。设置钉在运行里：改了治理文件要重新起一次运行。
 kind: script
 script: lines

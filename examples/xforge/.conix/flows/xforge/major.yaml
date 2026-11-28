@@ -26,7 +26,8 @@ archive:
   # 两路各自的设计、台账、工作包在 children/ 里：只留声明的制品就丢了一半的来龙去脉。
   keep: [proposal.md, verification.md, spec-delta.yaml, interface-delta.yaml, "ledgers/**", "children/**"]
 stations:
-  # 进站就判、不调模型：检视线与开发线是同一个模型，检视就不是另一双眼睛。设置钉在运行里，改了治理文件要重新起。
+  # 进站就判、不调模型：写出三条线各用什么模型；检视线没写或与开发线同一个模型只告警（检视不是另一双眼睛，但照跑）。
+  # 设置钉在运行里，改了治理文件要重新起。
   - id: lines
     title: 核对三条线
     exit:
@@ -58,6 +59,13 @@ stations:
         when: {gate: interface-compat, fact: breaking}
         separate: "${settings.review.separate}"
         binds: ["${output_dir}/interface-delta.yaml"]
+      # 增量动到的比启动时声明的多（门禁 impact 的事实 widened）：声明是人定的，多出来的也要人认。
+      - kind: confirm
+        who: owner
+        label: 影响面扩大
+        when: {gate: impact, fact: widened}
+        separate: "${settings.review.separate}"
+        binds: ["${output_dir}/proposal.md", "${output_dir}/interface-delta.yaml"]
     on_unmet: {rework_to: propose, max: 2}
 
   # 不自动打回：问题要人答，答完人重跑这一站的出口（/xforge:clarify），再确认。

@@ -85,9 +85,9 @@ fn solid_and_major_fork_into_the_two_lines_and_hold_together() {
             _ => None,
         }).collect();
         let want: &[(&str, &str)] = if f == "xforge/major" {
-            &[("propose", "批准破坏性改动"), ("clarify", "范围定了"), ("seal", "规格侧定了"), ("join", "两路对上了"), ("accept", "验收")]
+            &[("propose", "批准破坏性改动"), ("propose", "影响面扩大"), ("clarify", "范围定了"), ("seal", "规格侧定了"), ("join", "两路对上了"), ("accept", "验收")]
         } else {
-            &[("propose", "批准破坏性改动"), ("seal", "规格侧定了"), ("join", "两路对上了"), ("accept", "验收")]
+            &[("propose", "批准破坏性改动"), ("propose", "影响面扩大"), ("seal", "规格侧定了"), ("join", "两路对上了"), ("accept", "验收")]
         };
         assert_eq!(confirms.iter().map(|(id, l, _)| (*id, l.as_str())).collect::<Vec<_>>(), want, "{f}");
         for (id, _, separate) in confirms {
@@ -272,7 +272,7 @@ async fn drive_setup() -> Drive {
 }
 
 const PROPOSAL: &str = "# 加 truncate\n\n## 背景\n标题太长，列表里放不下。\n\n## 目标\n能把文本截到给定长度。\n\n## 非目标\n不按词边界截。\n\n\
-    ## 改什么\n新增 TK-R3 与 fn:textkit.truncate。\n\n## 影响面\n无\n\n## 为什么选这条流程\n行为说得清，值得要一套独立写的测试。\n";
+    ## 改什么\n新增 TK-R3 与 fn:textkit.truncate。\n\n## 影响面\n- 接口：textkit 多一个公开函数 truncate，已有的不变\n\n## 为什么选这条流程\n行为说得清，值得要一套独立写的测试。\n";
 
 fn design(what: &str) -> String {
     format!(
@@ -323,7 +323,7 @@ fn implementation(right: bool) -> String {
         + &format!("\n\ndef truncate(text: str, n: int) -> str:\n    \"\"\"把文本截到 n 个字符。\"\"\"\n    return text if len(text) <= n else {cut}\n")
 }
 
-/// A child of major: its path reviews the designs (the example's defaults), solid's reviews nothing.
+/// A child whose path reviews the designs: major's (the example's defaults); solid's here has them switched off.
 fn reviewed(child: &RunRecord) -> bool {
     child.inputs["review"]["design"] == json!(true)
 }
@@ -370,7 +370,7 @@ impl Drive {
         let path = matches!(rec.flow.as_str(), "xforge/solid" | "xforge/major");
         match (rec.flow.as_str(), b.station.as_str()) {
             (_, "propose") if path && self.breaking.load(std::sync::atomic::Ordering::SeqCst) => {
-                let text = PROPOSAL.replace("## 影响面\n无", "## 影响面\n- 接口：slugify 多了分隔符参数，签名变了，调用方要跟着改");
+                let text = PROPOSAL.replace("## 影响面\n- 接口：textkit 多一个公开函数 truncate，已有的不变", "## 影响面\n- 接口：slugify 多了分隔符参数，签名变了，调用方要跟着改");
                 std::fs::write(out.join("proposal.md"), text).unwrap();
                 self.cmd(id, "xspec", &["add", "textkit", "截断", "- WHEN 文本超过 n 个字符\n- THEN 返回前 n 个字符\n- WHEN 文本不超过 n 个字符\n- THEN 原样返回"]).await;
                 self.cmd(id, "xarch", &["modify", "fn:textkit.slugify", "--signature", "slugify(text: str, sep: str = '-') -> str", "--breaking"]).await;
@@ -569,6 +569,12 @@ async fn a_solid_run_forks_the_two_lines_from_one_commit_joins_them_and_archives
     }
     let d = drive_setup().await;
     let root = d.root.as_path();
+    // A person switched solid's design review off: this run is about the two lines and the black box
+    // (major's run is about the review line).
+    let gov = root.join(".conix/governance/xforge.yaml");
+    let text = std::fs::read_to_string(&gov).unwrap();
+    assert!(text.contains("  solid: {design: true, tests-design: true}"), "{text}");
+    std::fs::write(&gov, text.replace("  solid: {design: true, tests-design: true}", "  solid: {design: false, tests-design: false}")).unwrap();
     let main_head = git(root, "rev-parse main");
     let input = CreateIn {
         flow: "xforge/solid".into(),
@@ -581,7 +587,8 @@ async fn a_solid_run_forks_the_two_lines_from_one_commit_joins_them_and_archives
     let run = o.value["run"].as_str().unwrap().to_string();
     d.rn.apply(o).await;
 
-    // The spec side written and approved; sealed; two children forked and through. solid reviews nothing.
+    // The spec side written and approved; sealed; two children forked and through. The start declared
+    // no impact, the interface delta adds a function: the owner confirmed the wider impact.
     d.until(&run, "the first join", |r| r.stations.get("join").is_some_and(|s| s.status.is_open() && s.tasks.iter().all(|t| t.status == TaskStatus::Submitted))).await;
     let rec = d.record(&run).await;
     let wt = PathBuf::from(&rec.worktree.as_ref().unwrap().path);
@@ -589,9 +596,13 @@ async fn a_solid_run_forks_the_two_lines_from_one_commit_joins_them_and_archives
     // Adding an element breaks nothing: the owner was not asked to approve a breaking change.
     let left_out: Vec<_> = rec.stations["propose"].not_required.iter().map(|n| (n.label.as_str(), n.value.clone())).collect();
     assert_eq!(left_out, [("批准破坏性改动", json!(false))]);
-    assert!(rec.stations["propose"].confirms.is_empty());
+    let impact = rec.stations["propose"].checks.iter().find(|c| c.label.ends_with("/impact")).unwrap();
+    assert_eq!(impact.facts["undeclared"], json!(["interface"]), "{impact:?}");
+    let widened: Vec<_> = rec.stations["propose"].checks.iter().filter(|c| c.label == "影响面扩大").map(|c| c.status).collect();
+    assert_eq!(widened, [CheckStatus::Pass]);
+    assert_eq!(rec.stations["propose"].confirms.len(), 1, "影响面扩大: a person's");
     assert_eq!(rec.stations["lines"].status, StationStatus::Passed);
-    assert_eq!(rec.stations["review-spec"].status, StationStatus::Skipped, "review.solid.spec is off");
+    assert!(!rec.stations.contains_key("review-spec"), "solid reviews no spec side");
     assert_eq!(rec.stations["seal"].confirms.len(), 1, "规格侧定了: a person's");
     let sealed = rec.stations["seal"].tasks[0].output.clone().unwrap();
     for f in ["proposal.md", "spec-delta.yaml", "interface-delta.yaml"] {
@@ -618,7 +629,7 @@ async fn a_solid_run_forks_the_two_lines_from_one_commit_joins_them_and_archives
         let designed = std::fs::read_to_string(out.join("children/fork").join(task).join("design.md")).unwrap();
         assert!(designed.contains(if task == "build" { "：实现" } else { "：黑盒测试" }), "{designed}");
         for (id, st) in &c.stations {
-            assert_eq!(st.status == StationStatus::Skipped, id.starts_with("review-"), "{task} {id}: solid's lines have no review");
+            assert_eq!(st.status == StationStatus::Skipped, id.starts_with("review-"), "{task} {id}: solid's design review switched off, code and tests it has not");
         }
         // Its result, as its flow says.
         let result = tasks.iter().find(|t| t.id == task).unwrap().output.clone().unwrap();
@@ -720,7 +731,8 @@ async fn a_breaking_interface_change_waits_at_the_proposal_for_the_owners_approv
     assert_eq!(st.status, StationStatus::Working, "the gates passed; only the person is missing");
     let gate = st.checks.iter().find(|c| c.label.ends_with("interface-compat")).unwrap();
     assert_eq!(gate.facts["breaking"], json!(true), "{gate:?}");
-    assert!(st.not_required.is_empty());
+    // The impact was declared: only the wider impact is not owed.
+    assert_eq!(st.not_required.iter().map(|n| n.label.as_str()).collect::<Vec<_>>(), ["影响面扩大"]);
     let view = d.engine.get(&run).await.unwrap();
     let why = view.unmet["propose"].iter().find(|c| c.label == approval).unwrap().explain();
     assert!(why.contains("required: gate xforge/interface-compat fact breaking is true"), "{why}");
@@ -755,7 +767,7 @@ async fn a_major_run_has_the_review_line_find_send_back_and_settle_on_another_mo
     let input = CreateIn {
         flow: "xforge/major".into(),
         subject: "给 textkit 加 truncate".into(),
-        inputs: json!({"title": "truncate", "risk": "high"}),
+        inputs: json!({"title": "truncate", "risk": "high", "impact": ["interface"]}),
         project_root: Some(d.root.to_string_lossy().into_owned()),
         ..Default::default()
     };
@@ -813,38 +825,32 @@ async fn a_major_run_has_the_review_line_find_send_back_and_settle_on_another_mo
     assert!(d.log.lock().unwrap().iter().any(|l| l == "the build line disputed the review's finding"));
 }
 
+/// A review line on the build line's model is no other pair of eyes, but the run goes on: the first
+/// station passes with a warning that says so, and the proposal is worked on.
 #[tokio::test]
-async fn a_review_line_on_the_build_lines_model_stops_the_run_before_any_model_is_paid() {
+async fn a_review_line_on_the_build_lines_model_is_a_warning_and_the_run_goes_on() {
     let d = drive_setup().await;
     let gov = d.root.join(".conix/governance/xforge.yaml");
     let text = std::fs::read_to_string(&gov).unwrap();
     let build = text.lines().find_map(|l| l.trim().strip_prefix("build: {model: ")).unwrap().trim_end_matches('}').to_string();
     std::fs::write(&gov, text.replace("  review: {model: deepseek-chat}", &format!("  review: {{model: {build}}}"))).unwrap();
-    let start = |flow: &str, risk: &str| CreateIn {
-        flow: flow.into(),
-        subject: "s".into(),
-        inputs: json!({"title": "t", "risk": risk}),
-        project_root: Some(d.root.to_string_lossy().into_owned()),
-        ..Default::default()
-    };
-    let o = d.rn.start_run(start("xforge/major", "high"), person()).await.unwrap();
-    let run = o.value["run"].as_str().unwrap().to_string();
-    d.rn.apply(o).await;
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
-    let check = loop {
+    for (flow, risk, on) in [("xforge/major", "high", "spec、design、tests-design"), ("xforge/solid", "medium", "design、tests-design")] {
+        let input = CreateIn {
+            flow: flow.into(),
+            subject: "s".into(),
+            inputs: json!({"title": "t", "risk": risk}),
+            project_root: Some(d.root.to_string_lossy().into_owned()),
+            ..Default::default()
+        };
+        let o = d.rn.start_run(input, person()).await.unwrap();
+        let run = o.value["run"].as_str().unwrap().to_string();
+        d.rn.apply(o).await;
+        d.until(&run, "the lines passed", |r| r.stations.get("lines").is_some_and(|s| s.status == StationStatus::Passed)).await;
         let rec = d.record(&run).await;
-        if let Some(c) = rec.stations.get("lines").and_then(|s| s.checks.iter().find(|c| c.status == CheckStatus::Error)) {
-            break c.clone();
-        }
-        assert!(tokio::time::Instant::now() < deadline, "{:?}", rec.stations.get("lines"));
-        tokio::time::sleep(Duration::from_millis(25)).await;
-    };
-    assert!(check.detail.contains(&format!("检视线与开发线是同一个模型 {build}")) && check.detail.contains("重新起一次运行"), "{}", check.detail);
-    let theirs: Vec<_> = d.host.opened().into_iter().filter(|s| s.run == run).filter_map(|s| d.host.session_of(&s.key)).collect();
-    assert!(theirs.iter().all(|id| d.host.sent_to(id).is_empty()), "no turn was sent");
-    // solid reviews nothing by default: the same lines are no problem there.
-    let o = d.rn.start_run(start("xforge/solid", "medium"), person()).await.unwrap();
-    let solid = o.value["run"].as_str().unwrap().to_string();
-    d.rn.apply(o).await;
-    d.until(&solid, "the lines passed", |r| r.stations.get("lines").is_some_and(|s| s.status == StationStatus::Passed)).await;
+        let c = &rec.stations["lines"].checks[0];
+        let [f] = &c.findings[..] else { panic!("{flow}: {c:?}") };
+        assert_eq!(f.severity, Severity::Warn, "{flow}");
+        assert!(f.message.contains(&format!("开着检视点 {on}，检视线与开发线是同一个模型 {build}")), "{flow}: {}", f.message);
+        assert!(rec.stations["propose"].status.is_open(), "{flow}: the proposal is worked on");
+    }
 }

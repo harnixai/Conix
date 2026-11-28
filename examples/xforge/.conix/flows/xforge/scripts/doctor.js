@@ -9,7 +9,7 @@ import { governance, verifyMenu } from "../lib/governance.js";
 import { readBaseline } from "../lib/arch.js";
 import { readSpecs } from "../lib/specs.js";
 import { BLACKBOX, blackboxProblem, menuProblems, writableProblems } from "../lib/verify.js";
-import { LINES, REVIEWED, STAGES, reviewLineProblem } from "../lib/lines.js";
+import { LINES, REVIEWED, STAGES, STAGES_OF, reviewLineWarning } from "../lib/lines.js";
 
 // 与 bundle.yaml 的 settings.file、门禁 constitution 与 unit-tests 写的路径是同一份。
 const SETTINGS = ".conix/governance/xforge.yaml";
@@ -19,7 +19,7 @@ const VERIFY_SH = ".conix/governance/verify.sh";
 // 治理文件里每个开关该是什么类型。review.separate 不是布尔值时启动就拒（确认出口的 separate）；
 // governance 的两个按"spec 不写 false 就开、interface 写 true 才开"解释，写成 "no" 不报错却意思反了，所以一样算错；
 // 检视点写成 "yes" 时站的 when 判它不等于 true，那一处就悄悄不检视了。
-const SWITCHES = { governance: ["spec", "interface"], review: ["separate"], "review.solid": STAGES, "review.major": STAGES };
+const SWITCHES = { governance: ["spec", "interface"], review: ["separate"], "review.solid": STAGES_OF.solid, "review.major": STAGES_OF.major };
 const TOP = ["governance", "review", "lines", "checks", "verify"];
 
 export default function (input, flow) {
@@ -65,7 +65,13 @@ function checkSettings(flow, add) {
     }
     const nested = group === "review" ? REVIEWED : [];
     for (const k of Object.keys(g)) {
-      if (!keys.includes(k) && !nested.includes(k)) add("warn", `${group}.${k} xforge 不认识（有 ${keys.concat(nested).join("、")}），写错了名字？`, SETTINGS, `删掉或改成 ${keys.concat(nested).join("、")} 之一`);
+      if (keys.includes(k) || nested.includes(k)) continue;
+      // 0.5.0 起 solid 只检视设计环节：以前写的 spec、code、tests、verify 不再起作用，别让人以为还开着。
+      if (group === "review.solid" && STAGES.includes(k)) {
+        add("warn", `review.solid.${k} 不起作用：solid 只检视设计环节（${keys.join("、")}），要检视 ${k} 走 major`, SETTINGS, `删掉 review.solid.${k}`);
+      } else {
+        add("warn", `${group}.${k} xforge 不认识（有 ${keys.concat(nested).join("、")}），写错了名字？`, SETTINGS, `删掉或改成 ${keys.concat(nested).join("、")} 之一`);
+      }
     }
     for (const k of keys) {
       if (g[k] !== undefined && typeof g[k] !== "boolean") {
@@ -77,7 +83,7 @@ function checkSettings(flow, add) {
   return ok;
 }
 
-// lines：每条线一个模型（字符串）；开着检视点的路径，检视线要与开发线不同（门禁 lines 同一份判法）。
+// lines：每条线一个模型（字符串）；开着检视点的路径，检视线没写模型或与开发线相同只告警（门禁 lines 同一份判法）。
 function checkLines(flow, add) {
   const s = flow.settings || {};
   const l = s.lines;
@@ -101,8 +107,8 @@ function checkLines(flow, add) {
     }
   }
   for (const path of REVIEWED) {
-    const p = reviewLineProblem(s, path);
-    if (p) add("error", `${p}：xforge/${path} 第一站（核对三条线）就会停下`, SETTINGS, `lines.review.model 写一个与开发线不同的模型，或关掉 review.${path} 的检视点`);
+    const w = reviewLineWarning(s, path);
+    if (w) add("warn", `${w}：xforge/${path} 照跑，第一站（核对三条线）记一条告警`, SETTINGS, `lines.review.model 写一个与开发线不同的模型`);
   }
 }
 

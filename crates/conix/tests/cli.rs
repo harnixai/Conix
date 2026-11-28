@@ -721,10 +721,12 @@ async fn doctor_reports_what_is_wrong_and_fix_does_only_the_safe_things() {
     run_in_flight(e2.project.path(), "xforge").await;
     let out = e2.fails(&["doctor"]);
     assert!(out.contains("conix flow install xforge"), "{out}");
-    // 装上之后 xforge 自己的自检还报一条：新项目没写检视线的模型，major 第一站就会停下（不是 --fix 能替人定的）。
-    let out = e2.fails(&["doctor", "--fix"]);
+    // 装上之后 xforge 自己的自检还提醒一条：新项目没写检视线的模型（照跑，第一站记告警；不是 --fix 能替人定的）。
+    let out = e2.ok(&["doctor", "--fix"]);
+    assert!(out.contains("Fixed: installed xforge"), "{out}");
+    let out = e2.ok(&["doctor"]);
     assert!(
-        out.contains("Fixed: installed xforge") && out.contains("检视线没写模型"),
+        out.contains("◐ xforge:") && out.contains("检视线没写模型"),
         "{out}"
     );
     assert!(e2.installed("xforge").join("bundle.yaml").is_file());
@@ -869,12 +871,13 @@ fn doctor_runs_each_installed_bundles_own_check_on_a_fresh_project() {
     git(&["add", "-A"]);
     git(&["commit", "-qm", "init"]);
 
-    // xforge：没有治理文件、原则、verify.sh——都是 warn，别的路径照跑；只有 major 缺省开着检视点、
-    // 检视线却没写模型（与开发线一样是实例的缺省模型），是 error：major 第一站就会停下。
+    // xforge：没有治理文件、原则、verify.sh——都是 warn，路径照跑；solid、major 缺省开着检视点、检视线却没写模型
+    // （与开发线一样是实例的缺省模型）也只是 warn：照跑，第一站记告警。
     e.ok(&["install", "xforge", "--yes"]);
-    let out = e.fails(&["doctor"]);
+    let out = e.ok(&["doctor"]);
     for want in [
-        "✗ xforge: major 开着检视点 spec、design、tests-design，检视线没写模型",
+        "◐ xforge: solid 开着检视点 design、tests-design，检视线没写模型",
+        "◐ xforge: major 开着检视点 spec、design、tests-design，检视线没写模型",
         "◐ xforge: xforge/solid、xforge/major 需要 verify.blackbox",
         "◐ xforge: 没有原则文件 .conix/governance/constitution.yaml",
         "◐ xforge: 没有 .conix/governance/verify.sh",
@@ -883,7 +886,7 @@ fn doctor_runs_each_installed_bundles_own_check_on_a_fresh_project() {
     ] {
         assert!(out.contains(want), "{want}: {out}");
     }
-    assert_eq!(out.matches("✗").count(), 1, "{out}");
+    assert_eq!(out.matches("✗").count(), 0, "{out}");
     // 照演示项目备齐治理文件：不再有 warn，只剩"基线还是空的"（第一次运行会建）。
     let example =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/xforge/.conix/governance");

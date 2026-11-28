@@ -1,10 +1,13 @@
 name: impact
-title: 提案的影响面与启动时说的一致
+title: 提案的影响面与启动时说的、增量做的一致
 description: >-
   proposal.md 的「## 影响面」：启动时 inputs.impact 列了的每一项（interface / security / data-migration / infra，
-  或写成 接口 / 安全 / 数据迁移 / 基础设施）都写到、各说一句影响什么；impact 为空时写"无"。写到了没列的那几项只提醒。
+  或写成 接口 / 安全 / 数据迁移 / 基础设施）都写到、各说一句影响什么。接口增量里有改动而启动时没声明 interface，
+  影响面就多了 interface：提案照实写它，结果带事实 widened，站上「影响面扩大」由主人确认（启动时的声明是人定的，模型改不了，
+  也不该为了过门禁把实话删掉）。什么都没有时写"无"。写到了没列、增量里也看不出的那几项只提醒。
 kind: script
 script: impact
 params:
   proposal: "${output_dir}/proposal.md"
   impact: "${inputs.impact}"
+  delta: "${output_dir}/interface-delta.yaml"

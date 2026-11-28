@@ -58,7 +58,7 @@ fn stations(p: &DirPacks, flow: &str) -> Vec<String> {
 fn the_three_paths_and_every_part_they_name_hold_together() {
     let p = packs();
     let meta: BundleMeta = serde_yaml::from_str(&p.bundle_file("xforge", "bundle.yaml").unwrap()).unwrap();
-    assert_eq!(meta.version, "0.4.0");
+    assert_eq!(meta.version, "0.5.0");
     assert_eq!(meta.flows, ["quick", "solid", "major", "line-build", "line-tests"]);
     assert_eq!(meta.start.route, ["quick", "solid", "major"]);
     assert_eq!(meta.start.triage.as_deref(), Some("triage"));
@@ -74,7 +74,8 @@ fn the_three_paths_and_every_part_they_name_hold_together() {
     assert!(p.skill("xforge/archive").is_none(), "archiving is the commands' work, no model's");
 
     assert_eq!(stations(&p, "xforge/quick"), ["propose", "apply", "verify", "archive"]);
-    assert_eq!(stations(&p, "xforge/solid"), ["lines", "propose", "review-spec", "seal", "fork", "join", "verify", "review-verify", "accept", "archive"]);
+    // solid reviews only the design of its two lines (in the lines' flows); major the spec side and verification too.
+    assert_eq!(stations(&p, "xforge/solid"), ["lines", "propose", "seal", "fork", "join", "verify", "accept", "archive"]);
     assert_eq!(stations(&p, "xforge/major"), ["lines", "propose", "clarify", "review-spec", "seal", "fork", "join", "verify", "review-verify", "accept", "archive"]);
     assert_eq!(stations(&p, "xforge/line-build"), ["design", "review-design", "apply", "review-code"]);
     assert_eq!(stations(&p, "xforge/line-tests"), ["design", "review-tests-design", "apply", "review-tests"]);
@@ -163,8 +164,6 @@ fn each_line_names_its_model_and_each_review_point_is_one_switched_station() {
     assert_eq!(
         points,
         [
-            want("solid", "review-spec", "settings.review.solid.spec", "propose"),
-            want("solid", "review-verify", "settings.review.solid.verify", "verify"),
             want("major", "review-spec", "settings.review.major.spec", "propose"),
             want("major", "review-verify", "settings.review.major.verify", "verify"),
             want("line-build", "review-design", "inputs.review.design", "design"),
@@ -189,12 +188,13 @@ fn each_line_names_its_model_and_each_review_point_is_one_switched_station() {
         let Some(Executor::Agent { model, .. }) = p.flow(f).unwrap().0.station("apply").unwrap().executor.clone() else { panic!() };
         assert_eq!(model, Some(format!("${{settings.lines.{line}.model}}")), "{f}");
     }
-    // The defaults: major reviews the design stages, solid nothing, every line on the instance's model.
+    // The defaults: major reviews the design stages, solid the two lines' designs (all it has), every line on the instance's model.
     let meta: BundleMeta = serde_yaml::from_str(&p.bundle_file("xforge", "bundle.yaml").unwrap()).unwrap();
     let d = meta.settings.unwrap().defaults();
     let on = |path: &str| -> Vec<String> { d["review"][path].as_object().unwrap().iter().filter(|(_, v)| **v == json!(true)).map(|(k, _)| k.clone()).collect() };
     assert_eq!(on("major"), ["design", "spec", "tests-design"]);
-    assert!(on("solid").is_empty());
+    assert_eq!(on("solid"), ["design", "tests-design"]);
+    assert_eq!(d["review"]["solid"].as_object().unwrap().len(), 2, "solid has no other review point");
     assert_eq!(d["lines"], json!({}));
 }
 
@@ -277,8 +277,9 @@ fn ends() -> Value {
 
 #[tokio::test]
 async fn each_path_dry_runs_through_the_people_it_waits_for_to_its_end() {
-    // The interface gate says nothing breaks: no one is asked to approve a breaking change.
-    let calm = json!({"xforge/interface-compat": {"breaking": false}});
+    // The interface gate says nothing breaks, the impact gate that nothing more than declared is
+    // touched: no one is asked to approve a breaking change or a wider impact.
+    let calm = json!({"xforge/interface-compat": {"breaking": false}, "xforge/impact": {"widened": false}});
     let mut m = ends();
     m["propose"] = json!({"summary": "s", "packages": packages()});
     let rec = dry_through("xforge/quick", "low", json!({"stations": m, "facts": calm}), &["verify"]).await;
@@ -309,24 +310,31 @@ async fn a_breaking_interface_change_waits_for_the_owner_at_the_proposal_and_so_
             ExitCond::Confirm { who, label, when: Some(w), separate, binds, .. } => Some((who.as_deref(), label.as_deref(), w.gate.as_deref(), w.fact.as_deref(), separate.clone(), binds.clone())),
             _ => None,
         }).collect();
+        let separate = || Some(OrSetting::Setting("${settings.review.separate}".into()));
         assert_eq!(
             approvals,
-            [(Some("owner"), Some("批准破坏性改动"), Some("xforge/interface-compat"), Some("breaking"),
-              Some(OrSetting::Setting("${settings.review.separate}".into())), Some(Binds::List(vec!["${output_dir}/interface-delta.yaml".into()])))],
+            [
+                (Some("owner"), Some("批准破坏性改动"), Some("xforge/interface-compat"), Some("breaking"),
+                 separate(), Some(Binds::List(vec!["${output_dir}/interface-delta.yaml".into()]))),
+                // An interface change nobody declared at the start: the owner owns the wider impact too.
+                (Some("owner"), Some("影响面扩大"), Some("xforge/impact"), Some("widened"),
+                 separate(), Some(Binds::List(vec!["${output_dir}/proposal.md".into(), "${output_dir}/interface-delta.yaml".into()]))),
+            ],
             "{f}"
         );
     }
 
     let mut m = ends();
     m["propose"] = json!({"summary": "s", "packages": packages()});
-    let breaking = json!({"xforge/interface-compat": {"breaking": true}});
+    let breaking = json!({"xforge/interface-compat": {"breaking": true}, "xforge/impact": {"widened": false}});
     let rec = dry_through("xforge/quick", "low", json!({"stations": m.clone(), "facts": breaking}), &["propose", "verify"]).await;
     let propose = &rec.stations["propose"];
-    assert!(propose.not_required.is_empty());
+    // Only the wider impact was not owed (its gate said so): the breaking change was.
+    assert_eq!(propose.not_required.iter().map(|n| n.label.as_str()).collect::<Vec<_>>(), ["影响面扩大"]);
     let c = propose.checks.iter().find(|c| c.label == "批准破坏性改动").unwrap();
     assert_eq!((c.status, c.when.as_ref().unwrap().required), (CheckStatus::Pass, Some(true)));
     // A gate that gives no fact (here: a mocked one) is no answer: the owner is asked all the same.
-    dry_through("xforge/quick", "low", json!({"stations": m}), &["propose", "verify"]).await;
+    dry_through("xforge/quick", "low", json!({"stations": m, "facts": {"xforge/impact": {"widened": false}}}), &["propose", "verify"]).await;
 }
 
 #[tokio::test]
@@ -356,7 +364,7 @@ async fn with_review_separate_on_whoever_authored_the_run_does_not_confirm_it() 
     let start = StartIn {
         flow: Some("xforge/quick".into()),
         inputs: json!({"title": "truncate", "risk": "low"}),
-        mocks: serde_json::from_value(json!({"stations": m, "facts": {"xforge/interface-compat": {"breaking": false}}})).unwrap(),
+        mocks: serde_json::from_value(json!({"stations": m, "facts": {"xforge/interface-compat": {"breaking": false}, "xforge/impact": {"widened": false}}})).unwrap(),
         ..Default::default()
     };
     let run = sb.start(start, person()).await.unwrap();
@@ -464,6 +472,30 @@ async fn the_proposal_is_judged_by_its_sections_and_its_impact_by_what_the_start
     assert!(r["findings"].to_string().contains("warn"), "{r}");
     let r = b.verdict("impact", at(proposal("无").replace("## 影响面\n无\n\n", "")), iface).await;
     assert_eq!(r["verdict"], "fail", "{r}");
+}
+
+/// 接口增量有改动而启动时没声明 interface：影响面多了 interface。提案照实写就过、带事实 widened（站上「影响面扩大」
+/// 等主人）；写"无"不过——不叫模型为了过门禁把实话删掉。没开接口基线就看不出，照声明判。
+#[tokio::test]
+async fn an_interface_change_nobody_declared_widens_the_impact_for_the_owner_to_confirm() {
+    let b = bench();
+    let gov = |on: bool| format!("governance: {{spec: true, interface: {on}}}\n");
+    let at = |impact: &str, on: bool| {
+        json!({"out/proposal.md": proposal(impact), "out/interface-delta.yaml": IFACE_DELTA, ".conix/governance/xforge.yaml": gov(on)})
+    };
+    let none = json!({"impact": []});
+    let r = b.verdict("impact", at("- 接口：textkit 多一个公开函数 truncate，已有的不变", true), none.clone()).await;
+    assert_eq!(r["verdict"], "pass", "{r}");
+    assert_eq!(r["facts"], json!({"widened": true, "undeclared": ["interface"]}), "{r}");
+    assert!(r["findings"].to_string().contains("影响面扩大"), "{r}");
+    let r = b.verdict("impact", at("无", true), none.clone()).await;
+    assert_eq!(r["verdict"], "fail", "the delta says interface: {r}");
+    assert!(r["findings"].to_string().contains("增量里动到了 interface"), "{r}");
+    let r = b.verdict("impact", at("无", false), none).await;
+    assert_eq!(r["verdict"], "pass", "no interface baseline, nothing to see: {r}");
+    assert_eq!(r["facts"]["widened"], false, "{r}");
+    let r = b.verdict("impact", at("- 接口：textkit 多一个公开函数 truncate，已有的不变", true), json!({"impact": ["interface"]})).await;
+    assert_eq!((r["verdict"].as_str(), r["facts"]["widened"].as_bool()), (Some("pass"), Some(false)), "{r}");
 }
 
 const DESIGN: &str = "# 加 truncate：设计\n\n## 做法\n在 textkit 里加 truncate(text, n)。\n\n## 集成点\n无调用方，只是新函数。\n\n\

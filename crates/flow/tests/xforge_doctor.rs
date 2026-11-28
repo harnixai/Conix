@@ -89,8 +89,11 @@ async fn a_settings_file_that_does_not_read_or_a_switch_of_the_wrong_type_is_an_
     assert!(r.findings.iter().all(|f| f.path.as_deref() == Some(SETTINGS) || f.level != DoctorLevel::Error));
 }
 
+/// A review line on the build line's model, or not named, still runs: a warning, not an error, for
+/// each path that reviews (solid its designs, major from the spec on), saying what the first station
+/// will say. Only a line of the wrong shape is an error.
 #[tokio::test]
-async fn a_review_line_on_the_build_lines_model_or_unnamed_where_a_path_reviews_is_an_error() {
+async fn a_review_line_on_the_build_lines_model_or_unnamed_where_a_path_reviews_is_a_warning() {
     let p = project();
     let lines = |p: &Path, text: &str| edit(p, SETTINGS, |s| {
         let (head, rest) = s.split_once("lines:\n").unwrap();
@@ -98,25 +101,42 @@ async fn a_review_line_on_the_build_lines_model_or_unnamed_where_a_path_reviews_
         format!("{head}lines:\n{text}\n\n{tail}")
     });
     lines(p.path(), "  build: {model: m1}\n  review: {model: m1}");
-    let errors = of(&check(p.path()).await, DoctorLevel::Error);
-    assert_eq!(errors.len(), 1, "{errors:?}");
-    assert!(errors[0].contains("major 开着检视点 spec、design、tests-design，检视线与开发线是同一个模型 m1") && errors[0].contains("核对三条线"), "{}", errors[0]);
+    let r = check(p.path()).await;
+    assert_eq!(of(&r, DoctorLevel::Error), Vec::<String>::new());
+    let warns: Vec<String> = of(&r, DoctorLevel::Warn).into_iter().filter(|m| m.contains("检视线")).collect();
+    assert_eq!(warns.len(), 2, "{warns:?}");
+    assert!(warns[0].contains("solid 开着检视点 design、tests-design，检视线与开发线是同一个模型 m1") && warns[0].contains("照跑"), "{}", warns[0]);
+    assert!(warns[1].contains("major 开着检视点 spec、design、tests-design，检视线与开发线是同一个模型 m1"), "{}", warns[1]);
     // Not named: the instance's model, which is the build line's too when that is not named either.
     lines(p.path(), "  tests: {model: m2}");
-    let errors = of(&check(p.path()).await, DoctorLevel::Error);
-    assert!(errors.len() == 1 && errors[0].contains("检视线没写模型") && errors[0].contains("两条线就是同一个模型"), "{errors:?}");
-    // A path that reviews nothing owes no review line; a line of the wrong shape, a name not known.
+    let r = check(p.path()).await;
+    assert_eq!(of(&r, DoctorLevel::Error), Vec::<String>::new());
+    assert!(of(&r, DoctorLevel::Warn).iter().any(|m| m.contains("检视线没写模型") && m.contains("两条线就是同一个模型")), "{r:#?}");
+    // A line of the wrong shape is an error, a name not known a warning.
     lines(p.path(), "  build: {model: m1}\n  tests: [m2]\n  reviw: {model: m3}");
-    edit(p.path(), SETTINGS, |s| s.replace("  major: {spec: true, design: true, tests-design: true,", "  major: {spec: false, design: false, tests-design: false,"));
     let r = check(p.path()).await;
     let errors = of(&r, DoctorLevel::Error);
-    assert_eq!(errors.len(), 1, "major reviews nothing now: {errors:?}");
+    assert_eq!(errors.len(), 1, "{errors:?}");
     assert!(errors[0].contains("lines.tests 要写成 {model"), "{errors:?}");
     assert!(of(&r, DoctorLevel::Warn).iter().any(|m| m.contains("lines.reviw xforge 不认识")), "{r:#?}");
     // A review point that is no switch: the station's `when` would quietly not review.
-    edit(p.path(), SETTINGS, |s| s.replace("tests-design: false, code: false, tests: false, verify: false}\n  solid", "tests-design: \"yes\", code: false, tests: false, verify: false}\n  solid"));
+    edit(p.path(), SETTINGS, |s| s.replace("tests-design: true, code: false, tests: false, verify: false}\n  solid", "tests-design: \"yes\", code: false, tests: false, verify: false}\n  solid"));
     let errors = of(&check(p.path()).await, DoctorLevel::Error);
     assert!(errors.iter().any(|m| m.contains("review.major.tests-design 要是 true 或 false")), "{errors:?}");
+}
+
+/// solid reviews only its two lines' designs (0.5.0): a review point of the old switch list there
+/// does nothing, and the doctor says so rather than let a person think it is on.
+#[tokio::test]
+async fn a_review_point_solid_no_longer_has_is_a_warning_that_says_where_it_went() {
+    let p = project();
+    edit(p.path(), SETTINGS, |s| s.replace("  solid: {design: true, tests-design: true}", "  solid: {spec: true, design: true, tests-design: true, code: false}"));
+    let r = check(p.path()).await;
+    assert_eq!(of(&r, DoctorLevel::Error), Vec::<String>::new());
+    let warns = of(&r, DoctorLevel::Warn);
+    for k in ["spec", "code"] {
+        assert!(warns.iter().any(|m| m.contains(&format!("review.solid.{k} 不起作用")) && m.contains("走 major")), "{k}: {warns:?}");
+    }
 }
 
 #[tokio::test]

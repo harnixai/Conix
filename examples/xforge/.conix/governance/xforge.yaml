@@ -5,12 +5,13 @@ governance:
   interface: true   # 接口基线：xforge/interfaces/
 review:
   separate: false   # 作者也能批；团队要分开（交付过的人不能确认）就改 true
-  # 检视点：检视线（与开发线不同的模型）在哪几处检视。缺省 major 开设计阶段的 spec、design、tests-design，solid 都关。
-  # 全链条检视要人手工开：major: {code: true, tests: true, verify: true}。
+  # 检视点：检视线（与开发线不同的模型）在哪几处检视。solid 只检视设计环节（两路的设计），缺省开；
+  # major 缺省开 spec、design、tests-design，全链条检视要人手工开：major: {code: true, tests: true, verify: true}。
   major: {spec: true, design: true, tests-design: true, code: false, tests: false, verify: false}
-  solid: {spec: false, design: false, tests-design: false, code: false, tests: false, verify: false}
+  solid: {design: true, tests-design: true}
 
-# 三条线的模型：开发线写提案、设计、代码；测试线照规格写黑盒测试；检视线检视，要与开发线不同。
+# 三条线的模型：开发线写提案、设计、代码（Claude）；测试线照规格写黑盒测试、检视线检视（都用 DeepSeek）。
+# 检视线该与开发线不同：相同、或没写（用实例的缺省模型）照跑，第一站记一条告警，运行的报告里也有。
 # 换成实例里配了的模型（Conix 里 /model 列出的）；没写的线用实例的缺省模型。
 lines:
   build: {model: claude-sonnet-5-5}

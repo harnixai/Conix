@@ -57,6 +57,13 @@ stations:
         when: {gate: interface-compat, fact: breaking}
         separate: "${settings.review.separate}"
         binds: ["${output_dir}/interface-delta.yaml"]
+      # 增量动到的比启动时声明的多（门禁 impact 的事实 widened）：声明是人定的，多出来的也要人认。
+      - kind: confirm
+        who: owner
+        label: 影响面扩大
+        when: {gate: impact, fact: widened}
+        separate: "${settings.review.separate}"
+        binds: ["${output_dir}/proposal.md", "${output_dir}/interface-delta.yaml"]
       - {kind: gate, gate: packages-planned-quick}
     on_unmet: {rework_to: propose, max: 2}
 

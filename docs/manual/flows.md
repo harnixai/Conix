@@ -104,14 +104,16 @@ release: [carol]
   `conix flow verify --all` 扫项目里所有的 `conix/*/archive/*/`。
 - **内置的 `xforge`**（`conix flow install xforge` 装进项目）：规格驱动的开发流程，按风险三条路径，每条路径几条线：
   `xforge/quick`（只有开发线：提案、实施、验证、归档）、`xforge/solid`（开发线与测试线：规格侧定了分两路，各在自己的 worktree 里，
-  一路实现、一路只照规格写黑盒测试，互相看不到，合起来用测试跑实现）、`xforge/major`（先澄清，再加一条与开发线不同模型的检视线）。
+  一路实现、一路只照规格写黑盒测试，互相看不到，合起来用测试跑实现；检视线只检视两路的设计）、`xforge/major`（先澄清，检视线检视规格侧
+  与两路的设计，可以开到整条链）。
   规格在 `conix/xforge/specs/`，站里的会话用 `xspec`、`xarch`、`xledger`、`xpkg` 记规格与接口增量、台账、工作包，归档时增量并进基线。
   项目要准备的：`.conix/governance/verify.sh`（实施站的出口跑它：单测、lint），可选的 `.conix/governance/constitution.yaml`
   （设计逐条对照的原则），`.conix/governance/xforge.yaml` 里：
-  - `lines`：三条线的模型，`build`（开发线）、`tests`（测试线）、`review`（检视线，要与开发线不同；测试线与检视线可以是同一个），
-    没写的用实例的缺省模型；
-  - `review.major`、`review.solid`：哪几个检视点由检视线检视。major 缺省开设计阶段的 `spec`、`design`、`tests-design`；
-    全链条（`code`、`tests`、`verify`）要你手工开。检视线记下问题就自动打回开发线修，再检视一轮确认；两轮还没结清停下等你；
+  - `lines`：三条线的模型，`build`（开发线）、`tests`（测试线）、`review`（检视线）。比如开发线 Claude、测试线与检视线 DeepSeek。
+    检视线该与开发线不同：相同（或没写）也照跑，运行的第一站记一条告警、界面提示一次、运行的报告里也有；没写的线用实例的缺省模型；
+  - `review.solid`、`review.major`：哪几个检视点由检视线检视。solid 只有设计环节的 `design`、`tests-design`，缺省开；major 缺省开
+    `spec`、`design`、`tests-design`，全链条（`code`、`tests`、`verify`）要你手工开。检视线记下问题就自动打回开发线修，再检视一轮确认；
+    两轮还没结清停下等你；
   - verify 菜单的 `blackbox` 一项（黑盒测试放哪、怎么跑）：solid、major 合起来那一站跑它。
 
   合起来没过时会话判错在哪一边，你决定打回哪一路（`/rework fork` 两路都重做，`/rework fork/build` 只重做开发线）。solid、major

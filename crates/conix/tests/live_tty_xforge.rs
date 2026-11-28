@@ -206,7 +206,7 @@ fn finish(t: &mut Tty, lv: &Live, run: &str, limit: Duration) -> Value {
             let key = format!("{run} {st} {}", r["round"]);
             if waits_confirm(r) {
                 let why = match st.as_str() {
-                    "propose" => "破坏性改动看过了，批准",
+                    "propose" => "破坏性改动与影响面看过了，批准",
                     "clarify" => "范围定了",
                     "seal" => "规格侧定了",
                     "join" => "两路对上了",
