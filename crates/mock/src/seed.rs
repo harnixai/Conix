@@ -173,6 +173,7 @@ pub fn busy() -> Seed {
             def_state: port::DefState::Current,
             proposals: vec![],
             worktree: None,
+            warnings: vec![],
         })
         .collect();
     Seed {

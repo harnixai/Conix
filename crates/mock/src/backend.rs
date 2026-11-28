@@ -909,6 +909,7 @@ impl ScriptedBackend {
             def_state: port::DefState::Current,
             proposals: vec![],
             worktree: None,
+            warnings: vec![],
         };
         advance(&mut view);
         Ok(view)

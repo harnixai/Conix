@@ -366,7 +366,35 @@ pub(crate) fn run_view(v: &harnix_flow::RunView) -> port::RunView {
         def_state: port::DefState::Current,
         proposals: rec.proposals.iter().filter_map(proposal).collect(),
         worktree: worktree(rec),
+        warnings: warnings(rec),
     }
+}
+
+/// 各站这一轮的门禁告警，按定义里站的顺序，同一句只留一条（重判过的门禁会把同一句再记一遍）。
+fn warnings(rec: &harnix_flow::RunRecord) -> Vec<port::RunWarning> {
+    let mut out: Vec<port::RunWarning> = vec![];
+    for s in &rec.def.stations {
+        let Some(r) = rec.stations.get(&s.id) else {
+            continue;
+        };
+        for c in r.checks.iter().filter(|c| c.round == r.round) {
+            for f in c
+                .findings
+                .iter()
+                .filter(|f| f.severity == harnix_flow::Severity::Warn)
+            {
+                let w = port::RunWarning {
+                    station: StationId(s.id.clone()),
+                    check: c.label.clone(),
+                    message: f.message.clone(),
+                };
+                if !out.contains(&w) {
+                    out.push(w);
+                }
+            }
+        }
+    }
+    out
 }
 
 /// 运行自己的 worktree：子运行借父运行的或自己分叉出来的，由流程库合回父运行，人不收尾，但也列出来

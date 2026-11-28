@@ -48,6 +48,7 @@ flows:
   def_changed: " · 已改过"
   def_deleted: " · 已删除"
   ended_notice: "运行已结束：在主会话里说的话不影响运行"
+  run_warning: "{run} 的「{station}」告警：{message}"
   running: "{n} 个在跑"
   main_agent: "主 Agent"
   own_session: "  独立会话"

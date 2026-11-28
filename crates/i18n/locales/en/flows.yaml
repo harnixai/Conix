@@ -47,6 +47,7 @@ flows:
   def_changed: " · since changed"
   def_deleted: " · since deleted"
   ended_notice: "The run has ended: what you say in its main session does not affect it"
+  run_warning: "{run}, station {station}, warns: {message}"
   running: "{n} running"
   main_agent: "main agent"
   own_session: "  own session"

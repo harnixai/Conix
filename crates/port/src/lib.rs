@@ -28,7 +28,7 @@ pub use common::{Millis, Usage};
 pub use event::{CompactOutcome, ConnState, Event, NoticeLevel};
 pub use flow::{
     BundleInfo, CommandInfo, ConditionalExit, DefState, FlowDetail, FlowOrigin, FlowSummary, Pace,
-    ProposalKind, ProposalStatus, ProposalView, RunOp, RunStatus, RunSummary, RunView,
+    ProposalKind, ProposalStatus, ProposalView, RunOp, RunStatus, RunSummary, RunView, RunWarning,
     SampleBundle, StationStatus, StationTask, StationView, VoteView, WorktreeEnd, WorktreeView,
 };
 pub use ids::{

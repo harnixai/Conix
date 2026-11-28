@@ -160,6 +160,8 @@ pub struct Flows {
     /// 已结束的运行的摘要：第一次要时把运行记录扫一遍，之后跟着派工器的变化更新，
     /// 免得「已结束」每取一页都把所有运行记录读一遍。
     ended: std::sync::Mutex<Option<Vec<port::RunSummary>>>,
+    /// 已经告诉过人的门禁告警（运行、站、检查、那句话）：同一条只在第一次出现时说。
+    warned: std::sync::Mutex<BTreeSet<String>>,
     /// 流程包：插件启停时整体换（[`swap::SwapPacks`]）。
     swap: Arc<swap::SwapPacks>,
     /// 启用着的插件带来的门禁与步骤（`PluginGates` / `PluginPrograms` 按它找插件函数）。
@@ -276,6 +278,7 @@ pub async fn start(hub: &Hub, cfg: FlowsConfig) -> anyhow::Result<Arc<Flows>> {
         author: std::sync::OnceLock::new(),
         published: Default::default(),
         ended: Default::default(),
+        warned: Default::default(),
         author_host: Arc::new(tools::ConixAuthorHost::new(me.clone(), cfg.command_gates)),
         swap,
         plugin_map,
@@ -606,6 +609,32 @@ impl Flows {
             .take(limit as usize)
             .cloned()
             .collect())
+    }
+
+    /// 运行里第一次出现的门禁告警：记进实例日志，给界面一条提示（不挡路，但人该知道，比如检视线与开发线同一个模型）。
+    fn new_warnings(&self, v: &port::RunView) -> Vec<Event> {
+        let mut warned = self.warned.locked();
+        v.warnings
+            .iter()
+            .filter(|w| {
+                warned.insert(format!(
+                    "{}\u{1f}{}\u{1f}{}\u{1f}{}",
+                    v.summary.id, w.station, w.check, w.message
+                ))
+            })
+            .map(|w| {
+                tracing::warn!(run = %v.summary.id, station = %w.station, check = w.check, "{}", w.message);
+                Event::Notice {
+                    level: port::NoticeLevel::Warn,
+                    text: i18n::t!(
+                        "flows.run_warning",
+                        run = v.summary.id,
+                        station = w.station,
+                        message = w.message
+                    ),
+                }
+            })
+            .collect()
     }
 
     /// 一个运行变了：结束了就记进「已结束」（还没扫过就等第一次要时再扫）。
@@ -987,6 +1016,10 @@ async fn follow(flows: Arc<Flows>, mut rx: broadcast::Receiver<harnix_flow::runn
             };
             seen_flows.insert(v.summary.flow.clone());
             flows.note_ended(&v.summary);
+            let notices = flows.new_warnings(&v);
+            if !notices.is_empty() {
+                hub.emit_events(notices);
+            }
             if is_ended(&v.summary.status) {
                 hub.write_run_report(&v);
             }

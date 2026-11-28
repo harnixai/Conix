@@ -84,6 +84,7 @@ impl Hub {
             "def_digest": v.def_digest,
             "main_session": self.session_brief(&v.main_session.0),
             "stations": stations,
+            "warnings": v.warnings,
             "dir": dir,
             "written_ms": self.now(),
         })

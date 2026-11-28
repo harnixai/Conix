@@ -211,6 +211,17 @@ pub struct RunView {
     /// 运行在自己的 worktree 里（`workspace: worktree`）：分支、怎么收尾的；在项目里跑的是 `None`。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub worktree: Option<WorktreeView>,
+    /// 各站这一轮门禁报的告警（过了的也有）：不挡路、但人该知道的，比如检视线与开发线是同一个模型。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<RunWarning>,
+}
+
+/// 一条门禁告警：哪一站、哪道检查、说了什么。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RunWarning {
+    pub station: StationId,
+    pub check: String,
+    pub message: String,
 }
 
 /// 运行的 worktree（flows.md §6.4）：运行结束后由人定合进项目、留分支还是丢掉（`RunOp::EndWorktree`）。
