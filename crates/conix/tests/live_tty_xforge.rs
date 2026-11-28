@@ -272,7 +272,7 @@ fn merge(t: &mut Tty, lv: &Live, run: &str) {
 }
 
 fn shows_finished(t: &mut Tty, lv: &Live, changes: usize) {
-    // 流程标签里结束的运行计数（`已结束 (n)`）：两路的子运行也各算一次。
+    // 流程标签里结束的运行计数（`已结束 (n)`）只数人起的那几次：两路的子运行收在父运行底下。
     let ended: Vec<String> = runs(lv)
         .into_iter()
         .filter(|(_, v)| v["status"] == "finished")
@@ -285,7 +285,7 @@ fn shows_finished(t: &mut Tty, lv: &Live, changes: usize) {
     assert_eq!(top, changes, "结束的变更：{ended:?}");
     t.keys("^N");
     t.wait_text("流程标签", QUICK, "已结束");
-    t.wait_text("结束的计数", QUICK, &format!("已结束 ({})", ended.len()));
+    t.wait_text("结束的计数", QUICK, &format!("已结束 ({changes})"));
     t.keys("^N ^N Esc");
 }
 

@@ -892,6 +892,7 @@ impl ScriptedBackend {
                 } else {
                     port::Pace::Auto
                 },
+                parent: None,
             },
             main_session: main.id,
             stations: stations

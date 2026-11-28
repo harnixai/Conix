@@ -79,9 +79,8 @@ impl State {
             }
         }
         let ended: Vec<&RunSummary> = self
-            .domain
-            .ended_runs
-            .iter()
+            .ended_tree()
+            .into_iter()
             .filter(|r| {
                 filter.is_empty()
                     || r.subject.contains(filter.as_str())
@@ -103,6 +102,31 @@ impl State {
             }
         }
         out
+    }
+
+    /// 已结束的运行，子运行紧跟在父运行后面（父运行不在这一页里的照常排）：人起了三次、其中两次各分了两路，
+    /// 列出来是三组，不是七个并排的。
+    pub(crate) fn ended_tree(&self) -> Vec<&RunSummary> {
+        let runs = &self.domain.ended_runs;
+        let mut out = vec![];
+        for r in runs.iter().filter(|r| !self.ended_nests(r)) {
+            out.push(r);
+            out.extend(runs.iter().filter(|c| c.parent.as_ref() == Some(&r.id)));
+        }
+        out
+    }
+
+    /// 已结束的这个运行收在它的父运行底下（父运行也在已结束的列表里）。
+    pub(crate) fn ended_nests(&self, r: &RunSummary) -> bool {
+        r.parent
+            .as_ref()
+            .is_some_and(|p| self.domain.ended_runs.iter().any(|x| &x.id == p))
+    }
+
+    /// 「已结束 (n)」的 n：人起的那几次，子运行不另算。
+    pub(crate) fn ended_count(&self) -> usize {
+        let runs = &self.domain.ended_runs;
+        runs.iter().filter(|r| !self.ended_nests(r)).count()
     }
 
     pub fn selected_flow_row(&self) -> Option<FlowRow> {
@@ -362,7 +386,7 @@ pub(crate) fn upper_lines(s: &State, width: usize) -> Vec<Line> {
             }
             FlowRow::Ended => {
                 let mark = if s.ui.ended_expanded { "▾" } else { "▸" };
-                let n = s.domain.ended_runs.len();
+                let n = s.ended_count();
                 let label = if s.domain.ended_more {
                     i18n::t!("flows.ended_more", n = n)
                 } else {
@@ -379,8 +403,10 @@ pub(crate) fn upper_lines(s: &State, width: usize) -> Vec<Line> {
                 if is_ended(&r.status) {
                     // 不分流程平铺，所以写出它是哪个流程的；状态只靠符号（✓ 完成、✗ 取消）。
                     let end = r.ended_ms.unwrap_or(now);
+                    // 子运行收在父运行底下，多缩两格。
+                    let indent = if s.ended_nests(r) { "      " } else { "    " };
                     return crate::sessions::split_line(
-                        Line::toned("    ", Tone::Normal)
+                        Line::toned(indent, Tone::Normal)
                             .push(format!("{g} "), tone)
                             .push(r.subject.clone(), Tone::Normal)
                             .push(format!("  {}", s.flow_title(&r.flow)), Tone::Dim),
@@ -1146,4 +1172,48 @@ pub(crate) fn conditional_text(c: &port::ConditionalExit) -> String {
         .skip(1)
         .map(|(t, _)| t)
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use port::RunId;
+
+    fn ended(id: &str, parent: Option<&str>) -> RunSummary {
+        RunSummary {
+            id: RunId(id.into()),
+            flow: "xforge/solid".into(),
+            subject: id.into(),
+            status: RunStatus::Finished,
+            current: None,
+            stations_done: 0,
+            stations_total: 0,
+            started_ms: 0,
+            ended_ms: Some(1),
+            usage: Default::default(),
+            bundle: None,
+            pace: Default::default(),
+            parent: parent.map(|p| RunId(p.into())),
+        }
+    }
+
+    /// 人起了两次、其中一次分了两路：「已结束 (2)」，两个子运行收在父运行底下；父运行不在列表里的子运行照常排。
+    #[test]
+    fn ended_child_runs_sit_under_their_parent_and_are_not_counted() {
+        let mut s = State::new(
+            std::sync::Arc::new(keys::Keymap::default()),
+            tui::Size::new(160, 45),
+            0,
+        );
+        s.domain.ended_runs = vec![
+            ended("b-1", Some("s-1")),
+            ended("q-1", None),
+            ended("t-1", Some("s-1")),
+            ended("s-1", None),
+            ended("orphan", Some("gone")),
+        ];
+        assert_eq!(s.ended_count(), 3);
+        let order: Vec<&str> = s.ended_tree().iter().map(|r| r.id.0.as_str()).collect();
+        assert_eq!(order, ["q-1", "s-1", "b-1", "t-1", "orphan"]);
+    }
 }

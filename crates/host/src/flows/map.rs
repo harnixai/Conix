@@ -257,6 +257,7 @@ fn summary_of(rec: &RunRecord, phase: &Phase, now: u64) -> port::RunSummary {
         usage: usage(&rec.usage()),
         bundle: rec.def.bundle.clone(),
         pace: pace(rec.pace),
+        parent: rec.parent.as_ref().map(|p| RunId(p.run.clone())),
     }
 }
 
@@ -280,6 +281,7 @@ pub(crate) fn run_summary(s: &harnix_flow::RunSummary) -> port::RunSummary {
         // 列表摘要不带运行记录里的步调，取名字里的包；读得到记录时用的是上面那个。
         bundle: harnix_flow::bundle::split(&s.flow).map(|(b, _)| b.to_string()),
         pace: port::Pace::Auto,
+        parent: s.parent.clone().map(RunId),
     }
 }
 

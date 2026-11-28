@@ -165,6 +165,7 @@ pub fn busy() -> Seed {
                 usage: Usage::default(),
                 bundle: None,
                 pace: port::Pace::Auto,
+                parent: None,
             },
             main_session: SessionId::from("b001"),
             stations: vec![],

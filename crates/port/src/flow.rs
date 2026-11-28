@@ -175,6 +175,9 @@ pub struct RunSummary {
     pub bundle: Option<String>,
     #[serde(default)]
     pub pace: Pace,
+    /// 子运行（由父运行的站起的）挂在哪个运行下：界面把它收在父运行底下，不当成人起的一次运行来数。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<RunId>,
 }
 
 /// 与 Harnix flow 的运行状态一致，"等待 / 暂停中 / 已暂停"是它派生出来的。
