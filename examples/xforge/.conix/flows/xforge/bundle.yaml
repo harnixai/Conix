@@ -6,6 +6,8 @@ description: >-
   检视线（与开发线不同的模型）只检视两路的设计；major 是高风险或跨系统的变更，先澄清，检视线检视规格侧与两路的设计、可以开到整条链，
   检视、打回、修复、确认。
 version: 0.5.0
+# 包的设置、命令门禁的 plan、子运行在自己的 worktree 里、模型与站的开关读设置、门禁告警进运行的报告，都是 0.1.11 才有的。
+requires: {conix: ">=0.1.11"}
 flows: [quick, solid, major, line-build, line-tests]
 # 只按风险选这三条；line-build、line-tests 是 solid、major 的两路，只由它们的 fork 站起。
 start:

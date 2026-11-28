@@ -59,6 +59,7 @@ fn the_three_paths_and_every_part_they_name_hold_together() {
     let p = packs();
     let meta: BundleMeta = serde_yaml::from_str(&p.bundle_file("xforge", "bundle.yaml").unwrap()).unwrap();
     assert_eq!(meta.version, "0.5.0");
+    assert_eq!(meta.requires.as_ref().and_then(|r| r.conix.as_deref()), Some(">=0.1.11"));
     assert_eq!(meta.flows, ["quick", "solid", "major", "line-build", "line-tests"]);
     assert_eq!(meta.start.route, ["quick", "solid", "major"]);
     assert_eq!(meta.start.triage.as_deref(), Some("triage"));

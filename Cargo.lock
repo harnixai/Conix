@@ -613,7 +613,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "app"
-version = "0.1.10-2026112502"
+version = "0.1.11-2026112701"
 dependencies = [
  "anyhow",
  "clap",
@@ -994,7 +994,7 @@ checksum = "1c133bc6a41be0d194c306b5506d15e6feeea7b1d6604bd3f8310dfb2ca96486"
 
 [[package]]
 name = "client"
-version = "0.1.10-2026112502"
+version = "0.1.11-2026112701"
 dependencies = [
  "async-trait",
  "host",
@@ -1048,7 +1048,7 @@ dependencies = [
 
 [[package]]
 name = "conix"
-version = "0.1.10-2026112502"
+version = "0.1.11-2026112701"
 dependencies = [
  "anyhow",
  "app",
@@ -1407,7 +1407,7 @@ dependencies = [
 
 [[package]]
 name = "engine"
-version = "0.1.10-2026112502"
+version = "0.1.11-2026112701"
 dependencies = [
  "agix",
  "anyhow",
@@ -1835,7 +1835,7 @@ checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 
 [[package]]
 name = "host"
-version = "0.1.10-2026112502"
+version = "0.1.11-2026112701"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2004,7 +2004,7 @@ dependencies = [
 
 [[package]]
 name = "i18n"
-version = "0.1.10-2026112502"
+version = "0.1.11-2026112701"
 dependencies = [
  "serde_yaml",
 ]
@@ -2393,7 +2393,7 @@ dependencies = [
 
 [[package]]
 name = "keys"
-version = "0.1.10-2026112502"
+version = "0.1.11-2026112701"
 dependencies = [
  "crossterm",
  "i18n",
@@ -2611,7 +2611,7 @@ dependencies = [
 
 [[package]]
 name = "mock"
-version = "0.1.10-2026112502"
+version = "0.1.11-2026112701"
 dependencies = [
  "async-trait",
  "port",
@@ -2624,7 +2624,7 @@ dependencies = [
 
 [[package]]
 name = "model"
-version = "0.1.10-2026112502"
+version = "0.1.11-2026112701"
 dependencies = [
  "i18n",
  "keys",
@@ -3093,7 +3093,7 @@ checksum = "f6b464fbc74e149a392436b17d523f769e057cb6877f6a5c4618bc6f11800548"
 
 [[package]]
 name = "port"
-version = "0.1.10-2026112502"
+version = "0.1.11-2026112701"
 dependencies = [
  "async-trait",
  "serde",
@@ -4820,7 +4820,7 @@ dependencies = [
 
 [[package]]
 name = "tui"
-version = "0.1.10-2026112502"
+version = "0.1.11-2026112701"
 dependencies = [
  "i18n",
  "ratatui",
@@ -5567,7 +5567,7 @@ dependencies = [
 
 [[package]]
 name = "wire"
-version = "0.1.10-2026112502"
+version = "0.1.11-2026112701"
 dependencies = [
  "serde",
  "serde_json",
