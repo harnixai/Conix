@@ -292,11 +292,36 @@ pub async fn start(hub: &Hub, cfg: FlowsConfig) -> anyhow::Result<Arc<Flows>> {
     ));
     tokio::spawn(follow(flows.clone(), runner.changes()));
     hub.set_flows(flows.clone()).await;
+    if std::env::var(DEV_REPIN).as_deref() == Ok("1") {
+        flows.repin_active().await;
+    }
     runner.start().await;
     Ok(flows)
 }
 
+/// 只给开发流程包用（LIVE 从快照续跑，docs/design/testing.md §8.2）：实例起来时把没结束的运行换钉成包现在的样子，
+/// 改了包不用从头跑。环境变量是开关，端口命令与模型的工具都碰不到它；平常的实例里运行照旧按启动时钉的判。
+pub const DEV_REPIN: &str = "CONIX_DEV_REPIN";
+
 impl Flows {
+    /// [`DEV_REPIN`]：每个没结束的运行换钉一次，记进实例日志。换不了的（走过的站在新定义里没了）照旧跑旧的。
+    async fn repin_active(&self) {
+        let by = harnix_flow::Actor::new("system", DEV_REPIN);
+        for s in self.runs(None, None).await.unwrap_or_default() {
+            if s.status != RunStatus::Active {
+                continue;
+            }
+            match self.engine.repin(&s.id, by.clone()).await {
+                Ok(o) if o.value["unchanged"] == true => {}
+                // 派工器还没起：它起来时照运行记录把该做的接着做（recover），这里不派。
+                Ok(o) => {
+                    tracing::warn!(run = s.id, from = %o.value["from"], to = %o.value["to"], "dev: repinned to the flow and its parts (gates, scripts) as they are now")
+                }
+                Err(e) => tracing::warn!(run = s.id, error = %e, "dev: not repinned"),
+            }
+        }
+    }
+
     /// 实例收尾：派工器的任务不再等（运行不取消，下次启动接着做）。
     pub async fn stop(&self) {
         if !self.runner.stop(std::time::Duration::from_secs(5)).await {

@@ -52,3 +52,4 @@ workspace 的成员。为什么分叉、改成什么样见 `docs/design/flows.md
 | 引用的根多一个 `settings`（`refs::ROOTS`、`context_in`：运行钉住的设置），包没声明设置时校验报；站的 `when` 可以读它（关着的站进站即 `skipped`）；`main` 与执行方式的 `model` / `provider`、`agent` 的 `model` / `agent_type` 可写一个 `${settings.<路径>}`（`validate::named_problem`），派工时取（`work::named`，读不到就是不写，用宿主的缺省），这样的模型不对照目录 | flows.md §7.1 | — | 是 |
 | 运行的提交（分叉、交付、合回）开头的词由宿主给（`ProjectLayout::commit_word`、`with_commit_word`，缺省 `DEFAULT_COMMIT_WORD` 即原来的 `Harnix task`）：提交落在用户的历史里，宿主写自己的名字 | flows.md §6.5 | — | 否 |
 | 门禁结果回写撞上并发提交：第一次记 debug，再撞才 warn（同一站的门禁一起判完、一起提交，撞一次是常事；结果是重交、不是重跑） | — | — | 否 |
+| 开发用的换钉：`Engine::repin`（换成包现在的定义与部件，留设置与各站记录；进过的站没了就拒；事件 `run.repinned`） | flows.md §7.15 | — | 否 |

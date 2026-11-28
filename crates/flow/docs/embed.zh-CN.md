@@ -489,6 +489,8 @@ Conix 在 Harnix 0.4.7 分叉了这个库，先把站的治理（门禁、确认
   被信号杀、超时是回答；被拒、起不来、调用写错抛错（`code: "exec"`）。
 - **运行的提交开头的词**：**`ProjectLayout::with_commit_word`**（字段 `commit_word`，缺省 `kernel::layout::DEFAULT_COMMIT_WORD`，即原来的 `Harnix task`）。
   分叉、交付、合回的提交落在用户的历史里，宿主写自己的名字（Conix：`Conix run`）。
+- **开发用的换钉**：**`Engine::repin(run, by)`** 把没结束的运行换钉成它的流程在包里现在的样子（定义与部件），留着设置与各站的记录；
+  进过的站在新定义里没了就拒。只给开发流程包用：宿主决定什么时候调（Conix：实例启动时 `CONIX_DEV_REPIN=1`），别暴露给人或模型。
 
 ### `FLOW_API_VERSION = 1`
 

@@ -1882,6 +1882,59 @@ impl Engine {
         })
     }
 
+    /// For developing a bundle only, never offered to a person or a model: pin `run` afresh to its
+    /// flow as the packs hold it now — definition, gates, scripts, skills — keeping the settings it
+    /// started under, what it wrote and every station's record. A host calls it when it is told to
+    /// (Conix: `CONIX_DEV_REPIN=1` at the instance's start), so a long run resumed from a snapshot
+    /// goes on under the edited bundle instead of starting over. A station that has been entered must
+    /// still be in the flow — its record would refer to nothing — else it is refused; stations new
+    /// to the flow are added as not entered. An unchanged definition is left alone. `value`:
+    /// `{run, from, to}` (the digests), or `{run, unchanged: true}`.
+    pub async fn repin(&self, run: &str, by: Actor) -> Result<Outcome> {
+        transact!(self, by.clone(), |t| {
+            t.load(run).await?;
+            let rec = t.get(run);
+            if !rec.is_active() {
+                return invalid(format!("run {run} has ended: there is nothing to go on with"));
+            }
+            let packs = self.packs_for(rec.project_root.as_deref());
+            let (def, digest) = packs.flow(&rec.flow).ok_or_else(|| FlowError::NotFound(format!("flow {}", rec.flow)))?;
+            let mut parts = super::parts::pin(&def, packs.as_ref());
+            parts.settings = pinned_settings(&def, packs.as_ref(), rec.parts.settings.clone())?;
+            if digest == rec.def_digest && parts == rec.parts {
+                return Ok(json!({"run": run, "unchanged": true}));
+            }
+            check_def(&def, packs.as_ref())?;
+            let gone: Vec<String> = rec
+                .stations
+                .iter()
+                .filter(|(id, s)| s.status != StationStatus::Pending && def.station(id).is_none())
+                .map(|(id, _)| id.clone())
+                .collect();
+            if !gone.is_empty() {
+                return invalid(format!("run {run} has been through {} that {} no longer has: go on from before them", gone.join(", "), rec.flow));
+            }
+            let from = rec.def_digest.clone();
+            {
+                let rec = t.get_mut(run);
+                rec.stations.retain(|id, _| def.station(id).is_some());
+                for s in &def.stations {
+                    rec.stations.entry(s.id.clone()).or_default();
+                }
+                rec.def_digest = digest.clone();
+                rec.parts = parts;
+                rec.def = def.clone();
+            }
+            let mut m = t.m(run);
+            let data = json!({"from": from, "to": digest});
+            m.emit("run.repinned", None, None, data.clone());
+            m.log("repin", None, None, data);
+            m.advance_later();
+            t.settle().await?;
+            Ok(json!({"run": run, "from": from, "to": digest}))
+        })
+    }
+
     /// A station's session proposes, under its task's claim, that a person rework the run to
     /// `to` — one of the station's rework points ([`super::def::Station::rework_points`]) — or
     /// cancel it. Recorded on the run, open until someone reworks there (accepted), the station

@@ -654,6 +654,10 @@ is so as not to collide with Harnix's own next one; what changes for a host is l
 - **The word a run's commits start with**: **`ProjectLayout::with_commit_word`** (field `commit_word`, by default
   `kernel::layout::DEFAULT_COMMIT_WORD`, the old `Harnix task`). Fork, delivery and merge commits land in the user's
   history, so the host names itself (Conix: `Conix run`).
+- **Repinning, for development**: **`Engine::repin(run, by)`** pins a run that has not ended to its flow as the packs hold
+  it now (definition and parts), keeping its settings and every station's record; a station it has been through that the
+  new definition lacks refuses it. For developing a bundle only: the host decides when (Conix: `CONIX_DEV_REPIN=1` at an
+  instance's start) and offers it to no person or model.
 
 ### `FLOW_API_VERSION = 1`
 
