@@ -852,11 +852,17 @@ async fn the_builtin_xforge_solid_forks_the_build_and_tests_lines_and_joins_them
             .any(|n| n["label"] == "批准破坏性改动" && n["value"] == false),
         "{left_out:?}"
     );
-    assert!(
-        !p.confirmed.iter().any(|s| s == "propose"),
-        "{:?}",
-        p.confirmed
-    );
+    // 启动时没声明 interface、增量里加了一个公开函数：提案站等的是主人认「影响面扩大」，不是批准破坏性改动。
+    let labels: Vec<&str> = rec["stations"]["propose"]["checks"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|c| {
+            c["kind"] == "confirm" && c["status"] == "pass" && c["when"]["required"] != false
+        })
+        .filter_map(|c| c["label"].as_str())
+        .collect();
+    assert_eq!(labels, ["影响面扩大"], "{:?}", p.confirmed);
 
     // 父运行在 .wkts/ 下自己的 worktree 里，运行目录在那里面。
     let wt = rec["worktree"]["path"]
