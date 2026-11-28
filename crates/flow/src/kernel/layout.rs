@@ -46,7 +46,14 @@ pub struct ProjectLayout {
     /// when set, a run's own directory is `<project>/<artifacts>/runs/<run>/`, its process directory
     /// `_run/` in it, and a bundle's data `<project>/<artifacts>/<bundle>/`. Unset: as before.
     pub artifacts: Option<String>,
+    /// What the commits the library makes for a run start with: `<word> <run> (<flow>): …`,
+    /// `Merge <branch> (<word> <run>)`. They land in the user's history, so the host names itself
+    /// there ([`DEFAULT_COMMIT_WORD`] unless it says).
+    pub commit_word: String,
 }
+
+/// The commits' word when the host gives none.
+pub const DEFAULT_COMMIT_WORD: &str = "Harnix task";
 
 /// A run's process directory in its own directory, when there is a directory of artifacts.
 pub const PROCESS_DIR: &str = "_run";
@@ -62,7 +69,16 @@ impl ProjectLayout {
             agent_dirs: vec![],
             runs: RUNS_DIR.into(),
             artifacts: None,
+            commit_word: DEFAULT_COMMIT_WORD.into(),
         }
+    }
+
+    /// What the library's commits for a run start with (in Conix: `Conix run`).
+    pub fn with_commit_word(mut self, word: impl Into<String>) -> Self {
+        let word = word.into();
+        let word = word.trim();
+        self.commit_word = if word.is_empty() { DEFAULT_COMMIT_WORD.into() } else { word.into() };
+        self
     }
 
     /// The project's directory of artifacts (in Conix): one plain name, as `with_runs_dir` keeps it.
@@ -160,6 +176,14 @@ impl ProjectLayout {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_commits_word_is_the_hosts_and_a_blank_one_is_the_default() {
+        let l = ProjectLayout::new(".conix", "/w", "conix/flow");
+        assert_eq!(l.commit_word, DEFAULT_COMMIT_WORD);
+        assert_eq!(l.clone().with_commit_word(" Conix run ").commit_word, "Conix run");
+        assert_eq!(l.with_commit_word("  ").commit_word, DEFAULT_COMMIT_WORD);
+    }
 
     #[test]
     fn everything_is_where_the_host_says() {

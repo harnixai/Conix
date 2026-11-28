@@ -436,7 +436,7 @@ exit: [{kind: children, require: all}]   # all（缺省）| any | 正整数：�
   `workspace: project` 的流程读定义时就拒；没写的看启动时选了什么，派任务时父运行不在自己的 worktree 里，任务失败并写明原因。
   `workspace` 只认 `worktree`（不写就是原来的样子：子运行与父运行共用 worktree）。
 - **分叉提交。** 这一站本轮第一次派这种任务时，派工器在父运行的 worktree 里把没提交的全部提交到父运行的分支
-  （`Harnix task <父运行> (<流程>): forked at <站>`，什么都没改也取当时的 HEAD），记在站上（`StationRec::fork`：轮次、提交）。
+  （`<提交词> <父运行> (<流程>): forked at <站>`，提交词由宿主给，Conix 是 `Conix run`；什么都没改也取当时的 HEAD），记在站上（`StationRec::fork`：轮次、提交）。
   同一轮的子运行都从这一个提交分出去，哪怕前一个已经合回去、父运行的分支往前走了；打回后的新一轮另做一次。
 - **子运行的 worktree** 是 `<worktrees_root>/<子运行>`，分支 `<前缀>/<子运行>`，从分叉提交建；与父运行的并排，不嵌套
   （Conix 只认 `.wkts/<运行>` 这一层）。子运行的 `base_commit` 就是分叉提交；`WorktreeRec::fork` 记父运行的 worktree、分支和映射过来的输出目录。

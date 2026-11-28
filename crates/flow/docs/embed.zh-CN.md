@@ -487,6 +487,8 @@ Conix 在 Harnix 0.4.7 分叉了这个库，先把站的治理（门禁、确认
   剩下的。档位按调用方：门禁、`plan`、`foreach`、doctor 的脚本，只读的子命令，运行之外的一切命令 → `Read`；运行里会写的子命令与命令步骤 →
   `Workspace`（运行目录、包的数据目录、站的 `writes` 每条的固定前缀）。网络与环境按 `bundle.yaml` 的 `exec`，减去宿主的拒绝表。退出非 0、
   被信号杀、超时是回答；被拒、起不来、调用写错抛错（`code: "exec"`）。
+- **运行的提交开头的词**：**`ProjectLayout::with_commit_word`**（字段 `commit_word`，缺省 `kernel::layout::DEFAULT_COMMIT_WORD`，即原来的 `Harnix task`）。
+  分叉、交付、合回的提交落在用户的历史里，宿主写自己的名字（Conix：`Conix run`）。
 
 ### `FLOW_API_VERSION = 1`
 

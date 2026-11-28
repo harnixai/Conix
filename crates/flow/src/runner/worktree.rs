@@ -159,10 +159,10 @@ pub(crate) async fn unmake(engine: &Engine, root: &str, w: &WorktreeRec) {
 }
 
 /// The commit message for what a task left in its worktree.
-pub(super) fn work_message(rec: &RunRecord) -> String {
+pub(super) fn work_message(rec: &RunRecord, word: &str) -> String {
     let what = if rec.title.is_empty() { &rec.subject } else { &rec.title };
     let line = what.lines().next().unwrap_or_default().trim();
-    format!("Harnix task {} ({}): {line}", rec.id, rec.flow)
+    format!("{word} {} ({}): {line}", rec.id, rec.flow)
 }
 
 /// Why a worktree could not be ended.
@@ -211,8 +211,9 @@ pub(crate) async fn end(engine: &Engine, run: &str, how: WorktreeEnd, by: Actor)
     let Some(root) = rec.project_root.clone() else {
         return Err(FlowError::Invalid(format!("run {run} has no project")).into());
     };
-    let message = work_message(&rec);
-    let merge_message = format!("Merge {} (Harnix task {})", w.branch, rec.id);
+    let word = engine.layout().map_or_else(|| crate::kernel::layout::DEFAULT_COMMIT_WORD.to_string(), |l| l.commit_word.clone());
+    let message = work_message(&rec, &word);
+    let merge_message = format!("Merge {} ({word} {})", w.branch, rec.id);
     let (project, path, branch) = (PathBuf::from(&root), PathBuf::from(&w.path), w.branch.clone());
     // The project's data directory in the worktree is the engine's, but for the project's flows.
     let own = engine.layout().map(|l| l.dir.clone());

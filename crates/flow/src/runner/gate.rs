@@ -103,7 +103,13 @@ pub(crate) async fn offer_result(
     loop {
         match engine.gate_result(run, station, round, gate, result.clone()).await {
             Err(FlowError::Conflict(why)) => {
-                tracing::warn!(run, station, gate, why, "a gate's result met conflicts; offered again");
+                // A station's gates finish together and race to commit: losing once is ordinary, the
+                // result is offered again (never run again). Only one that keeps losing is worth a warning.
+                if wait == OFFER_AGAIN_AFTER {
+                    tracing::debug!(run, station, gate, why, "a gate's result met conflicts; offered again");
+                } else {
+                    tracing::warn!(run, station, gate, why, "a gate's result met conflicts again; offered again");
+                }
                 tokio::select! {
                     _ = tokio::time::sleep(wait) => {}
                     _ = stopping.cancelled() => {

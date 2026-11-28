@@ -171,7 +171,12 @@ pub(crate) async fn run_task_gate(rn: &Arc<Runner>, run: String, station: String
     loop {
         match engine.task_gate_result(&run, &station, round, &task, seq, cond, result.clone()).await {
             Err(FlowError::Conflict(why)) => {
-                tracing::warn!(run, station, task, gate, why, "a task gate's result met conflicts; offered again");
+                // As a station's gates do (gate::offer_result): once is ordinary, again is worth a warning.
+                if wait == Duration::from_millis(50) {
+                    tracing::debug!(run, station, task, gate, why, "a task gate's result met conflicts; offered again");
+                } else {
+                    tracing::warn!(run, station, task, gate, why, "a task gate's result met conflicts again; offered again");
+                }
                 tokio::select! {
                     _ = tokio::time::sleep(wait) => {}
                     // Still waiting in the run: the next start runs it again.

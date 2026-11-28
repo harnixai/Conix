@@ -404,6 +404,7 @@ const BUILDERS: &[(&str, &str)] = &[
     ("ProjectLayout::with_agent_dirs", "fnwith_agent_dirs<I,S>(mutself,dirs:I)->SelfwhereI:IntoIterator<Item=S>,S:Into<String>,"),
     ("ProjectLayout::with_runs_dir", "fnwith_runs_dir(mutself,dir:implInto<String>)->Self"),
     ("ProjectLayout::with_artifacts_dir", "fnwith_artifacts_dir(mutself,dir:implInto<String>)->Self"),
+    ("ProjectLayout::with_commit_word", "fnwith_commit_word(mutself,word:implInto<String>)->Self"),
     ("ProjectLayout::artifacts_dir", "fnartifacts_dir(&self,base:&Path)->Option<PathBuf>"),
     ("ProjectLayout::run_dir", "fnrun_dir(&self,base:&Path,run:&str)->Option<PathBuf>"),
     ("ProjectLayout::bundle_data_dir", "fnbundle_data_dir(&self,base:&Path,bundle:&str)->Option<PathBuf>"),

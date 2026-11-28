@@ -651,6 +651,9 @@ is so as not to collide with Harnix's own next one; what changes for a host is l
   (**`BundleMeta::jobs_problems`**, part of `start_problems`: ids, five cron fields, a flow job names only this bundle's
   flows), and **`JobDecl::flow_of`** gives a flow job's full flow name. Parsing the cron and adding them to a project is
   the host's.
+- **The word a run's commits start with**: **`ProjectLayout::with_commit_word`** (field `commit_word`, by default
+  `kernel::layout::DEFAULT_COMMIT_WORD`, the old `Harnix task`). Fork, delivery and merge commits land in the user's
+  history, so the host names itself (Conix: `Conix run`).
 
 ### `FLOW_API_VERSION = 1`
 

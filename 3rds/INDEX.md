@@ -50,3 +50,5 @@ workspace 的成员。为什么分叉、改成什么样见 `docs/design/flows.md
 | worktree 运行的归档目录按 worktree 根（加 `prefix`）记：worktree 在项目的 `.wkts/` 里，先按项目根算会记成 `.wkts/<运行>/…`，合并之后就不对了（`archive::relative_to`） | flows.md §6.5 | — | 是 |
 | 命令门禁的 `writable` / `network`（`GateDef`，值或 `${settings.<路径>}`；`gate::gate_access`）与 `plan` 的 run 的 `writable` / `network`：只给运行工作目录里被 git 忽略的目录（起进程前 `git check-ignore`，没有就建），档位换成 `workspace`；设置里读不到算不多给。试门禁按门禁名取包的设置（`Env::for_trial` 多一个 `gate`） | flows.md §2.2 | — | 是 |
 | 引用的根多一个 `settings`（`refs::ROOTS`、`context_in`：运行钉住的设置），包没声明设置时校验报；站的 `when` 可以读它（关着的站进站即 `skipped`）；`main` 与执行方式的 `model` / `provider`、`agent` 的 `model` / `agent_type` 可写一个 `${settings.<路径>}`（`validate::named_problem`），派工时取（`work::named`，读不到就是不写，用宿主的缺省），这样的模型不对照目录 | flows.md §7.1 | — | 是 |
+| 运行的提交（分叉、交付、合回）开头的词由宿主给（`ProjectLayout::commit_word`、`with_commit_word`，缺省 `DEFAULT_COMMIT_WORD` 即原来的 `Harnix task`）：提交落在用户的历史里，宿主写自己的名字 | flows.md §6.5 | — | 否 |
+| 门禁结果回写撞上并发提交：第一次记 debug，再撞才 warn（同一站的门禁一起判完、一起提交，撞一次是常事；结果是重交、不是重跑） | — | — | 否 |

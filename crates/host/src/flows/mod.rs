@@ -42,6 +42,8 @@ use session_host::ConixSessionHost;
 
 /// 运行的 worktree 分支：`conix/flow/<运行>`，与引擎自己的 worktree 分开。
 const BRANCH_PREFIX: &str = "conix/flow";
+/// 流程库替运行做的提交（分叉、交付、合回）落在用户的历史里：写 Conix 的名字，不写分叉来源的。
+const COMMIT_WORD: &str = "Conix run";
 
 /// 项目层目录（`.conix`）里引擎的沙箱让任务会话写的子目录：Agix 0.3.20 起只有 `state/` 下这两个
 /// （Agix#93），其余归应用。
@@ -105,7 +107,8 @@ pub const GATE_ENV_DENY: &[&str] = &[
 pub fn project_layout(project: &Path, artifacts_dir: Option<&str>) -> ProjectLayout {
     let mut layout = ProjectLayout::new(".conix", worktrees_root(project), BRANCH_PREFIX)
         .with_agent_dirs(AGENT_DIRS)
-        .with_runs_dir(RUNS_DIR);
+        .with_runs_dir(RUNS_DIR)
+        .with_commit_word(COMMIT_WORD);
     if let Some(a) = artifacts_dir.filter(|a| artifacts_dir_ok(a)) {
         layout = layout.with_artifacts_dir(a);
     }
@@ -223,7 +226,8 @@ pub async fn start(hub: &Hub, cfg: FlowsConfig) -> anyhow::Result<Arc<Flows>> {
     prepare_worktrees_dir(&cfg.worktrees_dir);
     let mut layout = ProjectLayout::new(".conix", cfg.worktrees_dir, BRANCH_PREFIX)
         .with_agent_dirs(AGENT_DIRS)
-        .with_runs_dir(RUNS_DIR);
+        .with_runs_dir(RUNS_DIR)
+        .with_commit_word(COMMIT_WORD);
     if let Some(a) = cfg.artifacts_dir.as_deref().filter(|a| artifacts_dir_ok(a)) {
         layout = layout.with_artifacts_dir(a);
     }

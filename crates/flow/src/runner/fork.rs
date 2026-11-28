@@ -65,8 +65,8 @@ pub(crate) async fn run_fork(rn: &Arc<Runner>, run: String, station: String, tas
 }
 
 /// The commit message for a fork: what the parent's worktree held when it forked.
-fn fork_message(rec: &RunRecord, station: &str) -> String {
-    format!("Harnix task {} ({}): forked at {station}", rec.id, rec.flow)
+fn fork_message(rec: &RunRecord, station: &str, word: &str) -> String {
+    format!("{word} {} ({}): forked at {station}", rec.id, rec.flow)
 }
 
 /// The git side of a fork: the fork commit (the round's, if a sibling made it already) and an id
@@ -81,7 +81,7 @@ async fn fork(engine: &Engine, rec: &RunRecord, station: &str, task: &str, flow:
     let (commit, children) = match had {
         Some(p) => (p.commit, p.children),
         None => {
-            let (path, own, message) = (PathBuf::from(&w.path), layout.dir.clone(), fork_message(rec, station));
+            let (path, own, message) = (PathBuf::from(&w.path), layout.dir.clone(), fork_message(rec, station, &layout.commit_word));
             let wkts = super::worktree::root_in_repo(Path::new(&root), &w.prefix, &layout.worktrees_root);
             let commit = super::worktree::blocking(move || {
                 git::snapshot(&path, Some(&own), wkts.as_deref(), &message)?;
@@ -204,9 +204,9 @@ pub(crate) async fn run_join(rn: &Arc<Runner>, run: String, station: String, tas
         own: layout.dir.clone(),
         ours: layout.worktrees_root.clone(),
         wkts: super::worktree::root_in_repo(Path::new(&root), &w.prefix, &layout.worktrees_root),
-        message: super::worktree::work_message(&c),
-        parent_message: format!("Harnix task {run}: before merging {}", w.branch),
-        merge_message: format!("Merge {} (Harnix task {child})", w.branch),
+        message: super::worktree::work_message(&c, &layout.commit_word),
+        parent_message: format!("{} {run}: before merging {}", layout.commit_word, w.branch),
+        merge_message: format!("Merge {} ({} {child})", w.branch, layout.commit_word),
         outs: c.output_dir.as_deref().and_then(|o| Some((PathBuf::from(o), mapped(o, Path::new(&w.path), Path::new(&fork.parent_path))?))),
         delivered,
     };
