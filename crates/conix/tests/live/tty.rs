@@ -297,6 +297,11 @@ impl<'a> Tty<'a> {
                 self.record("提问框：Enter 批准".into());
                 self.keys("Enter");
             }
+            // 上一条命令的结果开在浮层里（`/flow:xforge:xledger` 这类）：人看完按 Esc 关掉再敲下一条。
+            if self.overlay_open() {
+                self.record("浮层：Esc 关掉".into());
+                self.keys("Esc");
+            }
             self.type_text(text);
             if self.composer().map(|c| squash(&c)) == Some(want.clone()) {
                 self.keys("Enter");
@@ -310,6 +315,11 @@ impl<'a> Tty<'a> {
             self.keys("^U");
         }
         self.fail(&format!("敲了三次，输入框里都不是「{text}」"));
+    }
+
+    /// 开着浮层：底栏左边是浮层的「Esc 返回」。
+    pub fn overlay_open(&self) -> bool {
+        self.last_line().trim_start().starts_with("Esc 返回")
     }
 
     /// 输入框里的字（`> ` 起头、折成几行的连起来）；焦点不在输入框、看不到它是 `None`。

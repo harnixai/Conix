@@ -351,6 +351,26 @@ async fn in_context_a_command_runs_locally_and_its_output_is_shown() {
     );
 }
 
+/// 命令的输出开在浮层里：浮层是模态的，开着时打的字一个也不进底下的输入框（不然绑定了的 y、数字、空格被浮层吃掉、
+/// 别的进了输入框，拼出残缺的一句）；Esc 关掉以后照常打。
+#[tokio::test(start_paused = true)]
+async fn typing_while_a_command_output_is_open_does_not_leak_into_the_composer() {
+    let mut h = xforge().await;
+    open_run(&mut h, "xforge/solid", "x1").await;
+    say(&mut h, "/xforge:xspec list").await;
+    assert!(
+        matches!(h.core.state.ui.overlay, Some(model::Overlay::Text { .. })),
+        "输出在浮层里"
+    );
+    h.type_str("/xforge:clarify x1 done").await;
+    assert_eq!(h.core.state.ui.composer.text, "");
+    assert!(h.core.state.ui.overlay.is_some());
+    h.keys("Esc").await;
+    assert!(h.core.state.ui.overlay.is_none());
+    h.type_str("ok 1 y").await;
+    assert_eq!(h.core.state.ui.composer.text, "ok 1 y");
+}
+
 #[tokio::test(start_paused = true)]
 async fn globally_a_command_needs_the_full_address() {
     let mut h = xforge().await;

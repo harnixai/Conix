@@ -323,6 +323,9 @@ fn workbench(s: &mut State, msg: Msg) -> Vec<Effect> {
     match msg {
         Msg::Instances(..) => vec![],
         Msg::Action(a) => action(s, a),
+        // 浮层是模态的（交互 §4）：浮层上没绑定的字也不漏到底下的输入框——不然浮层开着时打字，绑定了的
+        // y、n、数字、空格被浮层吃掉、别的进了输入框，敲出来的是残缺的一句。
+        Msg::Text(_) | Msg::Paste(_) if s.ui.overlay.is_some() => vec![],
         Msg::Text(c) if s.ui.filtering => {
             s.ui.filter[s.ui.tab.index()].push(c);
             s.ui.upper_mut().selected = 0;
